@@ -99,7 +99,6 @@ type browserTemplateData struct {
 	Subtitle       string
 	TreeHTML       template.HTML
 	ShowBackButton bool
-	Instructions   bool
 	Content        template.HTML
 	BrowsePath     string
 }
@@ -889,7 +888,6 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		Title:            "Markdown Files",
 		Subtitle:         subtitle,
 		TreeHTML:         template.HTML(treeHTML),
-		Instructions:     true,
 		BrowsePath:       currentBrowseDir,
 	}
 

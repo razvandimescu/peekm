@@ -75,26 +75,6 @@
             display: none;
         }
 
-        .load-more {
-            margin-top: 1em;
-            padding: 8px 16px;
-            background-color: var(--fgColor-accent);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: opacity 0.2s;
-        }
-
-        .load-more:hover {
-            opacity: 0.9;
-        }
-
-        .load-more.hidden {
-            display: none;
-        }
-
         .tree-file {
             color: var(--fgColor-default);
         }
@@ -113,19 +93,6 @@
             color: var(--fgColor-muted);
             font-size: 0.85em;
             margin-left: 8px;
-        }
-
-        .instructions {
-            margin-top: 2em;
-            padding: 16px;
-            background-color: var(--bgColor-muted);
-            border-radius: 6px;
-            border-left: 4px solid var(--fgColor-accent);
-        }
-
-        .instructions p {
-            color: var(--fgColor-muted);
-            margin: 4px 0;
         }
 
         .header-actions {
@@ -416,18 +383,10 @@
 
         {{if .TreeHTML}}
         <div class="tree" id="file-tree">{{.TreeHTML}}</div>
-        <button class="load-more" id="load-more-btn" onclick="loadMore()">Load More (5)</button>
         {{end}}
 
         {{if .Content}}
         {{.Content}}
-        {{end}}
-
-        {{if .Instructions}}
-        <div class="instructions">
-            <p>📝 Click any file above to view it</p>
-            <p>🔄 Files are monitored for changes and auto-reload</p>
-        </div>
         {{end}}
     </div>
     <script>
@@ -580,52 +539,24 @@
             }
         }
 
-        // Pagination functionality
-        let currentlyShown = 5;
-        const increment = 5;
-
-        function loadMore() {
+        // Initialize collapsed directories on page load
+        window.addEventListener('DOMContentLoaded', function() {
             const allItems = document.querySelectorAll('.tree-item');
-            let visibleCount = 0;
-            let itemsShown = 0;
 
-            for (let i = 0; i < allItems.length; i++) {
-                const item = allItems[i];
+            // Hide children of collapsed directories
+            for (let item of allItems) {
                 const depth = parseInt(item.dataset.depth) || 0;
-
-                // Only count top-level items (depth 1)
-                if (depth === 1) {
-                    visibleCount++;
-                    if (visibleCount <= currentlyShown) {
-                        item.classList.remove('hidden');
-                        itemsShown++;
-                    } else if (visibleCount <= currentlyShown + increment) {
-                        item.classList.remove('hidden');
-                        itemsShown++;
-                    }
-                } else if (depth > 1) {
-                    // Show children of visible parents that are expanded
+                if (depth > 1) {
                     const parent = findParentItem(item, allItems);
-                    if (parent && !parent.classList.contains('hidden')) {
+                    if (parent) {
                         const parentDir = parent.querySelector('.tree-directory');
-                        if (parentDir && parentDir.dataset.collapsed !== 'true') {
-                            item.classList.remove('hidden');
+                        if (parentDir && parentDir.dataset.collapsed === 'true') {
+                            item.classList.add('hidden');
                         }
                     }
                 }
             }
-
-            currentlyShown += increment;
-
-            // Update button
-            const btn = document.getElementById('load-more-btn');
-            const remaining = countRemainingItems();
-            if (remaining > 0) {
-                btn.textContent = `Load More (${Math.min(increment, remaining)})`;
-            } else {
-                btn.classList.add('hidden');
-            }
-        }
+        });
 
         function findParentItem(item, allItems) {
             const depth = parseInt(item.dataset.depth) || 0;
@@ -640,67 +571,6 @@
             }
             return null;
         }
-
-        function countRemainingItems() {
-            const allItems = document.querySelectorAll('.tree-item');
-            let count = 0;
-            for (let item of allItems) {
-                const depth = parseInt(item.dataset.depth) || 0;
-                if (depth === 1 && item.classList.contains('hidden')) {
-                    count++;
-                }
-            }
-            return count;
-        }
-
-        // Initialize pagination on page load
-        window.addEventListener('DOMContentLoaded', function() {
-            const allItems = document.querySelectorAll('.tree-item');
-            let visibleCount = 0;
-
-            // First pass: hide children of collapsed directories
-            for (let item of allItems) {
-                const depth = parseInt(item.dataset.depth) || 0;
-                if (depth > 1) {
-                    const parent = findParentItem(item, allItems);
-                    if (parent) {
-                        const parentDir = parent.querySelector('.tree-directory');
-                        if (parentDir && parentDir.dataset.collapsed === 'true') {
-                            item.classList.add('hidden');
-                        }
-                    }
-                }
-            }
-
-            // Second pass: hide items beyond initial pagination limit
-            for (let item of allItems) {
-                const depth = parseInt(item.dataset.depth) || 0;
-                if (depth === 1) {
-                    visibleCount++;
-                    if (visibleCount > currentlyShown) {
-                        item.classList.add('hidden');
-                    }
-                } else if (depth > 1) {
-                    // Also hide children of paginated-out parents
-                    const parent = findParentItem(item, allItems);
-                    if (parent && parent.classList.contains('hidden')) {
-                        item.classList.add('hidden');
-                    }
-                }
-            }
-
-            // Update button (only if it exists - won't exist when viewing a single file)
-            const btn = document.getElementById('load-more-btn');
-            if (btn) {
-                const remaining = countRemainingItems();
-                if (remaining > 0) {
-                    btn.textContent = `Load More (${Math.min(increment, remaining)})`;
-                    btn.classList.remove('hidden');
-                } else {
-                    btn.classList.add('hidden');
-                }
-            }
-        });
 
         // Toast notification functions
         let toastTimeout;

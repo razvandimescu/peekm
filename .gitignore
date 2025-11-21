@@ -39,3 +39,4 @@ npm/platforms/*/bin/peek
 npm/platforms/*/bin/peek.exe
 *.log
 .npmrc
+.claude
