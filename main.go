@@ -64,11 +64,14 @@ var (
 	refreshMutex sync.Mutex
 
 	// Templates, CSS, and JavaScript (loaded once at startup)
-	githubCSS       string
-	themeOverrides  string
-	themeManagerJS  string
-	singleFileTmpl  *template.Template
-	fileBrowserTmpl *template.Template
+	githubCSS             string
+	themeOverrides        string
+	themeManagerJS        string
+	navigationJS          string
+	singleFileTmpl        *template.Template
+	singleFilePartialTmpl *template.Template
+	fileBrowserTmpl       *template.Template
+	fileBrowserPartialTmpl *template.Template
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -83,6 +86,7 @@ type baseTemplateData struct {
 	GitHubCSS      template.CSS
 	ThemeOverrides template.CSS
 	ThemeManagerJS template.JS
+	NavigationJS   template.JS
 }
 
 // singleFileTemplateData is used for rendering single markdown files
@@ -121,6 +125,7 @@ func newBaseTemplateData() baseTemplateData {
 		GitHubCSS:      template.CSS(githubCSS),
 		ThemeOverrides: template.CSS(themeOverrides),
 		ThemeManagerJS: template.JS(themeManagerJS),
+		NavigationJS:   template.JS(navigationJS),
 	}
 }
 
@@ -368,6 +373,11 @@ func validateSymlinkSecurity(path string, info os.FileInfo, homeDir string) (os.
 
 // validateAndResolvePath validates and resolves a path with security checks
 // Returns the validated absolute path or an error if validation fails
+// isPartialRequest detects if the request is an AJAX/fetch request for partial content
+func isPartialRequest(r *http.Request) bool {
+	return r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+}
+
 func validateAndResolvePath(targetPath string) (string, error) {
 	// Expand ~ to home directory
 	if strings.HasPrefix(targetPath, "~/") {
@@ -436,6 +446,12 @@ func init() {
 	}
 	themeManagerJS = string(themeManagerData)
 
+	navigationData, err := themeFS.ReadFile("theme/navigation.js")
+	if err != nil {
+		log.Fatalf("Failed to load navigation JS: %v", err)
+	}
+	navigationJS = string(navigationData)
+
 	// Load HTML templates
 	singleFileHTML, err := themeFS.ReadFile("theme/single-file.html")
 	if err != nil {
@@ -443,11 +459,23 @@ func init() {
 	}
 	singleFileTmpl = template.Must(template.New("single-file").Parse(string(singleFileHTML)))
 
+	singleFilePartialHTML, err := themeFS.ReadFile("theme/single-file-partial.html")
+	if err != nil {
+		log.Fatalf("Failed to load single-file-partial template: %v", err)
+	}
+	singleFilePartialTmpl = template.Must(template.New("single-file-partial").Parse(string(singleFilePartialHTML)))
+
 	fileBrowserHTML, err := themeFS.ReadFile("theme/file-browser.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
 	}
 	fileBrowserTmpl = template.Must(template.New("file-browser").Parse(string(fileBrowserHTML)))
+
+	fileBrowserPartialHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
+	if err != nil {
+		log.Fatalf("Failed to load file-browser-partial template: %v", err)
+	}
+	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Parse(string(fileBrowserPartialHTML)))
 }
 
 func main() {
@@ -905,7 +933,14 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := fileBrowserTmpl.Execute(w, data); err != nil {
+
+	// Choose template based on request type (SPA partial vs full page)
+	tmpl := fileBrowserTmpl
+	if isPartialRequest(r) {
+		tmpl = fileBrowserPartialTmpl
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("Template execution error: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
@@ -1130,7 +1165,14 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := fileBrowserTmpl.Execute(w, data); err != nil {
+
+	// Choose template based on request type (SPA partial vs full page)
+	tmpl := fileBrowserTmpl
+	if isPartialRequest(r) {
+		tmpl = fileBrowserPartialTmpl
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
 		log.Printf("Template execution error: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
