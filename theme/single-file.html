@@ -7,9 +7,49 @@
     <style>
         {{.GitHubCSS}}
         {{.ThemeOverrides}}
+
+        /* Connection status indicator */
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 200px;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            z-index: 1001;
+            font-size: 13px;
+            color: var(--fgColor-muted);
+        }
+
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            transition: background-color 0.3s;
+        }
+
+        .connection-dot.connected {
+            background-color: #28a745;
+        }
+
+        .connection-count {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body class="markdown-body">
+    <div class="connection-status">
+        <div class="connection-dot" id="connection-dot"></div>
+        <span class="connection-count" id="connection-count">0</span>
+    </div>
+
     <div class="theme-toggle">
         <button onclick="setTheme('light')" id="theme-light" title="Light theme">☀️</button>
         <button onclick="setTheme('dark')" id="theme-dark" title="Dark theme">🌙</button>
@@ -21,14 +61,46 @@
     <script>
         {{.ThemeManagerJS}}
 
+        // Connection status update
+        function updateConnectionStatus(count) {
+            const dot = document.getElementById('connection-dot');
+            const countEl = document.getElementById('connection-count');
+
+            if (countEl) {
+                countEl.textContent = count;
+            }
+
+            if (dot) {
+                if (count > 0) {
+                    dot.classList.add('connected');
+                } else {
+                    dot.classList.remove('connected');
+                }
+            }
+        }
+
         // Auto-refresh via SSE
         const eventSource = new EventSource('/events');
+
+        eventSource.onopen = function() {
+            // Show connected state immediately
+            const dot = document.getElementById('connection-dot');
+            if (dot) {
+                dot.classList.add('connected');
+            }
+        };
+
         eventSource.onmessage = function(event) {
             // Try to parse as JSON for typed messages
             try {
                 const data = JSON.parse(event.data);
-                // For single file mode, just reload on any message type
-                location.reload();
+
+                if (data.type === 'connection_status') {
+                    updateConnectionStatus(data.count);
+                } else {
+                    // For single file mode, reload on other message types
+                    location.reload();
+                }
             } catch (e) {
                 // Fallback to plain string messages (backwards compatibility)
                 if (event.data === 'reload') {
@@ -36,6 +108,21 @@
                 }
             }
         };
+
+        eventSource.onerror = function(error) {
+            // Show disconnected state
+            const dot = document.getElementById('connection-dot');
+            if (dot) {
+                dot.classList.remove('connected');
+            }
+        };
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
     </script>
 </body>
 </html>

@@ -241,16 +241,25 @@ When you run `peek README.md`, your markdown is displayed in a clean, centered l
 
 ## peekm vs. The World
 
-| Your Pain Point | grip | VS Code | GitHub | peekm |
-|----------------|------|----------|---------|------|
-| **Want it working in 5 seconds** | ❌ Python setup | ❌ Extension install | ❌ Git push required | ✅ Just works |
-| **Browse documentation trees** | ❌ Single file only | ❌ File explorer | ✅ But slow | ✅ Fast & local |
-| **Comfortable reading layout** | ❌ Full-width | ❌ Splits editor | ❌ Narrow column | ✅ Centered 900px |
-| **Works offline** | ✅ | ✅ | ❌ | ✅ |
-| **Dark mode** | ❌ | ✅ | ✅ | ✅ Auto-switching |
-| **Zero dependencies** | ❌ Needs Python | ❌ Needs VS Code | ❌ Needs internet | ✅ Single binary |
-| **Live reload** | ✅ | ✅ | ❌ Manual push | ✅ SSE-based |
-| **Startup time** | ~2s | ~1s | N/A | < 100ms |
+**The only markdown viewer built for modern AI-assisted development workflows.** Live reload, browser rendering, directory navigation, and instant notifications when AI agents create new files.
+
+| What You Need | Glow | grip | VS Code | peekm |
+|----------------|------|------|---------|------|
+| **Live reload on file change** | ❌ Static | ❌ Manual refresh | ✅ | ✅ SSE-based |
+| **AI agent notifications** | ❌ | ❌ | ❌ | ✅ Toast popups |
+| **Comfortable reading layout** | ❌ Terminal only | ❌ Full-width | ❌ Splits editor | ✅ Centered 900px |
+| **Interactive directory browser** | ✅ TUI list | ❌ Single file | ❌ File explorer | ✅ Web UI tree |
+| **Quick preview without editor** | ✅ | ✅ | ❌ Launches editor | ✅ |
+| **Works offline** | ✅ | ❌ GitHub API | ✅ | ✅ |
+| **Zero dependencies** | ✅ Single binary | ❌ Python runtime | ❌ Needs VS Code | ✅ Single binary |
+| **Startup time** | Fast | ~2s | Editor launch | < 100ms |
+
+**Choose peekm when you:**
+- Work with **AI coding assistants** (Claude Code, Cursor, Copilot) and want instant notifications for new markdown files
+- Need **live reload** as you write — no manual refresh, no breaking flow
+- Want **browser-quality rendering** with centered layout for comfortable reading
+- Need to **browse documentation directories** with a visual tree interface
+- Want **one command** that just works — no Python, no VS Code, no configuration
 
 ### Philosophy
 
@@ -338,9 +347,9 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Related Projects
 
-- [grip](https://github.com/joeyespo/grip) - GitHub-flavored markdown preview
-- [marked](https://marked.js.org/) - JavaScript markdown parser
-- [glow](https://github.com/charmbracelet/glow) - Terminal markdown renderer
+- [glow](https://github.com/charmbracelet/glow) - Terminal markdown renderer (21k+ stars) — Choose this if you prefer terminal TUI over browser UI
+- [grip](https://github.com/joeyespo/grip) - GitHub-flavored markdown preview (6.7k stars) — Python-based, requires GitHub API
+- [VS Code Markdown Preview](https://code.visualstudio.com/docs/languages/markdown) - Built-in editor preview — Choose this if you're already in VS Code
 
 ---
 

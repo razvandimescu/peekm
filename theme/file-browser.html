@@ -331,6 +331,41 @@
         .toast-close:hover {
             color: var(--fgColor-default);
         }
+
+        /* Connection status indicator */
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 200px;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            z-index: 1001;
+            font-size: 13px;
+            color: var(--fgColor-muted);
+        }
+
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            transition: background-color 0.3s;
+        }
+
+        .connection-dot.connected {
+            background-color: #28a745;
+        }
+
+        .connection-count {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body class="markdown-body">
@@ -346,6 +381,12 @@
     <div class="nav-toggle">
         <button onclick="openNavModal()" title="Navigate to directory">λ</button>
     </div>
+
+    <div class="connection-status">
+        <div class="connection-dot" id="connection-dot"></div>
+        <span class="connection-count" id="connection-count">0</span>
+    </div>
+
     <div class="theme-toggle">
         <button onclick="setTheme('light')" id="theme-light" title="Light theme">☀️</button>
         <button onclick="setTheme('dark')" id="theme-dark" title="Dark theme">🌙</button>
@@ -691,6 +732,24 @@
             return div.innerHTML;
         }
 
+        // Connection status update
+        function updateConnectionStatus(count) {
+            const dot = document.getElementById('connection-dot');
+            const countEl = document.getElementById('connection-count');
+
+            if (countEl) {
+                countEl.textContent = count;
+            }
+
+            if (dot) {
+                if (count > 0) {
+                    dot.classList.add('connected');
+                } else {
+                    dot.classList.remove('connected');
+                }
+            }
+        }
+
         // Auto-refresh via SSE (for file changes and new file detection)
         let eventSource;
         let reconnectAttempts = 0;
@@ -702,6 +761,12 @@
             eventSource.onopen = function() {
                 console.log('[SSE] Connected');
                 reconnectAttempts = 0;
+
+                // Show connected state immediately
+                const dot = document.getElementById('connection-dot');
+                if (dot) {
+                    dot.classList.add('connected');
+                }
             };
 
             eventSource.onmessage = function(event) {
@@ -713,6 +778,8 @@
                         showToast(`New file: ${data.path}`, data.path);
                         // Dynamically insert file instead of reloading
                         insertFileIntoTree(data.path);
+                    } else if (data.type === 'connection_status') {
+                        updateConnectionStatus(data.count);
                     }
                 } catch (e) {
                     // Fallback to plain string messages (backwards compatibility)
@@ -726,6 +793,12 @@
                 console.log('[SSE] Connection error, reconnecting...');
                 eventSource.close();
 
+                // Show disconnected state
+                const dot = document.getElementById('connection-dot');
+                if (dot) {
+                    dot.classList.remove('connected');
+                }
+
                 // Exponential backoff for reconnection
                 reconnectAttempts++;
                 const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
@@ -736,6 +809,13 @@
 
         // Initial connection
         connectSSE();
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
     </script>
 </body>
 </html>

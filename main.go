@@ -109,6 +109,12 @@ type fileEventMessage struct {
 	Path string `json:"path"`
 }
 
+// connectionStatusMessage is used for SSE notifications about connection status
+type connectionStatusMessage struct {
+	Type  string `json:"type"`  // "connection_status"
+	Count int    `json:"count"` // Number of active connections
+}
+
 // newBaseTemplateData creates a baseTemplateData with embedded resources
 func newBaseTemplateData() baseTemplateData {
 	return baseTemplateData{
@@ -800,7 +806,8 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 	clientCount := len(clients)
 	clientsMutex.Unlock()
 
-	log.Printf("SSE client connected from %s (total: %d)", r.RemoteAddr, clientCount)
+	// Broadcast connection status to all clients
+	broadcastConnectionStatus(clientCount)
 
 	defer func() {
 		clientsMutex.Lock()
@@ -808,7 +815,9 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 		clientCount := len(clients)
 		clientsMutex.Unlock()
 		close(clientChan)
-		log.Printf("SSE client disconnected from %s (remaining: %d)", r.RemoteAddr, clientCount)
+
+		// Broadcast updated connection status to remaining clients
+		broadcastConnectionStatus(clientCount)
 	}()
 
 	// Send initial comment to establish connection
@@ -824,18 +833,15 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 		case message := <-clientChan:
 			str := fmt.Sprintf("data: %s\n\n", message)
 			if _, err := fmt.Fprint(w, str); err != nil {
-				log.Printf("SSE write error from %s: %v", r.RemoteAddr, err)
 				return
 			}
 			flusher.Flush()
 		case <-ticker.C:
 			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
-				log.Printf("SSE keepalive error from %s: %v", r.RemoteAddr, err)
 				return
 			}
 			flusher.Flush()
 		case <-r.Context().Done():
-			log.Printf("SSE context cancelled for %s", r.RemoteAddr)
 			return
 		}
 	}
@@ -847,12 +853,6 @@ func notifyClients() {
 
 func notifyClientsWithMessage(message string) {
 	clientsMutex.RLock()
-	clientCount := len(clients)
-	clientsMutex.RUnlock()
-
-	log.Printf("Notifying %d SSE client(s): %s", clientCount, message)
-
-	clientsMutex.RLock()
 	defer clientsMutex.RUnlock()
 
 	for clientChan := range clients {
@@ -861,6 +861,19 @@ func notifyClientsWithMessage(message string) {
 		default:
 		}
 	}
+}
+
+func broadcastConnectionStatus(count int) {
+	msg := connectionStatusMessage{
+		Type:  "connection_status",
+		Count: count,
+	}
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Error marshaling connection status: %v", err)
+		return
+	}
+	notifyClientsWithMessage(string(msgBytes))
 }
 
 func serveBrowser(w http.ResponseWriter, r *http.Request) {
