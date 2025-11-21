@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>peek - Markdown Browser</title>
+    <style>
+        {{.GitHubCSS}}
+        {{.ThemeOverrides}}
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--fgColor-default);
+            background-color: var(--bgColor-muted);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--bgColor-default);
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            padding: 40px;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin-bottom: 0.5em;
+            color: var(--fgColor-accent);
+            border-bottom: 2px solid var(--borderColor-muted);
+            padding-bottom: 0.3em;
+        }
+
+        .subtitle {
+            color: var(--fgColor-muted);
+            margin-bottom: 2em;
+            font-size: 0.9em;
+        }
+
+        .tree {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .tree-item {
+            margin: 2px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .tree-connector {
+            color: var(--borderColor-default);
+            margin-right: 8px;
+            white-space: pre;
+        }
+
+        .tree-directory {
+            color: var(--fgColor-accent);
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tree-directory .expand-icon {
+            display: inline-block;
+            width: 12px;
+            font-size: 10px;
+        }
+
+        .tree-item.hidden {
+            display: none;
+        }
+
+        .load-more {
+            margin-top: 1em;
+            padding: 8px 16px;
+            background-color: var(--fgColor-accent);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.2s;
+        }
+
+        .load-more:hover {
+            opacity: 0.9;
+        }
+
+        .load-more.hidden {
+            display: none;
+        }
+
+        .tree-file {
+            color: var(--fgColor-default);
+        }
+
+        .tree-file a {
+            color: var(--fgColor-accent);
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .tree-file a:hover {
+            text-decoration: underline;
+        }
+
+        .file-size {
+            color: var(--fgColor-muted);
+            font-size: 0.85em;
+            margin-left: 8px;
+        }
+
+        .instructions {
+            margin-top: 2em;
+            padding: 16px;
+            background-color: var(--bgColor-muted);
+            border-radius: 6px;
+            border-left: 4px solid var(--fgColor-accent);
+        }
+
+        .instructions p {
+            color: var(--fgColor-muted);
+            margin: 4px 0;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .back-button {
+            display: inline-block;
+            padding: 8px 16px;
+            background-color: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            color: var(--fgColor-default);
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background-color: var(--bgColor-neutral-muted);
+            border-color: var(--borderColor-muted);
+        }
+
+        .delete-button {
+            padding: 8px 16px;
+            background-color: #d73a49;
+            border: 1px solid #cb2431;
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .delete-button:hover {
+            background-color: #cb2431;
+            border-color: #b92833;
+        }
+
+        /* Navigation toggle button */
+        .nav-toggle {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+        }
+
+        .nav-toggle button {
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+            color: var(--fgColor-accent);
+        }
+
+        .nav-toggle button:hover {
+            background: var(--bgColor-muted);
+            border-color: var(--borderColor-muted);
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-header {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: var(--fgColor-default);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-body {
+            margin-bottom: 16px;
+        }
+
+        .modal-body label {
+            display: block;
+            color: var(--fgColor-muted);
+            font-size: 0.9em;
+            margin-bottom: 8px;
+        }
+
+        .modal-body input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 14px;
+        }
+
+        .modal-body input:focus {
+            outline: none;
+            border-color: var(--fgColor-accent);
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .modal-footer button {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--borderColor-default);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .modal-footer button.primary {
+            background: var(--fgColor-accent);
+            color: white;
+            border-color: var(--fgColor-accent);
+        }
+
+        .modal-footer button.primary:hover {
+            opacity: 0.9;
+        }
+
+        .modal-footer button.secondary {
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+        }
+
+        .modal-footer button.secondary:hover {
+            background: var(--bgColor-muted);
+        }
+
+        .current-path {
+            color: var(--fgColor-muted);
+            font-size: 0.85em;
+            margin-top: 8px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-left: 4px solid var(--fgColor-accent);
+            border-radius: 6px;
+            padding: 16px 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 3000;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+            max-width: 400px;
+            cursor: pointer;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .toast:hover {
+            background: var(--bgColor-muted);
+        }
+
+        .toast-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-message {
+            color: var(--fgColor-default);
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .toast-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .toast-close:hover {
+            color: var(--fgColor-default);
+        }
+    </style>
+</head>
+<body class="markdown-body">
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <div class="toast-content">
+            <span class="toast-icon">📄</span>
+            <span class="toast-message" id="toast-message"></span>
+            <button class="toast-close" onclick="hideToast()" title="Close">×</button>
+        </div>
+    </div>
+
+    <div class="nav-toggle">
+        <button onclick="openNavModal()" title="Navigate to directory">λ</button>
+    </div>
+    <div class="theme-toggle">
+        <button onclick="setTheme('light')" id="theme-light" title="Light theme">☀️</button>
+        <button onclick="setTheme('dark')" id="theme-dark" title="Dark theme">🌙</button>
+        <button onclick="setTheme('auto')" id="theme-auto" title="Auto (system)">💻</button>
+    </div>
+
+    <!-- Navigation Modal -->
+    <div class="modal-overlay" id="nav-modal" onclick="closeNavModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span>λ</span>
+                <span>Navigate to Directory</span>
+            </div>
+            <div class="modal-body">
+                <label for="nav-path">Enter directory path (relative to $HOME or absolute):</label>
+                <input type="text" id="nav-path" placeholder="e.g., ~/Documents or ./project" autocomplete="off">
+                <div class="current-path">Current: {{.BrowsePath}}</div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeNavModal()">Cancel</button>
+                <button class="primary" onclick="submitNavigation()">Navigate</button>
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        {{if .ShowBackButton}}
+        <div class="header-actions">
+            <a href="/" class="back-button">← Back to File Browser</a>
+            <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+        </div>
+        {{end}}
+
+        <h1>{{.Title}}</h1>
+        <p class="subtitle">{{.Subtitle}}</p>
+
+        {{if .TreeHTML}}
+        <div class="tree" id="file-tree">{{.TreeHTML}}</div>
+        <button class="load-more" id="load-more-btn" onclick="loadMore()">Load More (5)</button>
+        {{end}}
+
+        {{if .Content}}
+        {{.Content}}
+        {{end}}
+
+        {{if .Instructions}}
+        <div class="instructions">
+            <p>📝 Click any file above to view it</p>
+            <p>🔄 Files are monitored for changes and auto-reload</p>
+        </div>
+        {{end}}
+    </div>
+    <script>
+        {{.ThemeManagerJS}}
+
+        // Navigation modal functionality
+        function openNavModal() {
+            const modal = document.getElementById('nav-modal');
+            const input = document.getElementById('nav-path');
+            modal.classList.add('active');
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeNavModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('nav-modal');
+            modal.classList.remove('active');
+        }
+
+        function submitNavigation() {
+            const input = document.getElementById('nav-path');
+            const path = input.value.trim();
+
+            if (!path) {
+                alert('Please enter a directory path');
+                return;
+            }
+
+            // Submit to backend
+            fetch('/navigate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ path: path })
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Reload the page to show new directory
+                    window.location.reload();
+                } else {
+                    return response.text().then(text => {
+                        throw new Error(text || 'Navigation failed');
+                    });
+                }
+            })
+            .catch(error => {
+                alert('Navigation error: ' + error.message);
+            });
+        }
+
+        // Delete file confirmation and handling
+        function confirmDelete() {
+            const filePath = document.querySelector('.subtitle').textContent;
+            const fileName = document.querySelector('h1').textContent;
+
+            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.`)) {
+                deleteFile(filePath);
+            }
+        }
+
+        function deleteFile(filePath) {
+            fetch('/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ path: filePath })
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Successfully deleted, redirect to browser
+                    window.location.href = '/';
+                } else {
+                    return response.text().then(text => {
+                        throw new Error(text || 'Delete failed');
+                    });
+                }
+            })
+            .catch(error => {
+                alert('Delete error: ' + error.message);
+            });
+        }
+
+        // Handle Enter key in navigation input
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('nav-path');
+            if (input) {
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        submitNavigation();
+                    }
+                });
+            }
+        });
+
+        // Directory collapse/expand functionality
+        function toggleDir(dirElement) {
+            const isCollapsed = dirElement.dataset.collapsed === 'true';
+            let icon = dirElement.querySelector('.expand-icon');
+            const treeItem = dirElement.closest('.tree-item');
+            const depth = parseInt(treeItem.dataset.depth) || 0;
+
+            // Toggle icon visibility (only show arrow on collapsed folders)
+            if (isCollapsed) {
+                // Expanding: hide the arrow
+                if (icon) {
+                    icon.style.display = 'none';
+                }
+            } else {
+                // Collapsing: show the arrow (create if doesn't exist)
+                if (!icon) {
+                    icon = document.createElement('span');
+                    icon.className = 'expand-icon';
+                    icon.textContent = '▶';
+                    dirElement.insertBefore(icon, dirElement.firstChild);
+                    icon.insertAdjacentText('afterend', ' '); // Add space after arrow
+                } else {
+                    icon.style.display = 'inline';
+                    icon.textContent = '▶';
+                }
+            }
+            dirElement.dataset.collapsed = !isCollapsed;
+
+            if (isCollapsed) {
+                dirElement.classList.remove('collapsed');
+            } else {
+                dirElement.classList.add('collapsed');
+            }
+
+            // Toggle children visibility
+            let nextItem = treeItem.nextElementSibling;
+            while (nextItem && nextItem.classList.contains('tree-item')) {
+                const nextDepth = parseInt(nextItem.dataset.depth) || 0;
+                if (nextDepth <= depth) break;
+
+                if (nextDepth === depth + 1) {
+                    // Direct children - toggle visibility
+                    if (isCollapsed) {
+                        nextItem.classList.remove('hidden');
+                    } else {
+                        nextItem.classList.add('hidden');
+                    }
+                } else if (!isCollapsed) {
+                    // Nested children - hide when parent collapses
+                    nextItem.classList.add('hidden');
+                }
+
+                nextItem = nextItem.nextElementSibling;
+            }
+        }
+
+        // Pagination functionality
+        let currentlyShown = 5;
+        const increment = 5;
+
+        function loadMore() {
+            const allItems = document.querySelectorAll('.tree-item');
+            let visibleCount = 0;
+            let itemsShown = 0;
+
+            for (let i = 0; i < allItems.length; i++) {
+                const item = allItems[i];
+                const depth = parseInt(item.dataset.depth) || 0;
+
+                // Only count top-level items (depth 1)
+                if (depth === 1) {
+                    visibleCount++;
+                    if (visibleCount <= currentlyShown) {
+                        item.classList.remove('hidden');
+                        itemsShown++;
+                    } else if (visibleCount <= currentlyShown + increment) {
+                        item.classList.remove('hidden');
+                        itemsShown++;
+                    }
+                } else if (depth > 1) {
+                    // Show children of visible parents that are expanded
+                    const parent = findParentItem(item, allItems);
+                    if (parent && !parent.classList.contains('hidden')) {
+                        const parentDir = parent.querySelector('.tree-directory');
+                        if (parentDir && parentDir.dataset.collapsed !== 'true') {
+                            item.classList.remove('hidden');
+                        }
+                    }
+                }
+            }
+
+            currentlyShown += increment;
+
+            // Update button
+            const btn = document.getElementById('load-more-btn');
+            const remaining = countRemainingItems();
+            if (remaining > 0) {
+                btn.textContent = `Load More (${Math.min(increment, remaining)})`;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        function findParentItem(item, allItems) {
+            const depth = parseInt(item.dataset.depth) || 0;
+            if (depth <= 1) return null;
+
+            const index = Array.from(allItems).indexOf(item);
+            for (let i = index - 1; i >= 0; i--) {
+                const candidateDepth = parseInt(allItems[i].dataset.depth) || 0;
+                if (candidateDepth === depth - 1) {
+                    return allItems[i];
+                }
+            }
+            return null;
+        }
+
+        function countRemainingItems() {
+            const allItems = document.querySelectorAll('.tree-item');
+            let count = 0;
+            for (let item of allItems) {
+                const depth = parseInt(item.dataset.depth) || 0;
+                if (depth === 1 && item.classList.contains('hidden')) {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        // Initialize pagination on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const allItems = document.querySelectorAll('.tree-item');
+            let visibleCount = 0;
+
+            // First pass: hide children of collapsed directories
+            for (let item of allItems) {
+                const depth = parseInt(item.dataset.depth) || 0;
+                if (depth > 1) {
+                    const parent = findParentItem(item, allItems);
+                    if (parent) {
+                        const parentDir = parent.querySelector('.tree-directory');
+                        if (parentDir && parentDir.dataset.collapsed === 'true') {
+                            item.classList.add('hidden');
+                        }
+                    }
+                }
+            }
+
+            // Second pass: hide items beyond initial pagination limit
+            for (let item of allItems) {
+                const depth = parseInt(item.dataset.depth) || 0;
+                if (depth === 1) {
+                    visibleCount++;
+                    if (visibleCount > currentlyShown) {
+                        item.classList.add('hidden');
+                    }
+                } else if (depth > 1) {
+                    // Also hide children of paginated-out parents
+                    const parent = findParentItem(item, allItems);
+                    if (parent && parent.classList.contains('hidden')) {
+                        item.classList.add('hidden');
+                    }
+                }
+            }
+
+            // Update button (only if it exists - won't exist when viewing a single file)
+            const btn = document.getElementById('load-more-btn');
+            if (btn) {
+                const remaining = countRemainingItems();
+                if (remaining > 0) {
+                    btn.textContent = `Load More (${Math.min(increment, remaining)})`;
+                    btn.classList.remove('hidden');
+                } else {
+                    btn.classList.add('hidden');
+                }
+            }
+        });
+
+        // Toast notification functions
+        let toastTimeout;
+        let toastFilePath = null;
+
+        function showToast(message, filePath) {
+            const toast = document.getElementById('toast');
+            const messageEl = document.getElementById('toast-message');
+            messageEl.textContent = message;
+
+            // Store file path for navigation
+            toastFilePath = filePath;
+
+            toast.classList.add('show');
+
+            // Clear existing timeout
+            if (toastTimeout) {
+                clearTimeout(toastTimeout);
+            }
+
+            // Auto-hide after 5 seconds
+            toastTimeout = setTimeout(hideToast, 5000);
+        }
+
+        function hideToast() {
+            const toast = document.getElementById('toast');
+            toast.classList.remove('show');
+            toastFilePath = null;
+            if (toastTimeout) {
+                clearTimeout(toastTimeout);
+            }
+        }
+
+        // Handle toast click to navigate to file
+        document.addEventListener('DOMContentLoaded', function() {
+            const toast = document.getElementById('toast');
+            if (toast) {
+                toast.addEventListener('click', function(e) {
+                    // Don't navigate if clicking the close button
+                    if (e.target.classList.contains('toast-close')) {
+                        return;
+                    }
+                    if (toastFilePath) {
+                        window.location.href = `/view/${encodeURIComponent(toastFilePath)}`;
+                    }
+                });
+            }
+        });
+
+        // Dynamically insert a new file into the tree
+        function insertFileIntoTree(filePath) {
+            try {
+                console.log('[insertFileIntoTree] Adding file:', filePath);
+                const fileName = filePath.split('/').pop();
+                const fileTree = document.getElementById('file-tree');
+
+                if (!fileTree) {
+                    console.log('[insertFileIntoTree] No file-tree element found, skipping');
+                    return;
+                }
+
+                // Create new tree item HTML
+                const div = document.createElement('div');
+                div.className = 'tree-item';
+                div.dataset.depth = '1';
+                div.innerHTML = `
+                    <span class="tree-connector">├── </span>
+                    <span class="tree-file">
+                        <a href="/view/${encodeURIComponent(filePath)}">${escapeHtml(fileName)}</a>
+                        <span class="file-size">(0 bytes)</span>
+                    </span>
+                `;
+
+                // Find correct position (alphabetically among depth=1 files)
+                const allItems = fileTree.querySelectorAll('.tree-item[data-depth="1"]');
+                let inserted = false;
+
+                for (let item of allItems) {
+                    const link = item.querySelector('.tree-file a');
+                    if (link) {
+                        const itemName = link.textContent.trim();
+                        if (fileName.localeCompare(itemName) < 0) {
+                            item.parentNode.insertBefore(div, item);
+                            inserted = true;
+                            console.log('[insertFileIntoTree] Inserted before:', itemName);
+                            break;
+                        }
+                    }
+                }
+
+                // If not inserted, append at end
+                if (!inserted) {
+                    fileTree.appendChild(div);
+                    console.log('[insertFileIntoTree] Appended at end');
+                }
+
+                // Update file count in subtitle
+                const subtitle = document.querySelector('.subtitle');
+                if (subtitle) {
+                    const match = subtitle.textContent.match(/(\d+) markdown file/);
+                    if (match) {
+                        const newCount = parseInt(match[1]) + 1;
+                        subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
+                        console.log('[insertFileIntoTree] Updated count to:', newCount);
+                    }
+                }
+
+                console.log('[insertFileIntoTree] Successfully added file');
+            } catch (error) {
+                console.error('[insertFileIntoTree] Error:', error);
+                // Don't crash the page - just log the error
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Auto-refresh via SSE (for file changes and new file detection)
+        let eventSource;
+        let reconnectAttempts = 0;
+        const maxReconnectDelay = 30000; // 30 seconds max
+
+        function connectSSE() {
+            eventSource = new EventSource('/events');
+
+            eventSource.onopen = function() {
+                console.log('[SSE] Connected');
+                reconnectAttempts = 0;
+            };
+
+            eventSource.onmessage = function(event) {
+                // Try to parse as JSON for typed messages
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'file_added') {
+                        showToast(`New file: ${data.path}`, data.path);
+                        // Dynamically insert file instead of reloading
+                        insertFileIntoTree(data.path);
+                    }
+                } catch (e) {
+                    // Fallback to plain string messages (backwards compatibility)
+                    if (event.data === 'reload') {
+                        location.reload();
+                    }
+                }
+            };
+
+            eventSource.onerror = function(error) {
+                console.log('[SSE] Connection error, reconnecting...');
+                eventSource.close();
+
+                // Exponential backoff for reconnection
+                reconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+
+                setTimeout(connectSSE, delay);
+            };
+        }
+
+        // Initial connection
+        connectSSE();
+    </script>
+</body>
+</html>

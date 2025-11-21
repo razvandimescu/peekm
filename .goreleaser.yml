@@ -1,0 +1,97 @@
+project_name: peekm
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: peekm
+    main: ./main.go
+    binary: peekm
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: peekm
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+brews:
+  - name: peekm
+    repository:
+      owner: rd
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    homepage: "https://github.com/rd/peekm"
+    description: "Zen-like markdown viewer with live reload"
+    license: "MIT"
+    install: |
+      bin.install "peekm"
+    test: |
+      system "#{bin}/peekm", "--version"
+
+release:
+  github:
+    owner: rd
+    name: peekm
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## peekm {{ .Tag }}
+
+    Zen-like markdown viewer with live reload.
+  footer: |
+    **Full Changelog**: https://github.com/rd/peekm/compare/{{ .PreviousTag }}...{{ .Tag }}

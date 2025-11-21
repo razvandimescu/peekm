@@ -1,0 +1,47 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.1.0)'
+        required: true
+        type: string
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    needs: []
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Download the release assets
+          mkdir -p dist
+          VERSION="${{ github.event.inputs.version }}"
+          gh release download "v${VERSION}" -D dist -p "*.tar.gz" -p "*.zip"
+
+          # Extract binaries
+          cd dist
+          for file in *.tar.gz; do
+            tar xzf "$file"
+          done
+          for file in *.zip; do
+            unzip -q "$file"
+          done
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          ./scripts/publish-npm.sh ${{ github.event.inputs.version }}

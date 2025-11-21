@@ -1,0 +1,43 @@
+{
+  "name": "peekm",
+  "version": "0.1.0",
+  "description": "Zen-like markdown viewer with live reload",
+  "keywords": [
+    "markdown",
+    "viewer",
+    "live-reload",
+    "preview",
+    "documentation"
+  ],
+  "homepage": "https://github.com/rd/peekm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rd/peekm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rd/peekm/issues"
+  },
+  "license": "MIT",
+  "author": "rd",
+  "bin": {
+    "peekm": "bin/peekm.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "optionalDependencies": {
+    "@peekm/darwin-arm64": "0.1.0",
+    "@peekm/darwin-x64": "0.1.0",
+    "@peekm/linux-arm64": "0.1.0",
+    "@peekm/linux-x64": "0.1.0",
+    "@peekm/win32-x64": "0.1.0"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=12"
+  }
+}

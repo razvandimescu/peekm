@@ -1,0 +1,2 @@
+the purpose of this project is to monitor a folder and quickly visualize the documentation created by coding agents, quickly read the information provided at a glance and easily navigate all the existnig documentation let's ask the 
+business director to analyze other similar projects and ask it to highlight the benefits and the features to other parties that might find this useful 
