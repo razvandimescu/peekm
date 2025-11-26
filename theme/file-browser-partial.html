@@ -3,7 +3,10 @@
         {{if .ShowBackButton}}
         <div class="header-actions">
             <a href="/" class="back-button">← Back to File Browser</a>
-            <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+            <div style="display: flex; gap: 8px;">
+                <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
+                <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+            </div>
         </div>
         {{end}}
 

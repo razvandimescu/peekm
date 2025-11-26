@@ -143,7 +143,7 @@ func TestGenerateTreeHTML(t *testing.T) {
 	}
 
 	// Set up state (thread-safe)
-	setupTestState(t, testDir, files, false)
+	setupTestState(t, testDir, files)
 
 	html := generateTreeHTML()
 
@@ -174,7 +174,7 @@ func TestGenerateTreeHTML(t *testing.T) {
 
 // TestGenerateTreeHTML_EmptyFiles tests empty file list
 func TestGenerateTreeHTML_EmptyFiles(t *testing.T) {
-	setupTestState(t, "", []string{}, false)
+	setupTestState(t, "", []string{})
 
 	html := generateTreeHTML()
 
@@ -409,7 +409,7 @@ func TestGenerateTreeHTML_StaleFiles(t *testing.T) {
 	existingFile := createSimpleTestFile(t, testDir)
 
 	// Set up state with a non-existent file in the list (simulating stale state)
-	setupTestState(t, testDir, []string{nonExistentFile, existingFile}, false)
+	setupTestState(t, testDir, []string{nonExistentFile, existingFile})
 
 	// This should NOT panic even with non-existent files
 	html := generateTreeHTML()

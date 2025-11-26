@@ -12,24 +12,21 @@ import (
 type testState struct {
 	oldBrowseDir     string
 	oldMarkdownFiles []string
-	oldBrowserMode   bool
 	oldCurrentFile   string
 }
 
 // setupTestState sets up test state with proper mutex handling and automatic cleanup
-func setupTestState(t *testing.T, dir string, files []string, browserModeEnabled bool) *testState {
+func setupTestState(t *testing.T, dir string, files []string) *testState {
 	t.Helper()
 
 	fileMutex.Lock()
 	state := &testState{
 		oldBrowseDir:     browseDir,
 		oldMarkdownFiles: markdownFiles,
-		oldBrowserMode:   browserMode,
 		oldCurrentFile:   currentFile,
 	}
 	browseDir = dir
 	markdownFiles = files
-	browserMode = browserModeEnabled
 	fileMutex.Unlock()
 
 	// Register cleanup with t.Cleanup for LIFO execution and panic safety
@@ -38,7 +35,6 @@ func setupTestState(t *testing.T, dir string, files []string, browserModeEnabled
 		defer fileMutex.Unlock()
 		browseDir = state.oldBrowseDir
 		markdownFiles = state.oldMarkdownFiles
-		browserMode = state.oldBrowserMode
 		currentFile = state.oldCurrentFile
 	})
 

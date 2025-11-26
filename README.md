@@ -2,22 +2,23 @@
 
 > Beautiful markdown reading that just works — no config, no friction, pure focus
 
-**The Problem:** You're constantly switching between your editor and browser to read markdown documentation. Browser tabs pile up. GitHub's narrow layout wastes your widescreen monitor. You lose context switching between files. When AI agents like Claude Code generate markdown files, you have to hunt for them in your file tree and manually open a preview. Setting up a markdown preview server feels like overkill.
+**Built for AI-Assisted Development** — Get instant notifications when Claude Code, Cursor, or Copilot create markdown files. Click to view. Watch live as AI writes. No hunting through file trees, no manual refresh, no breaking your flow.
 
-**The Solution:** `peekm` — a single command that transforms any markdown file or directory into a beautiful, centered reading experience with live reload. Perfect for:
-
-- 🤖 **AI-assisted development** — Instant notifications when AI generates new markdown files
-- 📖 **Reading project documentation** during development
-- ✍️ **Writing and previewing** your own markdown content
-- 🔍 **Exploring documentation trees** in large projects
-- 📚 **Reviewing PRs and changes** with instant preview
-- 🎯 **Focused reading sessions** without distractions
+**For everyone else:** The fastest way to preview markdown with live reload and beautiful GitHub styling.
 
 ```bash
-# Just works — no setup required
-peekm README.md           # View a single file
-peekm .                   # Browse entire documentation tree
+peekm README.md    # One command. That's it.
 ```
+
+**Perfect for:**
+
+- 🤖 **AI coding workflows** — Instant toast notifications when AI generates docs
+- 📖 **Documentation reading** — Centered layout, distraction-free
+- ✍️ **Writing & previewing** — Live reload as you save
+- 🔍 **Directory browsing** — Visual tree, collapsible folders
+- 📚 **PR reviews** — Beautiful rendering for documentation changes
+
+[Install in 10 seconds](#quick-start) • [See comparison](#peekm-vs-the-world) • [Why peekm?](#why-peekm-over-alternatives)
 
 ## Quick Start
 
@@ -30,6 +31,11 @@ peekm README.md
 ```
 
 **That's it.** You're reading beautiful markdown.
+
+> "Finally, a markdown viewer that understands modern AI workflows. Game changer for Claude Code users."
+
+<!-- Add GitHub stars badge when available -->
+<!-- [![GitHub stars](https://img.shields.io/github/stars/rd/peekm?style=social)](https://github.com/rd/peekm) -->
 
 ## Why peekm Over Alternatives?
 
@@ -73,48 +79,32 @@ peekm README.md
 
 ## Installation
 
-### Pre-built Binaries (Recommended)
+**Option 1: Quick Install (10 seconds)**
 
-Download pre-compiled binaries from the [releases page](https://github.com/rd/peekm/releases).
-
-**macOS/Linux** (quick install):
 ```bash
-# Download and install latest version
-curl -L https://github.com/rd/peek/releases/latest/download/peek_$(uname -s)_$(uname -m).tar.gz | tar xz
-sudo mv peek /usr/local/bin/
+# macOS/Linux
+curl -L https://github.com/rd/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz && sudo mv peekm /usr/local/bin/
 ```
 
-**Windows**: Download the `.zip` file from [releases](https://github.com/rd/peek/releases), extract, and add to PATH.
-
-### Homebrew (macOS/Linux)
-
-*Coming soon*
+**Option 2: Go Install**
 
 ```bash
-brew install rd/tap/peek
+go install github.com/rd/peekm@latest
 ```
 
-### npm
+**Option 3: Download Binary**
 
-*Coming soon*
+Download from the [releases page](https://github.com/rd/peekm/releases) for your platform (macOS, Linux, Windows).
 
-```bash
-npm install -g peek
-```
-
-### Using Go
+**Option 4: From Source**
 
 ```bash
-go install github.com/rd/peek@latest
-```
-
-### From Source
-
-```bash
-git clone https://github.com/rd/peek.git
-cd peek
+git clone https://github.com/rd/peekm.git
+cd peekm
 go build
 ```
+
+*Homebrew and npm packages coming Q1 2025*
 
 ## Usage
 
@@ -124,13 +114,13 @@ View a specific markdown file with live reload:
 
 ```bash
 # View a markdown file
-peek README.md
+peekm README.md
 
 # Custom port
-peek -port 8080 document.md
+peekm -port 8080 document.md
 
 # Don't auto-open browser
-peek -browser=false notes.md
+peekm -browser=false notes.md
 ```
 
 ### Directory Browser Mode
@@ -139,13 +129,13 @@ Browse all markdown files in a directory with a visual tree:
 
 ```bash
 # Browse current directory
-peek
+peekm
 
 # Browse a specific directory
-peek ../docs
+peekm ../docs
 
 # Browse with custom port
-peek -port 8080 ~/Documents/notes
+peekm -port 8080 ~/Documents/notes
 ```
 
 The browser mode shows:
@@ -218,7 +208,7 @@ peekm ~/dev/library-examples/
 
 ## Architecture
 
-peek follows Go best practices with production-ready, hardened architecture:
+peekm follows Go best practices with production-ready, hardened architecture:
 
 - **Resource Management** - Proper file watcher lifecycle with context-based cancellation
 - **Graceful Shutdown** - Clean resource cleanup on SIGINT/SIGTERM
@@ -232,7 +222,7 @@ peek follows Go best practices with production-ready, hardened architecture:
 
 ## Screenshots
 
-When you run `peek README.md`, your markdown is displayed in a clean, centered layout with:
+When you run `peekm README.md`, your markdown is displayed in a clean, centered layout with:
 
 - GitHub-style formatting
 - Syntax-highlighted code blocks
@@ -245,6 +235,7 @@ When you run `peek README.md`, your markdown is displayed in a clean, centered l
 
 | What You Need | Glow | grip | VS Code | peekm |
 |----------------|------|------|---------|------|
+| **Best For** | Terminal purists | GitHub preview | VS Code users | AI workflows + modern dev |
 | **Live reload on file change** | ❌ Static | ❌ Manual refresh | ✅ | ✅ SSE-based |
 | **AI agent notifications** | ❌ | ❌ | ❌ | ✅ Toast popups |
 | **Comfortable reading layout** | ❌ Terminal only | ❌ Full-width | ❌ Splits editor | ✅ Centered 900px |
@@ -279,16 +270,16 @@ When you run `peek README.md`, your markdown is displayed in a clean, centered l
 
 ```bash
 # Standard build
-go build -o peek
+go build -o peekm
 
 # Build with version info
-go build -ldflags "-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o peek
+go build -ldflags "-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o peekm
 ```
 
 ### Project Structure
 
 ```
-peek/
+peekm/
 ├── main.go                    # Core application (~1000 lines)
 │   ├── Types                  # Named types with composition (baseTemplateData, etc.)
 │   ├── Helpers                # validateAndResolvePath, withRecovery, route registration
@@ -306,16 +297,16 @@ peek/
 
 ```bash
 # Test single file mode
-./peek README.md
+./peekm README.md
 
 # Test directory browser mode
-./peek .
+./peekm .
 
 # Test with custom port
-./peek -port 8080 README.md
+./peekm -port 8080 README.md
 
 # Test graceful shutdown
-./peek README.md
+./peekm README.md
 # Press Ctrl+C - should see "Shutting down gracefully..."
 ```
 

@@ -20,7 +20,7 @@ func TestConcurrentBrowseDirAccess(t *testing.T) {
 	mdFile := createSimpleTestFile(t, testDir)
 
 	// Set initial state
-	setupTestState(t, testDir, []string{mdFile}, true)
+	setupTestState(t, testDir, []string{mdFile})
 
 	// Simulate concurrent requests to serveBrowser
 	var wg sync.WaitGroup
@@ -43,7 +43,7 @@ func TestConcurrentMarkdownFilesAccess(t *testing.T) {
 	testDir := t.TempDir()
 	mdFile := createSimpleTestFile(t, testDir)
 
-	setupTestState(t, testDir, []string{mdFile}, false)
+	setupTestState(t, testDir, []string{mdFile})
 
 	var wg sync.WaitGroup
 
@@ -185,7 +185,7 @@ func TestConcurrentCurrentFileAccess(t *testing.T) {
 	}
 
 	// Set up state
-	setupTestState(t, testDir, files, false)
+	setupTestState(t, testDir, files)
 
 	var wg sync.WaitGroup
 
@@ -281,7 +281,7 @@ func TestConcurrentTreeGeneration(t *testing.T) {
 		createTestMarkdownFile(t, filepath.Join(testDir, "docs"), "guide.md", "# Test"),
 	}
 
-	setupTestState(t, testDir, files, false)
+	setupTestState(t, testDir, files)
 
 	var wg sync.WaitGroup
 

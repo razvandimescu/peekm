@@ -19,7 +19,7 @@ func TestServeBrowser(t *testing.T) {
 	mdFile := createSimpleTestFile(t, testDir)
 
 	// Set state (thread-safe)
-	setupTestState(t, testDir, []string{mdFile}, true)
+	setupTestState(t, testDir, []string{mdFile})
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -202,7 +202,7 @@ func TestServeFile(t *testing.T) {
 	mdFile := createTestMarkdownFile(t, testDir, "test.md", "# File Content\n\nThis is the content.")
 
 	// Set state
-	setupTestState(t, testDir, []string{mdFile}, false)
+	setupTestState(t, testDir, []string{mdFile})
 
 	req := httptest.NewRequest("GET", "/view/test.md", nil)
 	w := httptest.NewRecorder()
@@ -232,7 +232,7 @@ func TestServeFile_NotInWhitelist(t *testing.T) {
 	mdFile := createTestMarkdownFile(t, testDir, "allowed.md", "# Allowed")
 
 	// Set state with only one file
-	setupTestState(t, testDir, []string{mdFile}, false)
+	setupTestState(t, testDir, []string{mdFile})
 
 	// Try to access a different file
 	req := httptest.NewRequest("GET", "/view/notallowed.md", nil)
@@ -251,7 +251,7 @@ func TestServeFile_PathTraversal(t *testing.T) {
 	testDir := t.TempDir()
 	mdFile := createTestMarkdownFile(t, testDir, "safe.md", "# Safe")
 
-	setupTestState(t, testDir, []string{mdFile}, false)
+	setupTestState(t, testDir, []string{mdFile})
 
 	// Try path traversal
 	req := httptest.NewRequest("GET", "/view/../../../etc/passwd", nil)
@@ -366,7 +366,7 @@ func TestServeFile_RealWorldScenario(t *testing.T) {
 
 	// Set up state as it would be in browser mode with ABSOLUTE paths
 	// (mimicking what happens in main() at line 329-333)
-	setupTestState(t, testDir, []string{mdFile1, mdFile2}, true)
+	setupTestState(t, testDir, []string{mdFile1, mdFile2})
 
 	// Generate the tree HTML (this creates the file links)
 	treeHTML := generateTreeHTML()
@@ -440,7 +440,7 @@ func TestContentTypes(t *testing.T) {
 	testDir := t.TempDir()
 	mdFile := createSimpleTestFile(t, testDir)
 
-	setupTestState(t, testDir, []string{mdFile}, false)
+	setupTestState(t, testDir, []string{mdFile})
 	renderMarkdown(mdFile)
 
 	for _, tt := range tests {

@@ -45,13 +45,10 @@ var (
 	showVersion = flag.Bool("version", false, "Show version information")
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
-	currentHTML  string
-	htmlMutex    sync.RWMutex
 	clients      = make(map[chan string]bool)
 	clientsMutex sync.RWMutex
 
-	// Browser mode
-	browserMode   bool
+	// Browser mode (always active)
 	markdownFiles []string
 	currentFile   string
 	fileMutex     sync.RWMutex
@@ -64,14 +61,16 @@ var (
 	refreshMutex sync.Mutex
 
 	// Templates, CSS, and JavaScript (loaded once at startup)
-	githubCSS             string
-	themeOverrides        string
-	themeManagerJS        string
-	navigationJS          string
-	singleFileTmpl        *template.Template
-	singleFilePartialTmpl *template.Template
-	fileBrowserTmpl       *template.Template
+	githubCSS              string
+	themeOverrides         string
+	themeManagerJS         string
+	editorJS               string
+	navigationJS           string
+	fileBrowserTmpl        *template.Template
 	fileBrowserPartialTmpl *template.Template
+
+	// SSE event replay buffer (50 events = ~2 min of AI file creation)
+	globalEventBuffer = newEventBuffer(50)
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -86,14 +85,8 @@ type baseTemplateData struct {
 	GitHubCSS      template.CSS
 	ThemeOverrides template.CSS
 	ThemeManagerJS template.JS
+	EditorJS       template.JS
 	NavigationJS   template.JS
-}
-
-// singleFileTemplateData is used for rendering single markdown files
-type singleFileTemplateData struct {
-	baseTemplateData
-	Title   string
-	Content template.HTML
 }
 
 // browserTemplateData is used for rendering the file browser and file views
@@ -119,12 +112,90 @@ type connectionStatusMessage struct {
 	Count int    `json:"count"` // Number of active connections
 }
 
+// eventRecord stores a single SSE event with ID for replay
+type eventRecord struct {
+	id   string // Monotonic counter
+	data string // JSON message
+}
+
+// eventBuffer maintains a circular buffer of recent events for SSE replay
+type eventBuffer struct {
+	mu      sync.RWMutex
+	events  []eventRecord
+	counter uint64
+	maxSize int
+}
+
+// newEventBuffer creates an eventBuffer with specified capacity
+func newEventBuffer(maxSize int) *eventBuffer {
+	return &eventBuffer{
+		events:  make([]eventRecord, 0, maxSize),
+		maxSize: maxSize,
+	}
+}
+
+// add assigns an event ID, stores the event, and returns the ID
+func (eb *eventBuffer) add(data string) string {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+
+	eb.counter++
+	id := fmt.Sprintf("%d", eb.counter)
+
+	evt := eventRecord{
+		id:   id,
+		data: data,
+	}
+
+	// Circular buffer: if at capacity, remove oldest
+	if len(eb.events) >= eb.maxSize {
+		eb.events = eb.events[1:]
+	}
+	eb.events = append(eb.events, evt)
+
+	return id
+}
+
+// getAfter returns all events after the specified ID
+func (eb *eventBuffer) getAfter(lastID string) []eventRecord {
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+
+	var result []eventRecord
+	foundLast := false
+
+	for _, evt := range eb.events {
+		if foundLast {
+			result = append(result, evt)
+		}
+		if evt.id == lastID {
+			foundLast = true
+		}
+	}
+
+	return result
+}
+
+// has checks if an event ID exists in the buffer
+func (eb *eventBuffer) has(id string) bool {
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+
+	for _, evt := range eb.events {
+		if evt.id == id {
+			return true
+		}
+	}
+	return false
+}
+
 // newBaseTemplateData creates a baseTemplateData with embedded resources
 func newBaseTemplateData() baseTemplateData {
 	return baseTemplateData{
 		GitHubCSS:      template.CSS(githubCSS),
 		ThemeOverrides: template.CSS(themeOverrides),
 		ThemeManagerJS: template.JS(themeManagerJS),
+		EditorJS:       template.JS(editorJS),
 		NavigationJS:   template.JS(navigationJS),
 	}
 }
@@ -262,7 +333,7 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 			if strings.HasPrefix(name, ".") && path != rootDir {
 				return filepath.SkipDir
 			}
-			if name == "node_modules" || name == "vendor" || name == "dist" {
+			if name == "node_modules" || name == "vendor" || name == "dist" || name == "venv" {
 				return filepath.SkipDir
 			}
 
@@ -327,18 +398,15 @@ func withRecovery(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// registerBrowserModeRoutes registers HTTP routes for browser mode
-func registerBrowserModeRoutes() {
+// registerRoutes registers all HTTP routes
+func registerRoutes() {
 	http.HandleFunc("/", withRecovery(serveBrowser))
 	http.HandleFunc("/view/", withRecovery(serveFile))
 	http.HandleFunc("/navigate", withRecovery(handleNavigate))
 	http.HandleFunc("/delete", withRecovery(handleDelete))
-	http.HandleFunc("/events", withRecovery(serveSSE))
-}
-
-// registerSingleFileModeRoutes registers HTTP routes for single file mode
-func registerSingleFileModeRoutes() {
-	http.HandleFunc("/", withRecovery(serveHTML))
+	http.HandleFunc("/raw/", withRecovery(serveRaw))
+	http.HandleFunc("/save", withRecovery(handleSave))
+	http.HandleFunc("/download", withRecovery(handleDownload))
 	http.HandleFunc("/events", withRecovery(serveSSE))
 }
 
@@ -446,6 +514,12 @@ func init() {
 	}
 	themeManagerJS = string(themeManagerData)
 
+	editorData, err := themeFS.ReadFile("theme/editor.js")
+	if err != nil {
+		log.Fatalf("Failed to load editor JS: %v", err)
+	}
+	editorJS = string(editorData)
+
 	navigationData, err := themeFS.ReadFile("theme/navigation.js")
 	if err != nil {
 		log.Fatalf("Failed to load navigation JS: %v", err)
@@ -453,18 +527,6 @@ func init() {
 	navigationJS = string(navigationData)
 
 	// Load HTML templates
-	singleFileHTML, err := themeFS.ReadFile("theme/single-file.html")
-	if err != nil {
-		log.Fatalf("Failed to load single-file template: %v", err)
-	}
-	singleFileTmpl = template.Must(template.New("single-file").Parse(string(singleFileHTML)))
-
-	singleFilePartialHTML, err := themeFS.ReadFile("theme/single-file-partial.html")
-	if err != nil {
-		log.Fatalf("Failed to load single-file-partial template: %v", err)
-	}
-	singleFilePartialTmpl = template.Must(template.New("single-file-partial").Parse(string(singleFilePartialHTML)))
-
 	fileBrowserHTML, err := themeFS.ReadFile("theme/file-browser.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
@@ -486,112 +548,99 @@ func main() {
 		os.Exit(0)
 	}
 
-	if flag.NArg() < 1 {
-		// Browser mode - show tree of all markdown files in current directory
-		browserMode = true
-		var err error
-		browseDir, err = filepath.Abs(".")
-		if err != nil {
-			log.Fatalf("Error getting absolute path: %v", err)
-		}
-		markdownFiles = collectMarkdownFiles(browseDir)
+	// Determine target path (default to current directory)
+	targetPath := "."
+	var targetFile string // Specific file to auto-navigate to
 
-		if len(markdownFiles) == 0 {
-			fmt.Println("No markdown files found in current directory.")
-			fmt.Println("\nUsage: peekm [options] <markdown-file|directory>")
-			fmt.Println("\nOptions:")
-			flag.PrintDefaults()
-			os.Exit(1)
-		}
-
-		// Watch for new markdown files
-		if err := dirWatcher.watchDirectory(browseDir); err != nil {
-			log.Printf("Warning: Cannot watch directory for changes: %v", err)
-		}
-
-		registerBrowserModeRoutes()
-	} else {
-		// Check if argument is a file or directory
-		filePath := flag.Arg(0)
-
-		info, err := os.Stat(filePath)
-		if os.IsNotExist(err) {
-			log.Fatalf("Path not found: %s", filePath)
-		}
-		if err != nil {
-			log.Fatalf("Error accessing path: %v", err)
-		}
-
-		if info.IsDir() {
-			// Directory mode - browse markdown files in directory
-			browserMode = true
-			browseDir, err = filepath.Abs(filePath)
-			if err != nil {
-				log.Fatalf("Error getting absolute path: %v", err)
-			}
-			markdownFiles = collectMarkdownFiles(browseDir)
-
-			if len(markdownFiles) == 0 {
-				fmt.Printf("No markdown files found in directory: %s\n", filePath)
-				os.Exit(1)
-			}
-
-			// Watch for new markdown files
-			if err := dirWatcher.watchDirectory(browseDir); err != nil {
-				log.Printf("Warning: Cannot watch directory for changes: %v", err)
-			}
-
-			registerBrowserModeRoutes()
-		} else {
-			// Single file mode
-			// Initial render
-			if err := renderMarkdown(filePath); err != nil {
-				log.Fatalf("Error rendering markdown: %v", err)
-			}
-
-			// Watch for file changes
-			if err := fileWatcher.watch(filePath); err != nil {
-				log.Fatalf("Error watching file: %v", err)
-			}
-
-			registerSingleFileModeRoutes()
-		}
+	if flag.NArg() > 0 {
+		targetPath = flag.Arg(0)
 	}
+
+	// Resolve path
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		log.Fatalf("Error getting absolute path: %v", err)
+	}
+
+	info, err := os.Stat(absPath)
+	if os.IsNotExist(err) {
+		log.Fatalf("Path not found: %s", targetPath)
+	}
+	if err != nil {
+		log.Fatalf("Error accessing path: %v", err)
+	}
+
+	// Determine browse directory and target file
+	if info.IsDir() {
+		browseDir = absPath
+	} else {
+		// File argument - browse parent directory and remember file for auto-navigation
+		browseDir = filepath.Dir(absPath)
+		targetFile = filepath.Base(absPath)
+	}
+
+	// Collect markdown files
+	markdownFiles = collectMarkdownFiles(browseDir)
+	if len(markdownFiles) == 0 {
+		fmt.Printf("No markdown files found in: %s\n", browseDir)
+		fmt.Println("\nUsage: peekm [options] <markdown-file|directory>")
+		fmt.Println("\nOptions:")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	// Watch for new markdown files
+	if err := dirWatcher.watchDirectory(browseDir); err != nil {
+		log.Printf("Warning: Cannot watch directory for changes: %v", err)
+	}
+
+	// Register all routes
+	registerRoutes()
 
 	addr := fmt.Sprintf("localhost:%d", *port)
 	url := fmt.Sprintf("http://%s", addr)
 
-	if browserMode {
-		fmt.Printf("peekm file browser at %s\n", url)
-		if browseDir == "." {
-			fmt.Printf("Browsing current directory - found %d markdown file(s)\n", len(markdownFiles))
-		} else {
-			fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
+	// Build URL with auto-navigation if specific file requested
+	fullURL := url
+	if targetFile != "" {
+		// Get relative path for URL
+		for _, mdFile := range markdownFiles {
+			if filepath.Base(mdFile) == targetFile {
+				relPath, err := filepath.Rel(browseDir, mdFile)
+				if err == nil {
+					fullURL = fmt.Sprintf("%s/view/%s", url, relPath)
+				}
+				break
+			}
 		}
+		fmt.Printf("peekm at %s\n", url)
+		fmt.Printf("Opening %s - found %d markdown file(s)\n", targetFile, len(markdownFiles))
 	} else {
-		fmt.Printf("Serving %s at %s\n", flag.Arg(0), url)
+		fmt.Printf("peekm file browser at %s\n", url)
+		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
 	}
 	fmt.Println("Press Ctrl+C to quit")
 
 	if *openBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			openURL(url)
+			openURL(fullURL)
 		}()
 	}
 
 	// Setup graceful shutdown
 	server := &http.Server{
-		Addr:         addr,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        addr,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout intentionally omitted for SSE streaming endpoints
+		// SSE connections are long-lived and should not have write timeouts
+		IdleTimeout: 60 * time.Second,
 	}
 
 	// Handle shutdown signals
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
 		<-sigint
 
 		log.Println("\nShutting down gracefully...")
@@ -614,36 +663,6 @@ func main() {
 	}
 }
 
-func renderMarkdown(filePath string) error {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	md := newMarkdownRenderer()
-
-	var buf bytes.Buffer
-	if err := md.Convert(content, &buf); err != nil {
-		return err
-	}
-
-	var htmlBuf bytes.Buffer
-	data := singleFileTemplateData{
-		baseTemplateData: newBaseTemplateData(),
-		Title:            filePath,
-		Content:          template.HTML(buf.String()),
-	}
-
-	if err := singleFileTmpl.Execute(&htmlBuf, data); err != nil {
-		return err
-	}
-
-	htmlMutex.Lock()
-	currentHTML = htmlBuf.String()
-	htmlMutex.Unlock()
-
-	return nil
-}
 
 func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePath string) {
 	for {
@@ -655,12 +674,19 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 				return
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write {
-				log.Println("File modified, reloading...")
-				if err := renderMarkdown(filePath); err != nil {
-					log.Printf("Error rendering markdown: %v", err)
-					continue
+				log.Println("File modified, sending reload notification...")
+
+				// Send file_modified event with path so client can auto-refresh if viewing this file
+				msgBytes, err := json.Marshal(map[string]string{
+					"type": "file_modified",
+					"path": filePath,
+				})
+				if err != nil {
+					log.Printf("Error marshaling file modified message: %v", err)
+					notifyClients() // Fallback to plain reload
+				} else {
+					notifyClientsWithMessage(string(msgBytes))
 				}
-				notifyClients()
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -732,16 +758,48 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 						notifyClientsWithMessage(string(msgBytes))
 					}
 
-					// Schedule a refresh to properly sort the list and ensure consistency
-					scheduleRefresh()
+					// Note: No scheduleRefresh() needed - client handles insertion dynamically
 				}
 			}
 
 			// Handle REMOVE events for deleted/moved files
 			if event.Op&fsnotify.Remove == fsnotify.Remove {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
-					log.Printf("Markdown file changed: %s (refresh scheduled)", event.Name)
-					scheduleRefresh()
+					log.Printf("Deleted file: %s", event.Name)
+
+					// Remove from whitelist immediately
+					fileMutex.Lock()
+					for i, f := range markdownFiles {
+						if f == event.Name {
+							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
+							break
+						}
+					}
+					fileMutex.Unlock()
+
+					// Notify clients about the removed file with JSON message
+					relPath := event.Name
+					fileMutex.RLock()
+					if browseDir != "" {
+						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
+							relPath = rel
+						}
+					}
+					fileMutex.RUnlock()
+
+					// Use json.Marshal for proper escaping
+					msg := fileEventMessage{
+						Type: "file_removed",
+						Path: relPath,
+					}
+					msgBytes, err := json.Marshal(msg)
+					if err != nil {
+						log.Printf("Error marshaling file removed message: %v", err)
+					} else {
+						notifyClientsWithMessage(string(msgBytes))
+					}
+
+					// Note: No scheduleRefresh() needed - client handles removal dynamically
 				}
 			}
 
@@ -749,8 +807,40 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 			// Note: Rename generates two events - RENAME for old name, CREATE for new name
 			if event.Op&fsnotify.Rename == fsnotify.Rename {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
-					log.Printf("Markdown file changed: %s (refresh scheduled)", event.Name)
-					scheduleRefresh()
+					log.Printf("Renamed file: %s", event.Name)
+
+					// Remove from whitelist (CREATE event will add it back with new name)
+					fileMutex.Lock()
+					for i, f := range markdownFiles {
+						if f == event.Name {
+							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
+							break
+						}
+					}
+					fileMutex.Unlock()
+
+					// Notify clients about the removed file (new name will trigger CREATE event)
+					relPath := event.Name
+					fileMutex.RLock()
+					if browseDir != "" {
+						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
+							relPath = rel
+						}
+					}
+					fileMutex.RUnlock()
+
+					msg := fileEventMessage{
+						Type: "file_removed",
+						Path: relPath,
+					}
+					msgBytes, err := json.Marshal(msg)
+					if err != nil {
+						log.Printf("Error marshaling file removed message: %v", err)
+					} else{
+						notifyClientsWithMessage(string(msgBytes))
+					}
+
+					// Note: No scheduleRefresh() needed - client handles removal dynamically
 				}
 			}
 
@@ -804,13 +894,163 @@ func refreshFileList() {
 	// is already sent and the frontend will insert the file dynamically
 }
 
-func serveHTML(w http.ResponseWriter, r *http.Request) {
-	htmlMutex.RLock()
-	html := currentHTML
-	htmlMutex.RUnlock()
 
+func serveRaw(w http.ResponseWriter, r *http.Request) {
+	filePath := strings.TrimPrefix(r.URL.Path, "/raw")
+	filePath = strings.TrimPrefix(filePath, "/")
+
+	// Clean the path
+	filePath = filepath.Clean(filePath)
+
+	// Get current browse directory (thread-safe)
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	// Convert relative path to absolute by joining with browseDir
+	var absFilePath string
+	if filepath.IsAbs(filePath) {
+		absFilePath = filePath
+	} else {
+		absFilePath = filepath.Join(currentBrowseDir, filePath)
+	}
+
+	// Clean the absolute path
+	absFilePath = filepath.Clean(absFilePath)
+
+	validated, err := validateAndResolvePath(absFilePath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusForbidden)
+		return
+	}
+
+	content, err := os.ReadFile(validated)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(content)
+}
+
+func handleSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	filePath := r.FormValue("file")
+	content := r.FormValue("content")
+
+	validated, err := validateAndResolvePath(filePath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusForbidden)
+		return
+	}
+
+	if err := atomicWriteFile(validated, content); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "Saved successfully")
+}
+
+func atomicWriteFile(path, content string) error {
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, ".peek-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+func handleDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get currently viewed file
+	fileMutex.RLock()
+	filePath := currentFile
+	fileMutex.RUnlock()
+
+	if filePath == "" {
+		http.Error(w, "No file currently open", http.StatusBadRequest)
+		return
+	}
+
+	// Read and render markdown
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	md := newMarkdownRenderer()
+	var buf bytes.Buffer
+	if err := md.Convert(content, &buf); err != nil {
+		http.Error(w, "Failed to render markdown", http.StatusInternalServerError)
+		return
+	}
+
+	// Build self-contained HTML with inlined CSS (light theme only)
+	htmlTemplate := `<!DOCTYPE html>
+<html lang="en" data-color-mode="light" data-light-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>%s</title>
+    <style>
+%s
+    </style>
+</head>
+<body class="markdown-body">
+    <div class="container" style="max-width: 980px; margin: 0 auto; padding: 45px;">
+%s
+    </div>
+</body>
+</html>`
+
+	// Use light theme CSS only (from github-markdown.css)
+	html := fmt.Sprintf(htmlTemplate,
+		template.HTMLEscapeString(filepath.Base(filePath)),
+		githubCSS,
+		buf.String(),
+	)
+
+	// Set headers for download
+	filename := strings.TrimSuffix(filepath.Base(filePath), ".md") + ".html"
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
+
+	w.Write([]byte(html))
 }
 
 func serveSSE(w http.ResponseWriter, r *http.Request) {
@@ -827,7 +1067,7 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientChan := make(chan string)
+	clientChan := make(chan string, 10) // Buffer 10 events to handle bursts
 
 	clientsMutex.Lock()
 	clients[clientChan] = true
@@ -852,15 +1092,31 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
-	// Keep connection alive
-	ticker := time.NewTicker(30 * time.Second)
+	// Replay missed events if client reconnected with Last-Event-ID
+	lastEventID := r.Header.Get("Last-Event-ID")
+	if lastEventID != "" {
+		log.Printf("Client reconnected with Last-Event-ID: %s", lastEventID)
+		missedEvents := globalEventBuffer.getAfter(lastEventID)
+		if len(missedEvents) > 0 {
+			log.Printf("Replaying %d missed events", len(missedEvents))
+			for _, evt := range missedEvents {
+				fmt.Fprintf(w, "id: %s\ndata: %s\n\n", evt.id, evt.data)
+			}
+			flusher.Flush()
+		} else {
+			log.Printf("No missed events found after ID %s", lastEventID)
+		}
+	}
+
+	// Keep connection alive (10s interval < 15s WriteTimeout to prevent disconnections)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case message := <-clientChan:
-			str := fmt.Sprintf("data: %s\n\n", message)
-			if _, err := fmt.Fprint(w, str); err != nil {
+			// Message already formatted with "id: X\ndata: Y" from notifyClientsWithMessage
+			if _, err := fmt.Fprintf(w, "%s\n\n", message); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -880,12 +1136,18 @@ func notifyClients() {
 }
 
 func notifyClientsWithMessage(message string) {
+	// Assign event ID and add to buffer for replay
+	id := globalEventBuffer.add(message)
+
 	clientsMutex.RLock()
 	defer clientsMutex.RUnlock()
 
+	// Send with SSE event ID for replay support
+	formattedMsg := fmt.Sprintf("id: %s\ndata: %s", id, message)
+
 	for clientChan := range clients {
 		select {
-		case clientChan <- message:
+		case clientChan <- formattedMsg:
 		default:
 		}
 	}

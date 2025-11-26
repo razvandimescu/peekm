@@ -283,6 +283,8 @@
             pointer-events: none;
             max-width: 400px;
             cursor: pointer;
+            text-decoration: none;
+            color: inherit;
         }
 
         .toast.show {
@@ -336,7 +338,7 @@
         .connection-status {
             position: fixed;
             top: 20px;
-            right: 200px;
+            left: 70px;
             background: var(--bgColor-muted);
             border: 1px solid var(--borderColor-default);
             border-radius: 6px;
@@ -366,17 +368,221 @@
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
             font-weight: 600;
         }
+
+        /* Edit button (now in header-actions) */
+        .edit-button {
+            padding: 8px 16px;
+            background-color: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            color: var(--fgColor-default);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .edit-button:hover {
+            background-color: var(--bgColor-muted);
+            border-color: var(--borderColor-emphasis);
+        }
+
+        /* Editor container */
+        .editor-container {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bgColor-default);
+            z-index: 2000;
+            flex-direction: column;
+        }
+
+        .editor-container.active {
+            display: flex;
+        }
+
+        .editor-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--borderColor-default);
+            background: var(--bgColor-muted);
+        }
+
+        .editor-toolbar h2 {
+            margin: 0;
+            font-size: 16px;
+            color: var(--fgColor-default);
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .editor-actions button {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--borderColor-default);
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .editor-actions button:hover {
+            background: var(--bgColor-muted);
+            border-color: var(--borderColor-emphasis);
+        }
+
+        .editor-actions .save-button {
+            background: #2ea44f;
+            color: white;
+            border-color: #2ea44f;
+        }
+
+        .editor-actions .save-button:hover {
+            background: #2c974b;
+        }
+
+        #markdown-editor {
+            flex: 1;
+            padding: 20px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            border: none;
+            resize: none;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            outline: none;
+        }
+
+        /* Notification button and badge */
+        .notification-btn {
+            position: relative;
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            background: #d73a49;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 5px;
+            border-radius: 10px;
+            min-width: 16px;
+            text-align: center;
+        }
+
+        /* Notification dropdown */
+        .notification-dropdown {
+            position: fixed;
+            top: 60px;
+            right: 20px;
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 999;
+            width: 320px;
+            max-height: 400px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .notification-dropdown-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--borderColor-default);
+            background: var(--bgColor-muted);
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--fgColor-default);
+        }
+
+        .notification-dropdown-header .clear-btn {
+            background: none;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .notification-dropdown-header .clear-btn:hover {
+            background: var(--bgColor-neutral-muted);
+            color: var(--fgColor-default);
+        }
+
+        .notification-dropdown-body {
+            overflow-y: auto;
+            max-height: 350px;
+        }
+
+        .notification-empty {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--fgColor-muted);
+            font-size: 14px;
+        }
+
+        .notification-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--borderColor-muted);
+            cursor: pointer;
+            transition: background 0.2s;
+            text-decoration: none;
+            display: block;
+            color: inherit;
+        }
+
+        .notification-item:hover {
+            background: var(--bgColor-muted);
+        }
+
+        .notification-item:last-child {
+            border-bottom: none;
+        }
+
+        .notification-item-message {
+            font-size: 13px;
+            color: var(--fgColor-default);
+            margin-bottom: 4px;
+            line-height: 1.4;
+        }
+
+        .notification-item-time {
+            font-size: 11px;
+            color: var(--fgColor-muted);
+        }
     </style>
 </head>
 <body class="markdown-body">
     <!-- Global UI elements (persist across navigation) -->
-    <div class="toast" id="toast">
+    <a class="toast" id="toast" href="#" style="display: none;">
         <div class="toast-content">
             <span class="toast-icon">📄</span>
             <span class="toast-message" id="toast-message"></span>
-            <button class="toast-close" onclick="hideToast()" title="Close">×</button>
+            <button class="toast-close" onclick="event.preventDefault(); event.stopPropagation(); hideToast();" title="Close">×</button>
         </div>
-    </div>
+    </a>
 
     <div class="nav-toggle">
         <button onclick="openNavModal()" title="Navigate to directory">λ</button>
@@ -388,9 +594,25 @@
     </div>
 
     <div class="theme-toggle">
+        <button onclick="downloadHTML()" id="download-btn" title="Download as HTML" style="display: none;">⬇️</button>
+        <button onclick="toggleNotificationHistory()" id="notification-btn" title="Notification history" class="notification-btn">
+            🔔
+            <span class="notification-badge" id="notification-badge" style="display: none;">0</span>
+        </button>
         <button onclick="setTheme('light')" id="theme-light" title="Light theme">☀️</button>
         <button onclick="setTheme('dark')" id="theme-dark" title="Dark theme">🌙</button>
         <button onclick="setTheme('auto')" id="theme-auto" title="Auto (system)">💻</button>
+    </div>
+
+    <!-- Notification History Dropdown -->
+    <div class="notification-dropdown" id="notification-dropdown" style="display: none;">
+        <div class="notification-dropdown-header">
+            <span>Recent Notifications</span>
+            <button onclick="clearNotificationHistory()" class="clear-btn" title="Clear history">✕</button>
+        </div>
+        <div class="notification-dropdown-body" id="notification-list">
+            <div class="notification-empty">No recent notifications</div>
+        </div>
     </div>
 
     <!-- Navigation Modal -->
@@ -412,13 +634,28 @@
         </div>
     </div>
 
+    <!-- Editor container -->
+    <div class="editor-container" id="editor-container">
+        <div class="editor-toolbar">
+            <h2>Edit Markdown</h2>
+            <div class="editor-actions">
+                <button onclick="cancelEdit()">Cancel</button>
+                <button class="save-button" onclick="saveMarkdown()">Save (Ctrl+S)</button>
+            </div>
+        </div>
+        <textarea id="markdown-editor" placeholder="Edit your markdown here..."></textarea>
+    </div>
+
     <!-- Main content area (replaced during SPA navigation) -->
     <main id="content" data-view="{{if .Content}}file{{else}}browser{{end}}" data-path="{{.BrowsePath}}">
         <div class="container">
             {{if .ShowBackButton}}
             <div class="header-actions">
                 <a href="/" class="back-button">← Back to File Browser</a>
-                <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
+                    <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                </div>
             </div>
             {{end}}
 
@@ -473,6 +710,10 @@
             })
             .then(response => {
                 if (response.ok) {
+                    // Close modal first
+                    const modal = document.getElementById('nav-modal');
+                    modal.classList.remove('active');
+
                     // Navigate to root using SPA if available
                     if (typeof navigate === 'function') {
                         navigate('/');
@@ -595,185 +836,32 @@
             }
         }
 
-        // Setup collapsible directory functionality (called on page load and after SPA navigation)
-        function setupCollapse() {
-            const allItems = document.querySelectorAll('.tree-item');
+        // Note: setupCollapse() and findParentItem() are defined in navigation.js
+        // They will be called automatically by the DOMContentLoaded handler in navigation.js
 
-            // Hide children of collapsed directories
-            for (let item of allItems) {
-                const depth = parseInt(item.dataset.depth) || 0;
-                if (depth > 1) {
-                    const parent = findParentItem(item, allItems);
-                    if (parent) {
-                        const parentDir = parent.querySelector('.tree-directory');
-                        if (parentDir && parentDir.dataset.collapsed === 'true') {
-                            item.classList.add('hidden');
-                        }
-                    }
-                }
-            }
-        }
-
-        // Initialize collapsed directories on page load
-        window.addEventListener('DOMContentLoaded', function() {
-            setupCollapse();
-        });
-
-        function findParentItem(item, allItems) {
-            const depth = parseInt(item.dataset.depth) || 0;
-            if (depth <= 1) return null;
-
-            const index = Array.from(allItems).indexOf(item);
-            for (let i = index - 1; i >= 0; i--) {
-                const candidateDepth = parseInt(allItems[i].dataset.depth) || 0;
-                if (candidateDepth === depth - 1) {
-                    return allItems[i];
-                }
-            }
-            return null;
-        }
-
-        // Toast notification functions
-        let toastTimeout;
-        let toastFilePath = null;
-
-        function showToast(message, filePath) {
-            const toast = document.getElementById('toast');
-            const messageEl = document.getElementById('toast-message');
-            messageEl.textContent = message;
-
-            // Store file path for navigation
-            toastFilePath = filePath;
-
-            toast.classList.add('show');
-
-            // Clear existing timeout
-            if (toastTimeout) {
-                clearTimeout(toastTimeout);
-            }
-
-            // Auto-hide after 5 seconds
-            toastTimeout = setTimeout(hideToast, 5000);
-        }
-
-        function hideToast() {
-            const toast = document.getElementById('toast');
-            toast.classList.remove('show');
-            toastFilePath = null;
-            if (toastTimeout) {
-                clearTimeout(toastTimeout);
-            }
-        }
-
-        // Handle toast click to navigate to file
+        // Handle toast click to navigate to file (uses SPA navigation)
+        // Note: toast functions (showToast, hideToast) are defined in navigation.js
         document.addEventListener('DOMContentLoaded', function() {
             const toast = document.getElementById('toast');
             if (toast) {
                 toast.addEventListener('click', function(e) {
-                    // Don't navigate if clicking the close button
-                    if (e.target.classList.contains('toast-close')) {
-                        return;
+                    // Let browser handle Cmd/Ctrl+Click naturally (opens new tab)
+                    if (e.metaKey || e.ctrlKey) {
+                        return; // Don't prevent default - let <a> tag handle it
                     }
-                    if (toastFilePath) {
-                        // Use SPA navigation if available, otherwise fall back to full page load
-                        if (typeof navigate === 'function') {
-                            navigate(`/view/${encodeURIComponent(toastFilePath)}`);
-                        } else {
-                            window.location.href = `/view/${encodeURIComponent(toastFilePath)}`;
-                        }
+
+                    // For normal clicks, use SPA navigation if available
+                    e.preventDefault(); // Prevent full page navigation
+                    const href = this.getAttribute('href');
+
+                    if (href && href !== '#' && typeof navigate === 'function') {
+                        navigate(href);
                     }
                 });
             }
         });
 
-        // Dynamically insert a new file into the tree
-        function insertFileIntoTree(filePath) {
-            try {
-                console.log('[insertFileIntoTree] Adding file:', filePath);
-                const fileName = filePath.split('/').pop();
-                const fileTree = document.getElementById('file-tree');
-
-                if (!fileTree) {
-                    console.log('[insertFileIntoTree] No file-tree element found, skipping');
-                    return;
-                }
-
-                // Create new tree item HTML
-                const div = document.createElement('div');
-                div.className = 'tree-item';
-                div.dataset.depth = '1';
-                div.innerHTML = `
-                    <span class="tree-connector">├── </span>
-                    <span class="tree-file">
-                        <a href="/view/${encodeURIComponent(filePath)}">${escapeHtml(fileName)}</a>
-                        <span class="file-size">(0 bytes)</span>
-                    </span>
-                `;
-
-                // Find correct position (alphabetically among depth=1 files)
-                const allItems = fileTree.querySelectorAll('.tree-item[data-depth="1"]');
-                let inserted = false;
-
-                for (let item of allItems) {
-                    const link = item.querySelector('.tree-file a');
-                    if (link) {
-                        const itemName = link.textContent.trim();
-                        if (fileName.localeCompare(itemName) < 0) {
-                            item.parentNode.insertBefore(div, item);
-                            inserted = true;
-                            console.log('[insertFileIntoTree] Inserted before:', itemName);
-                            break;
-                        }
-                    }
-                }
-
-                // If not inserted, append at end
-                if (!inserted) {
-                    fileTree.appendChild(div);
-                    console.log('[insertFileIntoTree] Appended at end');
-                }
-
-                // Update file count in subtitle
-                const subtitle = document.querySelector('.subtitle');
-                if (subtitle) {
-                    const match = subtitle.textContent.match(/(\d+) markdown file/);
-                    if (match) {
-                        const newCount = parseInt(match[1]) + 1;
-                        subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-                        console.log('[insertFileIntoTree] Updated count to:', newCount);
-                    }
-                }
-
-                console.log('[insertFileIntoTree] Successfully added file');
-            } catch (error) {
-                console.error('[insertFileIntoTree] Error:', error);
-                // Don't crash the page - just log the error
-            }
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // Connection status update
-        function updateConnectionStatus(count) {
-            const dot = document.getElementById('connection-dot');
-            const countEl = document.getElementById('connection-count');
-
-            if (countEl) {
-                countEl.textContent = count;
-            }
-
-            if (dot) {
-                if (count > 0) {
-                    dot.classList.add('connected');
-                } else {
-                    dot.classList.remove('connected');
-                }
-            }
-        }
+        {{.EditorJS}}
 
     </script>
 
