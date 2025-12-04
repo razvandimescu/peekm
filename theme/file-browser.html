@@ -270,12 +270,12 @@
             position: fixed;
             top: 20px;
             right: 20px;
-            background: var(--bgColor-default);
+            background: var(--bgColor-muted);
             border: 1px solid var(--borderColor-default);
             border-left: 4px solid var(--fgColor-accent);
             border-radius: 6px;
             padding: 16px 20px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
             z-index: 3000;
             opacity: 0;
             transform: translateY(-20px);
@@ -284,7 +284,7 @@
             max-width: 400px;
             cursor: pointer;
             text-decoration: none;
-            color: inherit;
+            color: var(--fgColor-default);
         }
 
         .toast.show {
@@ -294,7 +294,8 @@
         }
 
         .toast:hover {
-            background: var(--bgColor-muted);
+            background: var(--bgColor-neutral-muted);
+            border-color: var(--borderColor-emphasis);
         }
 
         .toast-content {

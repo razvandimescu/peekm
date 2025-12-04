@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"embed"
@@ -948,7 +949,26 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	filePath := r.FormValue("file")
 	content := r.FormValue("content")
 
-	validated, err := validateAndResolvePath(filePath)
+	// Clean the path
+	filePath = filepath.Clean(filePath)
+
+	// Get current browse directory (thread-safe)
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	// Convert relative path to absolute by joining with browseDir
+	var absFilePath string
+	if filepath.IsAbs(filePath) {
+		absFilePath = filePath
+	} else {
+		absFilePath = filepath.Join(currentBrowseDir, filePath)
+	}
+
+	// Clean the absolute path
+	absFilePath = filepath.Clean(absFilePath)
+
+	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
 		http.Error(w, "Invalid path", http.StatusForbidden)
 		return
@@ -1440,8 +1460,57 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// parseIgnoreFile reads and parses .peekmignore file
+func parseIgnoreFile(filePath string) []string {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil // File doesn't exist or can't be read - silent fallback
+	}
+	defer file.Close()
+
+	var patterns []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("Warning: Error reading .peekmignore: %v", err)
+		return nil
+	}
+
+	return patterns
+}
+
+// matchesIgnorePattern checks if directory name matches any pattern
+func matchesIgnorePattern(dirName string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// Simple wildcard matching using filepath.Match
+		matched, err := filepath.Match(pattern, dirName)
+		if err != nil {
+			log.Printf("Warning: Invalid pattern '%s': %v", pattern, err)
+			continue
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 func collectMarkdownFiles(rootDir string) []string {
 	var files []string
+
+	// Load .peekmignore patterns from rootDir
+	ignorePatterns := parseIgnoreFile(filepath.Join(rootDir, ".peekmignore"))
+	if len(ignorePatterns) > 0 {
+		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(ignorePatterns))
+	}
 
 	// Get home directory for security boundary checks
 	homeDir, err := os.UserHomeDir()
@@ -1475,6 +1544,10 @@ func collectMarkdownFiles(rootDir string) []string {
 				return filepath.SkipDir
 			}
 			if name == "node_modules" || name == "vendor" || name == "dist" {
+				return filepath.SkipDir
+			}
+			// Apply custom .peekmignore patterns
+			if matchesIgnorePattern(name, ignorePatterns) {
 				return filepath.SkipDir
 			}
 		}

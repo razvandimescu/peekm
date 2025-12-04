@@ -24,7 +24,7 @@ peekm README.md    # One command. That's it.
 
 ```bash
 # macOS/Linux — Install in 10 seconds
-curl -L https://github.com/rd/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz && sudo mv peekm /usr/local/bin/
+curl -L https://github.com/razvandimescu/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz && sudo mv peekm /usr/local/bin/
 
 # Try it immediately
 peekm README.md
@@ -35,7 +35,7 @@ peekm README.md
 > "Finally, a markdown viewer that understands modern AI workflows. Game changer for Claude Code users."
 
 <!-- Add GitHub stars badge when available -->
-<!-- [![GitHub stars](https://img.shields.io/github/stars/rd/peekm?style=social)](https://github.com/rd/peekm) -->
+<!-- [![GitHub stars](https://img.shields.io/github/stars/razvandimescu/peekm?style=social)](https://github.com/razvandimescu/peekm) -->
 
 ## Why peekm Over Alternatives?
 
@@ -83,23 +83,23 @@ peekm README.md
 
 ```bash
 # macOS/Linux
-curl -L https://github.com/rd/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz && sudo mv peekm /usr/local/bin/
+curl -L https://github.com/razvandimescu/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz && sudo mv peekm /usr/local/bin/
 ```
 
 **Option 2: Go Install**
 
 ```bash
-go install github.com/rd/peekm@latest
+go install github.com/razvandimescu/peekm@latest
 ```
 
 **Option 3: Download Binary**
 
-Download from the [releases page](https://github.com/rd/peekm/releases) for your platform (macOS, Linux, Windows).
+Download from the [releases page](https://github.com/razvandimescu/peekm/releases) for your platform (macOS, Linux, Windows).
 
 **Option 4: From Source**
 
 ```bash
-git clone https://github.com/rd/peekm.git
+git clone https://github.com/razvandimescu/peekm.git
 cd peekm
 go build
 ```
