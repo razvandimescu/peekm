@@ -36,55 +36,97 @@
         }
 
         .tree {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe WPC",
+                         "Segoe UI Historic", Helvetica, "SF Pro Text", sans-serif;
             font-size: 13px;
-            line-height: 1.4;
+            line-height: 22px;
+            color: var(--fgColor-default);
         }
 
         .tree-item {
-            padding: 2px 8px;
-            display: block;
+            height: 22px;
+            padding: 0 8px;
+            display: flex;
+            align-items: center;
             cursor: pointer;
-            transition: background 0.1s;
+            user-select: none;
+            position: relative;
+            transition: background-color 0.1s ease-out;
+            min-width: 0;
         }
 
         .tree-item:hover {
-            background: var(--bgColor-muted);
+            background: rgba(128, 128, 128, 0.07);
+        }
+
+        .tree-item:focus-visible {
+            outline: 1px solid var(--fgColor-accent);
+            outline-offset: -1px;
         }
 
         .tree-directory {
             color: var(--fgColor-default);
-            font-weight: 400;
+            font-weight: 500;
             cursor: pointer;
             user-select: none;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            max-width: 100%;
+            overflow: hidden;
         }
 
         .tree-directory .expand-icon {
-            display: inline-block;
-            width: 16px;
-            font-size: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            margin-right: 2px;
+            font-size: 12px;
             color: var(--fgColor-muted);
-            text-align: center;
+            opacity: 0.8;
+            transition: opacity 0.15s ease-out;
+            flex-shrink: 0;
+        }
+
+        .tree-directory .dir-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+        }
+
+        .tree-directory:hover .expand-icon {
+            opacity: 1;
         }
 
         .tree-item.hidden {
             display: none;
         }
 
+
         .tree-file {
             color: var(--fgColor-default);
             display: inline-block;
+            font-weight: 400;
+            max-width: 100%;
+            overflow: hidden;
         }
 
         .tree-file a {
             color: var(--fgColor-default);
             text-decoration: none;
-            transition: all 0.1s;
+            transition: color 0.1s ease-out;
+            opacity: 0.9;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .tree-file a:hover {
             color: var(--fgColor-accent);
+            opacity: 1;
         }
 
         .header-actions {
@@ -145,10 +187,17 @@
         }
 
         .top-bar-left,
+        .top-bar-middle,
         .top-bar-right {
             display: flex;
             gap: 12px;
             align-items: center;
+        }
+
+        .top-bar-middle {
+            flex: 1;
+            justify-content: center;
+            max-width: 400px;
         }
 
         .top-bar button {
@@ -165,6 +214,142 @@
         .top-bar button:hover {
             background: var(--bgColor-muted);
             border-color: var(--borderColor-emphasis);
+        }
+
+        /* Search bar */
+        .search-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            pointer-events: none;
+            font-size: 14px;
+            opacity: 0.6;
+        }
+
+        .file-search-input {
+            flex: 1;
+            padding: 8px 32px 8px 36px;
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            font-size: 13px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .file-search-input::placeholder {
+            color: var(--fgColor-muted);
+            opacity: 0.6;
+        }
+
+        .file-search-input:focus {
+            border-color: var(--fgColor-accent);
+            background: var(--bgColor-default);
+            box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.1);
+        }
+
+        [data-theme="dark"] .file-search-input:focus {
+            box-shadow: 0 0 0 2px rgba(68, 147, 248, 0.15);
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 8px;
+            background: transparent;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            transition: all 0.15s;
+        }
+
+        .search-clear:hover {
+            background: var(--bgColor-muted);
+            color: var(--fgColor-default);
+        }
+
+        /* Search dropdown */
+        .search-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            z-index: 2000;
+            max-height: 400px;
+            overflow: hidden;
+        }
+
+        [data-theme="dark"] .search-dropdown {
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .search-results {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .search-result-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--borderColor-muted);
+            transition: background 0.1s;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: var(--bgColor-muted);
+        }
+
+        .search-result-item.selected {
+            background: rgba(9, 105, 218, 0.1);
+        }
+
+        [data-theme="dark"] .search-result-item.selected {
+            background: rgba(68, 147, 248, 0.15);
+        }
+
+        .search-result-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--fgColor-default);
+        }
+
+        .search-result-path {
+            font-size: 11px;
+            color: var(--fgColor-muted);
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        }
+
+        .search-no-results {
+            padding: 20px;
+            text-align: center;
+            color: var(--fgColor-muted);
+            font-size: 13px;
         }
 
         /* Modal overlay */
@@ -390,31 +575,115 @@
             width: 280px;
             flex-shrink: 0;
             background: var(--bgColor-default);
-            border-right: 1px solid var(--borderColor-default);
+            border-right: 1px solid rgba(0, 0, 0, 0.1);
+            box-shadow: 1px 0 0 rgba(0, 0, 0, 0.05);
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        [data-color-mode="dark"] .file-sidebar {
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 1px 0 0 rgba(255, 255, 255, 0.04);
         }
 
         [data-sidebar="collapsed"] .file-sidebar {
             width: 0;
         }
 
+        .sidebar-resize-handle {
+            position: absolute;
+            top: 0;
+            right: -2px;
+            bottom: 0;
+            width: 4px;
+            cursor: ew-resize;
+            z-index: 10;
+            background-color: var(--borderColor-default);
+            transition: background-color 0.15s ease-out, width 0.15s ease-out;
+        }
+
+        .sidebar-resize-handle::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 3px;
+            height: 40px;
+            background: repeating-linear-gradient(
+                to bottom,
+                var(--fgColor-muted) 0px,
+                var(--fgColor-muted) 2px,
+                transparent 2px,
+                transparent 4px
+            );
+            opacity: 0.4;
+            border-radius: 2px;
+            transition: opacity 0.15s ease-out;
+        }
+
+        .sidebar-resize-handle:hover {
+            background-color: var(--fgColor-accent);
+            width: 4px;
+        }
+
+        .sidebar-resize-handle:hover::before {
+            opacity: 0.8;
+        }
+
+        .sidebar-resize-handle.resizing {
+            background-color: var(--fgColor-accent);
+            width: 4px;
+        }
+
+        .sidebar-resize-handle.resizing::before {
+            opacity: 1;
+        }
+
+        [data-color-mode="dark"] .sidebar-resize-handle::before {
+            background: repeating-linear-gradient(
+                to bottom,
+                rgba(255, 255, 255, 0.4) 0px,
+                rgba(255, 255, 255, 0.4) 2px,
+                transparent 2px,
+                transparent 4px
+            );
+        }
+
+        body.sidebar-resizing {
+            cursor: ew-resize;
+            user-select: none;
+        }
+
+        body.sidebar-resizing * {
+            cursor: ew-resize !important;
+        }
+
         .sidebar-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--borderColor-muted);
-            background: var(--bgColor-muted);
+            padding: 8px 12px;
+            min-height: 35px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+            background: transparent;
             flex-shrink: 0;
+            display: flex;
+            align-items: center;
         }
 
         .breadcrumb {
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-            font-size: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 11px;
             color: var(--fgColor-muted);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            opacity: 0.8;
+            transition: opacity 0.2s ease-out;
+        }
+
+        .breadcrumb:hover {
+            opacity: 1;
         }
 
         .breadcrumb a {
@@ -442,9 +711,28 @@
 
         /* Current file highlighting in sidebar */
         .sidebar-content .tree-file a.current {
-            background: var(--bgColor-muted);
+            background: rgba(9, 105, 218, 0.1);
             color: var(--fgColor-accent);
             font-weight: 500;
+            display: block;
+            padding: 0 4px;
+            margin: 0 -4px;
+            border-radius: 3px;
+            opacity: 1;
+        }
+
+        .sidebar-content .tree-file a.current::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--fgColor-accent);
+        }
+
+        [data-color-mode="dark"] .sidebar-content .tree-file a.current {
+            background: rgba(68, 147, 248, 0.15);
         }
 
         .content-area {
@@ -455,8 +743,30 @@
         }
 
         .content-area .container {
-            max-width: 900px;
-            padding: 40px;
+            max-width: min(1200px, calc(100% - 120px));
+            padding: 40px 60px;
+            margin: 0 auto;
+            transition: max-width 0.3s ease;
+        }
+
+        /* Responsive scaling for larger displays */
+        @media (min-width: 1920px) {
+            .content-area .container {
+                max-width: 1280px;
+            }
+        }
+
+        @media (min-width: 2560px) {
+            .content-area .container {
+                max-width: 1400px;
+            }
+        }
+
+        /* Code blocks can expand beyond container for better readability */
+        .content-area .container pre {
+            max-width: calc(100vw - 380px);
+            margin-left: calc(-1 * max(0px, min(60px, (100% - 1200px) / 2)));
+            margin-right: calc(-1 * max(0px, min(60px, (100% - 1200px) / 2)));
         }
 
         /* Empty state styling */
@@ -475,9 +785,18 @@
 
         .empty-sidebar {
             text-align: center;
-            padding: 40px 20px;
+            padding: 60px 20px;
             color: var(--fgColor-muted);
-            font-size: 13px;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
+        .empty-sidebar::before {
+            content: "📂";
+            display: block;
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.3;
         }
 
         /* Responsive: Overlay sidebar on small screens */
@@ -778,16 +1097,71 @@
             </div>
         </div>
 
+        <div class="top-bar-middle">
+            <div class="search-container">
+                <span class="search-icon">🔍</span>
+                <input
+                    type="text"
+                    id="file-search"
+                    class="file-search-input"
+                    placeholder="Search files (Cmd+P)..."
+                    aria-label="Search files by name"
+                    autocomplete="off"
+                />
+                <button
+                    class="search-clear"
+                    id="search-clear"
+                    onclick="clearSearch()"
+                    style="display: none;"
+                    aria-label="Clear search"
+                    title="Clear search"
+                >×</button>
+                <!-- Search results dropdown -->
+                <div class="search-dropdown" id="search-dropdown" style="display: none;">
+                    <div class="search-results" id="search-results">
+                        <!-- Results populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="top-bar-right">
             <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">⬇️</button>
             <button onclick="toggleNotificationHistory()" id="notification-btn" class="notification-btn" aria-label="Notification history" title="Notification history">
                 🔔
                 <span class="notification-badge" id="notification-badge" style="display: none;">0</span>
             </button>
-            <div class="theme-toggle" role="group" aria-label="Theme selection">
-                <button onclick="setTheme('light')" id="theme-light" aria-label="Light theme" title="Light theme">☀️</button>
-                <button onclick="setTheme('dark')" id="theme-dark" aria-label="Dark theme" title="Dark theme">🌙</button>
-                <button onclick="setTheme('auto')" id="theme-auto" aria-label="Auto theme" title="Auto (system)">💻</button>
+            <div class="theme-dropdown-container">
+                <button
+                    onclick="toggleThemeDropdown(event)"
+                    id="theme-toggle-btn"
+                    class="theme-toggle-btn"
+                    aria-label="Theme selection"
+                    aria-expanded="false"
+                    aria-haspopup="true"
+                    title="Change theme"
+                >
+                    <span class="theme-icon" id="theme-current-icon">☀️</span>
+                    <span class="theme-label" id="theme-current-label">Light</span>
+                    <span class="dropdown-arrow">▾</span>
+                </button>
+                <div class="theme-dropdown-menu" id="theme-dropdown" role="listbox" aria-label="Theme selection" style="display: none;">
+                    <button onclick="selectTheme('light')" class="theme-option" role="option" aria-selected="true">
+                        <span class="theme-icon">☀️</span>
+                        <span>Light</span>
+                        <span class="theme-checkmark" id="checkmark-light">✓</span>
+                    </button>
+                    <button onclick="selectTheme('dark')" class="theme-option" role="option" aria-selected="false">
+                        <span class="theme-icon">🌙</span>
+                        <span>Dark</span>
+                        <span class="theme-checkmark" id="checkmark-dark" style="display: none;">✓</span>
+                    </button>
+                    <button onclick="selectTheme('auto')" class="theme-option" role="option" aria-selected="false">
+                        <span class="theme-icon">💻</span>
+                        <span>Auto</span>
+                        <span class="theme-checkmark" id="checkmark-auto" style="display: none;">✓</span>
+                    </button>
+                </div>
             </div>
         </div>
     </header>
@@ -852,6 +1226,7 @@
                     </div>
                 {{end}}
             </div>
+            <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </aside>
 
         <!-- Main content area (replaced during SPA navigation) -->
@@ -886,6 +1261,63 @@
         {{.ThemeManagerJS}}
 
         // Helper functions needed by navigation.js and inline code
+
+        // Sidebar resize functionality
+        (function() {
+            const SIDEBAR_MIN_WIDTH = 200;
+            const SIDEBAR_MAX_WIDTH = 600;
+            const SIDEBAR_WIDTH_KEY = 'peekm-sidebar-width';
+
+            const sidebar = document.querySelector('.file-sidebar');
+            const resizeHandle = document.getElementById('sidebar-resize-handle');
+
+            // Restore saved width
+            const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+            if (savedWidth) {
+                const width = parseInt(savedWidth, 10);
+                if (width >= SIDEBAR_MIN_WIDTH && width <= SIDEBAR_MAX_WIDTH) {
+                    sidebar.style.width = width + 'px';
+                }
+            }
+
+            let isResizing = false;
+            let startX = 0;
+            let startWidth = 0;
+
+            resizeHandle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                startX = e.clientX;
+                startWidth = sidebar.offsetWidth;
+
+                resizeHandle.classList.add('resizing');
+                document.body.classList.add('sidebar-resizing');
+
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+
+                const delta = e.clientX - startX;
+                let newWidth = startWidth + delta;
+
+                // Constrain width
+                newWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, newWidth));
+
+                sidebar.style.width = newWidth + 'px';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!isResizing) return;
+
+                isResizing = false;
+                resizeHandle.classList.remove('resizing');
+                document.body.classList.remove('sidebar-resizing');
+
+                // Save width to localStorage
+                localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebar.offsetWidth);
+            });
+        })();
 
         // Navigation modal functionality
         function openNavModal() {

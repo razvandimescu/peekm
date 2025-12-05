@@ -61,50 +61,135 @@ body {
     background-color: var(--bgColor-default);
 }
 
-.container {
-    max-width: 900px;
-    width: 100%;
-    padding: 45px;
+/* Note: .container styles for unified layout are defined in file-browser.html */
+
+/* Theme dropdown container */
+.theme-dropdown-container {
+    position: relative;
 }
 
-@media (max-width: 767px) {
-    .container {
-        padding: 15px;
-    }
-}
-
-.theme-toggle {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: var(--bgColor-muted);
+/* Theme toggle button */
+.theme-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
     border: 1px solid var(--borderColor-default);
     border-radius: 6px;
-    padding: 8px;
-    display: flex;
-    gap: 4px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    z-index: 1000;
-}
-
-.theme-toggle button {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 6px 12px;
-    color: var(--fgColor-muted);
+    padding: 8px 12px;
     cursor: pointer;
     font-size: 14px;
+    color: var(--fgColor-default);
     transition: all 0.2s;
 }
 
-.theme-toggle button:hover {
+.theme-toggle-btn:hover {
+    background: var(--bgColor-muted);
+    border-color: var(--borderColor-emphasis);
+}
+
+.theme-toggle-btn[aria-expanded="true"] {
+    background: var(--bgColor-muted);
+    border-color: var(--borderColor-emphasis);
+}
+
+.theme-toggle-btn .theme-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.theme-toggle-btn .theme-label {
+    font-size: 13px;
+    color: var(--fgColor-muted);
+}
+
+.theme-toggle-btn .dropdown-arrow {
+    font-size: 10px;
+    color: var(--fgColor-muted);
+    margin-left: 2px;
+    transition: transform 0.2s;
+}
+
+.theme-toggle-btn[aria-expanded="true"] .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+/* Theme dropdown menu */
+.theme-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: var(--bgColor-default);
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 998;
+    min-width: 140px;
+    padding: 4px;
+}
+
+[data-color-mode="dark"] .theme-dropdown-menu {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Theme option button */
+.theme-option {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
     color: var(--fgColor-default);
+    transition: background 0.15s;
+    gap: 8px;
+    text-align: left;
+}
+
+/* Force dropdown items to use current theme colors for readability */
+.theme-dropdown-menu .theme-option {
+    color: var(--fgColor-default) !important;
+}
+
+.theme-option:hover {
     background: var(--bgColor-neutral-muted);
 }
 
-.theme-toggle button.active {
-    background: var(--fgColor-accent);
-    color: #ffffff;
-    border-color: var(--fgColor-accent);
+.theme-option .theme-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+/* Brighten emojis in dark mode for better visibility */
+[data-theme="dark"] .theme-option .theme-icon,
+[data-theme="dark"] .theme-toggle-btn .theme-icon {
+    filter: brightness(1.3) contrast(1.1);
+}
+
+.theme-option span:nth-child(2) {
+    flex: 1;
+}
+
+.theme-checkmark {
+    margin-left: auto;
+    color: var(--fgColor-success);
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+    .theme-toggle-btn .theme-label {
+        display: none;
+    }
+
+    .theme-dropdown-menu {
+        right: 0;
+        left: auto;
+        min-width: 120px;
+    }
 }

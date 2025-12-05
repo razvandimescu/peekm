@@ -147,11 +147,14 @@ async function navigate(url, addToHistory = true) {
             oldContent.replaceWith(newContent);
         }
 
-        // Also update sidebar tree if present (for directory navigation)
-        const newSidebarTree = doc.getElementById('sidebar-tree');
-        const oldSidebarTree = document.getElementById('sidebar-tree');
-        if (newSidebarTree && oldSidebarTree) {
-            oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
+        // Only update sidebar tree for root navigation (directory changes)
+        // File navigation (/view/*) doesn't need tree update
+        if (url === '/') {
+            const newSidebarTree = doc.getElementById('sidebar-tree');
+            const oldSidebarTree = document.getElementById('sidebar-tree');
+            if (newSidebarTree && oldSidebarTree) {
+                oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
+            }
         }
 
         // Update browser history
@@ -288,6 +291,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize current page scripts
     reinitializeScripts();
+
+    // Restore tree state on initial page load
+    restoreTreeState();
 
     // Add initial history state
     history.replaceState({ url: window.location.pathname }, '', window.location.pathname);
@@ -722,12 +728,30 @@ function downloadHTML() {
 
 // ===== Tree State Persistence =====
 
-const TREE_STATE_KEY = 'peekm_tree_state';
+const TREE_STATE_KEY_PREFIX = 'peekm_tree_state_';
+
+// Get directory-scoped storage key based on current browse directory
+function getTreeStateKey() {
+    const content = document.getElementById('content');
+    const browseDir = content?.dataset.path || '';
+    if (!browseDir) return null;
+
+    // Use base64 encoding to handle special characters in paths
+    try {
+        return TREE_STATE_KEY_PREFIX + btoa(browseDir);
+    } catch (e) {
+        console.error('[TreeState] Failed to encode path:', e);
+        return null;
+    }
+}
 
 // Save tree expansion state and scroll position to sessionStorage
 function saveTreeState() {
     try {
-        const fileTree = document.getElementById('file-tree');
+        const storageKey = getTreeStateKey();
+        if (!storageKey) return;
+
+        const fileTree = document.querySelector('#sidebar-tree .tree');
         if (!fileTree) return;
 
         const expandedDirs = [];
@@ -736,14 +760,12 @@ function saveTreeState() {
         directories.forEach(dir => {
             // Save directories that are NOT collapsed (i.e., expanded)
             if (dir.dataset.collapsed !== 'true') {
-                // Use directory text (without expand icon) as identifier
-                const text = Array.from(dir.childNodes)
-                    .filter(node => node.nodeType === Node.TEXT_NODE)
-                    .map(node => node.textContent.trim())
-                    .join('');
+                // Use .dir-name element for reliable text extraction
+                const dirNameEl = dir.querySelector('.dir-name');
+                const name = dirNameEl ? dirNameEl.textContent.trim() : '';
 
-                if (text) {
-                    expandedDirs.push(text);
+                if (name) {
+                    expandedDirs.push(name);
                 }
             }
         });
@@ -753,8 +775,8 @@ function saveTreeState() {
             scrollY: window.scrollY
         };
 
-        sessionStorage.setItem(TREE_STATE_KEY, JSON.stringify(state));
-        console.log('[TreeState] Saved state:', state);
+        sessionStorage.setItem(storageKey, JSON.stringify(state));
+        console.log('[TreeState] Saved state for', storageKey, ':', state);
     } catch (error) {
         console.error('[TreeState] Failed to save:', error);
     }
@@ -763,26 +785,27 @@ function saveTreeState() {
 // Restore tree expansion state and scroll position from sessionStorage
 function restoreTreeState() {
     try {
-        const stored = sessionStorage.getItem(TREE_STATE_KEY);
+        const storageKey = getTreeStateKey();
+        if (!storageKey) return;
+
+        const stored = sessionStorage.getItem(storageKey);
         if (!stored) return;
 
         const state = JSON.parse(stored);
-        const fileTree = document.getElementById('file-tree');
+        const fileTree = document.querySelector('#sidebar-tree .tree');
         if (!fileTree) return;
 
-        console.log('[TreeState] Restoring state:', state);
+        console.log('[TreeState] Restoring state for', storageKey, ':', state);
 
         // Restore expanded directories
         const directories = fileTree.querySelectorAll('.tree-directory');
 
         directories.forEach(dir => {
-            // Get directory text (without expand icon)
-            const text = Array.from(dir.childNodes)
-                .filter(node => node.nodeType === Node.TEXT_NODE)
-                .map(node => node.textContent.trim())
-                .join('');
+            // Use .dir-name element for reliable text extraction
+            const dirNameEl = dir.querySelector('.dir-name');
+            const name = dirNameEl ? dirNameEl.textContent.trim() : '';
 
-            const shouldBeExpanded = state.expandedDirs.includes(text);
+            const shouldBeExpanded = state.expandedDirs.includes(name);
             const isCurrentlyCollapsed = dir.dataset.collapsed === 'true';
 
             // If directory should be expanded but is currently collapsed, toggle it
@@ -844,17 +867,19 @@ function getNotificationHistory() {
     }
 }
 
+// Close notification dropdown
+function closeNotificationDropdown() {
+    const dropdown = document.getElementById('notification-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+    document.removeEventListener('click', closeNotificationDropdown);
+}
+
 // Clear notification history
 function clearNotificationHistory() {
     sessionStorage.removeItem(NOTIFICATION_STORAGE_KEY);
     updateNotificationBadge();
     renderNotificationList();
-
-    // Close dropdown
-    const dropdown = document.getElementById('notification-dropdown');
-    if (dropdown) {
-        dropdown.style.display = 'none';
-    }
+    closeNotificationDropdown();
 }
 
 // Toggle notification history dropdown
@@ -865,10 +890,23 @@ function toggleNotificationHistory() {
     const isVisible = dropdown.style.display !== 'none';
 
     if (isVisible) {
-        dropdown.style.display = 'none';
+        closeNotificationDropdown();
     } else {
+        // Close theme dropdown if open (mutual exclusivity)
+        const themeDropdown = document.getElementById('theme-dropdown');
+        if (themeDropdown && themeDropdown.style.display !== 'none') {
+            if (typeof closeThemeDropdown === 'function') {
+                closeThemeDropdown();
+            }
+        }
+
         renderNotificationList();
         dropdown.style.display = 'flex';
+
+        // Add click-outside listener (prevents immediate close from current click bubbling)
+        setTimeout(() => {
+            document.addEventListener('click', closeNotificationDropdown);
+        }, 0);
     }
 }
 
@@ -1155,4 +1193,224 @@ document.addEventListener('keydown', function(e) {
             toggleSidebar();
         }
     }
+});
+
+// ===== File Search Functions =====
+
+let searchResults = [];
+let selectedIndex = -1;
+
+// Get all files from sidebar tree
+function getAllFiles() {
+    const sidebarTree = document.getElementById('sidebar-tree');
+    if (!sidebarTree) return [];
+
+    const files = [];
+    const allItems = sidebarTree.querySelectorAll('.tree-item .tree-file a');
+
+    allItems.forEach(link => {
+        const fileName = link.textContent.trim();
+        const filePath = link.getAttribute('href')?.replace('/view/', '') || '';
+
+        if (fileName && filePath) {
+            files.push({
+                name: fileName,
+                path: decodeURIComponent(filePath),
+                url: link.getAttribute('href')
+            });
+        }
+    });
+
+    return files;
+}
+
+// Search files and show dropdown
+function searchFiles(query) {
+    const dropdown = document.getElementById('search-dropdown');
+    const resultsContainer = document.getElementById('search-results');
+    const clearBtn = document.getElementById('search-clear');
+
+    // Show/hide clear button
+    if (clearBtn) {
+        clearBtn.style.display = query.length > 0 ? 'flex' : 'none';
+    }
+
+    if (!query || query.trim() === '') {
+        // No search - hide dropdown
+        if (dropdown) dropdown.style.display = 'none';
+        searchResults = [];
+        selectedIndex = -1;
+        return;
+    }
+
+    const searchQuery = query.toLowerCase().trim();
+    const allFiles = getAllFiles();
+
+    // Filter matching files
+    searchResults = allFiles.filter(file =>
+        file.name.toLowerCase().includes(searchQuery)
+    );
+
+    // Show dropdown with results
+    if (dropdown && resultsContainer) {
+        if (searchResults.length === 0) {
+            resultsContainer.innerHTML = '<div class="search-no-results">No files found</div>';
+            dropdown.style.display = 'block';
+        } else {
+            resultsContainer.innerHTML = searchResults.map((file, index) =>
+                `<div class="search-result-item" data-index="${index}">
+                    <div class="search-result-name">${escapeHtml(file.name)}</div>
+                    <div class="search-result-path">${escapeHtml(file.path)}</div>
+                </div>`
+            ).join('');
+            dropdown.style.display = 'block';
+            selectedIndex = -1;
+
+            // Add click handlers to results
+            const items = resultsContainer.querySelectorAll('.search-result-item');
+            items.forEach((item, index) => {
+                item.addEventListener('click', () => {
+                    navigateToFile(searchResults[index].url);
+                });
+            });
+        }
+    }
+
+    console.log(`[Search] Found ${searchResults.length} matches for "${query}"`);
+}
+
+// Navigate to selected file
+function navigateToFile(url) {
+    const searchInput = document.getElementById('file-search');
+    const dropdown = document.getElementById('search-dropdown');
+
+    // Hide dropdown
+    if (dropdown) dropdown.style.display = 'none';
+
+    // Clear search
+    if (searchInput) {
+        searchInput.value = '';
+        searchInput.blur();
+    }
+
+    const clearBtn = document.getElementById('search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+
+    searchResults = [];
+    selectedIndex = -1;
+
+    // Navigate using SPA
+    if (url && typeof navigate === 'function') {
+        navigate(url);
+    }
+}
+
+// Update selected item in dropdown
+function updateSelection() {
+    const resultsContainer = document.getElementById('search-results');
+    if (!resultsContainer) return;
+
+    const items = resultsContainer.querySelectorAll('.search-result-item');
+
+    items.forEach((item, index) => {
+        if (index === selectedIndex) {
+            item.classList.add('selected');
+            // Scroll into view
+            item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+}
+
+// Handle keyboard navigation in search
+function handleSearchKeyboard(e) {
+    const dropdown = document.getElementById('search-dropdown');
+
+    // Only handle keys when dropdown is visible
+    if (!dropdown || dropdown.style.display === 'none') {
+        return;
+    }
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, searchResults.length - 1);
+        updateSelection();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, -1);
+        updateSelection();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+            navigateToFile(searchResults[selectedIndex].url);
+        }
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        clearSearch();
+    }
+}
+
+// Clear search and hide dropdown
+function clearSearch() {
+    const searchInput = document.getElementById('file-search');
+    const clearBtn = document.getElementById('search-clear');
+    const dropdown = document.getElementById('search-dropdown');
+
+    if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+    }
+
+    if (clearBtn) {
+        clearBtn.style.display = 'none';
+    }
+
+    if (dropdown) {
+        dropdown.style.display = 'none';
+    }
+
+    searchResults = [];
+    selectedIndex = -1;
+
+    console.log('[Search] Cleared');
+}
+
+// Global keyboard shortcut: Cmd/Ctrl+P (VS Code style)
+document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+        e.preventDefault();
+        const searchInput = document.getElementById('file-search');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+});
+
+// Initialize search on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('file-search');
+
+    if (searchInput) {
+        // Real-time search as user types
+        searchInput.addEventListener('input', function(e) {
+            searchFiles(e.target.value);
+        });
+
+        // Keyboard navigation
+        searchInput.addEventListener('keydown', handleSearchKeyboard);
+
+        console.log('[Search] Initialized');
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        const searchContainer = document.querySelector('.search-container');
+        const dropdown = document.getElementById('search-dropdown');
+
+        if (dropdown && searchContainer && !searchContainer.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+    });
 });

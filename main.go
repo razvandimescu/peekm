@@ -1524,10 +1524,17 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate tree HTML only for full page loads (not SPA navigation)
+	var treeHTML string
+	if !isPartialRequest(r) {
+		treeHTML = generateTreeHTML()
+	}
+
 	data := browserTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		Title:            filepath.Base(absFilePath),
 		Subtitle:         absFilePath,
+		TreeHTML:         template.HTML(treeHTML),
 		Content:          template.HTML(buf.String()),
 		ShowBackButton:   true,
 		BrowsePath:       currentBrowseDir,
@@ -1919,7 +1926,7 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			} else {
 				buf.WriteString(`<span class="expand-icon">▼</span>`)
 			}
-			buf.WriteString(fmt.Sprintf(` %s</span>`, template.HTMLEscapeString(node.name)))
+			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span>`, template.HTMLEscapeString(node.name)))
 		} else {
 			buf.WriteString(`<span class="tree-file">`)
 			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, template.URLQueryEscaper(node.path), template.HTMLEscapeString(node.name)))
