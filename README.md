@@ -144,7 +144,7 @@ The browser mode shows:
 - 📄 Pagination - loads 5 items at a time with "Load More" button
 - 🔗 Clickable file links for easy navigation
 - 📊 File sizes displayed for each markdown file
-- 🔍 Smart scanning (skips hidden dirs, node_modules, vendor, dist)
+- 🔍 Smart scanning (skips hidden dirs, node_modules, vendor, dist, venv)
 - 🎨 Theme toggle (light/dark/auto) in top-right corner
 - 🧭 Directory navigation (λ button) in top-left corner - navigate to any directory within $HOME
 
@@ -155,6 +155,50 @@ The browser mode shows:
 | `-port` | `6419` | Port to serve on |
 | `-browser` | `true` | Automatically open browser |
 | `-version` | `false` | Show version information |
+| `-show-ignored` | `false` | Show all excluded directories and exit |
+
+## Ignoring Directories (Optional)
+
+peekm automatically excludes common directories:
+- `.*` (hidden directories like `.git`, `.vscode`)
+- `node_modules` (Node.js dependencies)
+- `vendor` (Go dependencies)
+- `dist` (build output)
+- `venv`, `env`, `virtualenv` (Python virtual environments)
+
+To add custom exclusions, create `.peekmignore` in your project root:
+
+```
+# .peekmignore - Project-specific exclusions
+# Commit this file to share with your team
+
+# Build artifacts
+target
+_site
+out
+
+# Temporary files
+*.tmp
+*.cache
+```
+
+**Syntax:**
+- One pattern per line
+- Simple paths: `build`, `output`, `temp`
+- Wildcards: `*.tmp`, `test_*` (matches any characters)
+- Comments: Lines starting with `#`
+- Not supported: Path separators (`/`, `\`), globstar (`**`)
+
+Your custom patterns **add to** the defaults (they don't replace them).
+
+**See what's being excluded:**
+```bash
+peekm --show-ignored
+# Shows hardcoded exclusions and .peekmignore patterns if present
+
+peekm --show-ignored ~/projects/myapp
+# Check exclusions for a specific directory
+```
 
 ## When You Need peekm
 

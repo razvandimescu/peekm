@@ -40,10 +40,31 @@ var (
 	commit  = "none"
 	date    = "unknown"
 
+	// Hardcoded directory exclusions (common build artifacts and dependencies)
+	hardcodedExclusions = []string{
+		"node_modules", // Node.js dependencies
+		"vendor",       // Go dependencies
+		"dist",         // Build output
+		"venv",         // Python virtual environment
+		"env",          // Python virtual environment (alternative name)
+		"virtualenv",   // Python virtual environment (alternative name)
+	}
+
+	// Map version for O(1) lookup performance
+	hardcodedExclusionsMap = map[string]bool{
+		"node_modules": true,
+		"vendor":       true,
+		"dist":         true,
+		"venv":         true,
+		"env":          true,
+		"virtualenv":   true,
+	}
+
 	// Flags
 	port        = flag.Int("port", 6419, "Port to serve on")
 	openBrowser = flag.Bool("browser", true, "Open browser automatically")
 	showVersion = flag.Bool("version", false, "Show version information")
+	showIgnored = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
 	clients      = make(map[chan string]bool)
@@ -60,6 +81,13 @@ var (
 	// Event debouncing for directory watching
 	refreshTimer *time.Timer
 	refreshMutex sync.Mutex
+
+	// Ignore pattern cache (reduces file I/O on navigation)
+	globalIgnoreCache struct {
+		rootDir  string
+		patterns []string
+		mu       sync.RWMutex
+	}
 
 	// Templates, CSS, and JavaScript (loaded once at startup)
 	githubCSS              string
@@ -546,6 +574,42 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("peekm %s (commit: %s, built: %s)\n", version, commit, date)
+		os.Exit(0)
+	}
+
+	if *showIgnored {
+		fmt.Println("Hardcoded exclusions:")
+		fmt.Println("  .* (hidden directories)")
+		for _, dir := range hardcodedExclusions {
+			fmt.Printf("  %s\n", dir)
+		}
+
+		// Determine directory to check for .peekmignore
+		checkDir := "."
+		if flag.NArg() > 0 {
+			checkDir = flag.Arg(0)
+		}
+
+		// Try to resolve to absolute path
+		absPath, err := filepath.Abs(checkDir)
+		if err == nil {
+			checkDir = absPath
+		}
+
+		// If it's a file, check parent directory
+		if info, err := os.Stat(checkDir); err == nil && !info.IsDir() {
+			checkDir = filepath.Dir(checkDir)
+		}
+
+		// Load .peekmignore if present (uses caching)
+		if patterns := getIgnorePatterns(checkDir); len(patterns) > 0 {
+			fmt.Printf("\nCustom exclusions (.peekmignore in %s):\n", checkDir)
+			for _, p := range patterns {
+				fmt.Printf("  %s\n", p)
+			}
+		} else {
+			fmt.Printf("\nNo .peekmignore file found in %s\n", checkDir)
+		}
 		os.Exit(0)
 	}
 
@@ -1461,28 +1525,98 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseIgnoreFile reads and parses .peekmignore file
-func parseIgnoreFile(filePath string) []string {
-	file, err := os.Open(filePath)
+func parseIgnoreFile(rootDir string) []string {
+	ignoreFilePath := filepath.Join(rootDir, ".peekmignore")
+
+	// CRITICAL: Validate path through existing security chain
+	validatedPath, err := validateAndResolvePath(ignoreFilePath)
+	if err != nil {
+		return nil // Outside $HOME or path validation failed
+	}
+
+	file, err := os.Open(validatedPath)
 	if err != nil {
 		return nil // File doesn't exist or can't be read - silent fallback
 	}
 	defer file.Close()
 
-	var patterns []string
+	const maxWarnings = 3
+	const maxPatternLength = 256
+
+	var customPatterns []string
+	var invalidCount int
 	scanner := bufio.NewScanner(file)
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		patterns = append(patterns, line)
+
+		// Reject patterns that are too long (prevent pathological cases)
+		if len(line) > maxPatternLength {
+			invalidCount++
+			if invalidCount <= maxWarnings {
+				log.Printf("Warning: .peekmignore pattern too long (max %d chars, ignored): %s", maxPatternLength, line[:50]+"...")
+			}
+			continue
+		}
+
+		// Reject patterns with path separators (ambiguous intent)
+		if strings.Contains(line, "/") || strings.Contains(line, "\\") {
+			invalidCount++
+			if invalidCount <= maxWarnings {
+				log.Printf("Warning: .peekmignore pattern contains path separator (ignored): %s", line)
+			}
+			continue
+		}
+
+		// Validate pattern syntax with arbitrary test filename
+		if _, err := filepath.Match(line, "test"); err != nil {
+			invalidCount++
+			if invalidCount <= maxWarnings {
+				log.Printf("Warning: Invalid .peekmignore pattern '%s': %v", line, err)
+			}
+			continue
+		}
+
+		customPatterns = append(customPatterns, line)
+	}
+
+	// Summarize suppressed warnings
+	if invalidCount > maxWarnings {
+		log.Printf("Warning: Suppressed %d additional invalid .peekmignore patterns", invalidCount-maxWarnings)
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("Warning: Error reading .peekmignore: %v", err)
 		return nil
 	}
+
+	return customPatterns
+}
+
+// getIgnorePatterns returns custom ignore patterns with caching
+// Reduces file I/O by caching patterns per rootDir
+func getIgnorePatterns(rootDir string) []string {
+	// Check cache (read lock)
+	globalIgnoreCache.mu.RLock()
+	if globalIgnoreCache.rootDir == rootDir {
+		patterns := globalIgnoreCache.patterns
+		globalIgnoreCache.mu.RUnlock()
+		return patterns // Cache hit
+	}
+	globalIgnoreCache.mu.RUnlock()
+
+	// Cache miss - parse file
+	patterns := parseIgnoreFile(rootDir)
+
+	// Update cache (write lock)
+	globalIgnoreCache.mu.Lock()
+	globalIgnoreCache.rootDir = rootDir
+	globalIgnoreCache.patterns = patterns
+	globalIgnoreCache.mu.Unlock()
 
 	return patterns
 }
@@ -1503,13 +1637,19 @@ func matchesIgnorePattern(dirName string, patterns []string) bool {
 	return false
 }
 
+// isHardcodedExclusion checks if directory name is in hardcoded exclusions
+// Uses map for O(1) lookup performance
+func isHardcodedExclusion(dirName string) bool {
+	return hardcodedExclusionsMap[dirName]
+}
+
 func collectMarkdownFiles(rootDir string) []string {
 	var files []string
 
-	// Load .peekmignore patterns from rootDir
-	ignorePatterns := parseIgnoreFile(filepath.Join(rootDir, ".peekmignore"))
-	if len(ignorePatterns) > 0 {
-		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(ignorePatterns))
+	// Load .peekmignore patterns from rootDir (with caching)
+	customPatterns := getIgnorePatterns(rootDir)
+	if len(customPatterns) > 0 {
+		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(customPatterns))
 	}
 
 	// Get home directory for security boundary checks
@@ -1543,11 +1683,12 @@ func collectMarkdownFiles(rootDir string) []string {
 			if strings.HasPrefix(name, ".") && path != rootDir {
 				return filepath.SkipDir
 			}
-			if name == "node_modules" || name == "vendor" || name == "dist" {
+			// Skip hardcoded exclusions (O(1) map lookup)
+			if isHardcodedExclusion(name) {
 				return filepath.SkipDir
 			}
-			// Apply custom .peekmignore patterns
-			if matchesIgnorePattern(name, ignorePatterns) {
+			// Apply custom .peekmignore patterns (skip check if no patterns loaded)
+			if len(customPatterns) > 0 && matchesIgnorePattern(name, customPatterns) {
 				return filepath.SkipDir
 			}
 		}
