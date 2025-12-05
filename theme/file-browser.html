@@ -1236,7 +1236,7 @@
                 <div class="header-actions">
                     <div style="display: flex; gap: 8px; margin-left: auto;">
                         <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
-                        <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                        <button class="delete-button" onclick="confirmDelete()" title="Move this file to trash">🗑️ Delete File</button>
                     </div>
                 </div>
                 {{end}}
@@ -1378,7 +1378,7 @@
             const filePath = document.querySelector('.subtitle').textContent;
             const fileName = document.querySelector('h1').textContent;
 
-            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.`)) {
+            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.\n\nPress OK to delete or Cancel to abort (Esc to cancel)`)) {
                 deleteFile(filePath);
             }
         }
@@ -1406,6 +1406,7 @@
                 }
             })
             .catch(error => {
+                console.error('[Delete] Error:', error);
                 alert('Delete error: ' + error.message);
             });
         }

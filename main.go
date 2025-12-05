@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -1397,6 +1398,44 @@ func handleNavigate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// moveToTrash attempts to move a file to the OS trash/recycle bin.
+// Falls back to permanent deletion (os.Remove) if trash commands fail.
+// Supports macOS (osascript), Linux (gio trash), and Windows (PowerShell).
+func moveToTrash(filePath string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin": // macOS
+		// Use AppleScript to move to Trash
+		script := fmt.Sprintf(`tell application "Finder" to delete POSIX file "%s"`, filePath)
+		cmd = exec.Command("osascript", "-e", script)
+
+	case "linux":
+		// Try gio trash (GNOME/modern Linux)
+		cmd = exec.Command("gio", "trash", filePath)
+
+	case "windows":
+		// Use PowerShell to move to Recycle Bin
+		script := fmt.Sprintf(`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('%s', 'OnlyErrorDialogs', 'SendToRecycleBin')`, filePath)
+		cmd = exec.Command("powershell", "-Command", script)
+
+	default:
+		// Unsupported OS, fall back to permanent deletion
+		log.Printf("Warning: Trash not supported on %s, permanently deleting file: %s", runtime.GOOS, filePath)
+		return os.Remove(filePath)
+	}
+
+	// Attempt to move to trash
+	if err := cmd.Run(); err != nil {
+		log.Printf("Warning: Failed to move to trash (attempting permanent deletion): %v", err)
+		// Fallback to permanent deletion
+		return os.Remove(filePath)
+	}
+
+	log.Printf("Moved to trash: %s", filePath)
+	return nil
+}
+
 func handleDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1448,8 +1487,8 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the file
-	if err := os.Remove(targetPath); err != nil {
+	// Move file to trash (with fallback to permanent deletion)
+	if err := moveToTrash(targetPath); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete file: %v", err), http.StatusInternalServerError)
 		return
 	}
