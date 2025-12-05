@@ -1263,18 +1263,54 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	copy(currentMarkdownFiles, markdownFiles)
 	fileMutex.RUnlock()
 
+	// Generate tree HTML for sidebar
 	treeHTML := generateTreeHTML()
 
-	subtitle := fmt.Sprintf("Found %d markdown file(s)", len(currentMarkdownFiles))
-	if currentBrowseDir != "." {
+	// Smart file selection for unified layout
+	defaultFile := selectDefaultFile(currentMarkdownFiles)
+
+	var content template.HTML
+	var showBackButton bool
+	var title, subtitle string
+
+	if defaultFile != "" {
+		// Render markdown content for the selected file
+		markdownContent, err := os.ReadFile(defaultFile)
+		if err == nil {
+			md := newMarkdownRenderer()
+			var buf bytes.Buffer
+			if err := md.Convert(markdownContent, &buf); err == nil {
+				content = template.HTML(buf.String())
+				showBackButton = true
+				title = filepath.Base(defaultFile)
+
+				// Get relative path for subtitle
+				relPath := defaultFile
+				if rel, err := filepath.Rel(currentBrowseDir, defaultFile); err == nil {
+					relPath = rel
+				}
+				subtitle = fmt.Sprintf("%s - %d file(s)", relPath, len(currentMarkdownFiles))
+			} else {
+				log.Printf("Error rendering markdown: %v", err)
+			}
+		} else {
+			log.Printf("Error reading default file: %v", err)
+		}
+	}
+
+	// If no content was rendered, show empty state
+	if content == "" {
+		title = "Documentation"
 		subtitle = fmt.Sprintf("%s - %d file(s)", currentBrowseDir, len(currentMarkdownFiles))
 	}
 
 	data := browserTemplateData{
 		baseTemplateData: newBaseTemplateData(),
-		Title:            "Markdown Files",
+		Title:            title,
 		Subtitle:         subtitle,
 		TreeHTML:         template.HTML(treeHTML),
+		Content:          content,
+		ShowBackButton:   showBackButton,
 		BrowsePath:       currentBrowseDir,
 	}
 
@@ -1643,6 +1679,60 @@ func isHardcodedExclusion(dirName string) bool {
 	return hardcodedExclusionsMap[dirName]
 }
 
+// FileInfo holds file metadata for smart selection
+type FileInfo struct {
+	Path    string
+	ModTime time.Time
+}
+
+// selectDefaultFile returns the best file to display by default
+// Priority: README.md > readme.md > most recent > first alphabetically
+func selectDefaultFile(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+
+	// Convert to FileInfo with modification times
+	var fileInfos []FileInfo
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			continue // Skip files that can't be stat'd
+		}
+		fileInfos = append(fileInfos, FileInfo{
+			Path:    f,
+			ModTime: info.ModTime(),
+		})
+	}
+
+	if len(fileInfos) == 0 {
+		return ""
+	}
+
+	// Priority 1: README.md (exact match)
+	for _, f := range fileInfos {
+		if filepath.Base(f.Path) == "README.md" {
+			return f.Path
+		}
+	}
+
+	// Priority 2: readme.md (case-insensitive)
+	for _, f := range fileInfos {
+		if strings.EqualFold(filepath.Base(f.Path), "readme.md") {
+			return f.Path
+		}
+	}
+
+	// Priority 3: Most recently modified (AI workflow optimization)
+	mostRecent := fileInfos[0]
+	for _, f := range fileInfos {
+		if f.ModTime.After(mostRecent.ModTime) {
+			mostRecent = f
+		}
+	}
+	return mostRecent.Path
+}
+
 func collectMarkdownFiles(rootDir string) []string {
 	var files []string
 
@@ -1793,27 +1883,27 @@ func generateTreeHTML() string {
 
 	// Generate HTML
 	var buf bytes.Buffer
-	generateTreeHTMLRecursive(root, "", true, true, 0, &buf)
+	generateTreeHTMLRecursive(root, "", true, true, 0, false, &buf)
 	return buf.String()
 }
 
-func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoot bool, depth int, buf *bytes.Buffer) {
+func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoot bool, depth int, parentCollapsed bool, buf *bytes.Buffer) {
 	if !isRoot {
-		connector := "├── "
-		if isLast {
-			connector = "└── "
+		buf.WriteString(`<div class="tree-item`)
+		// Hide children of collapsed parents
+		if parentCollapsed {
+			buf.WriteString(` hidden`)
 		}
-
-		buf.WriteString(`<div class="tree-item"`)
+		buf.WriteString(`"`)
+		buf.WriteString(fmt.Sprintf(` data-depth="%d"`, depth))
 		if depth > 0 {
-			buf.WriteString(fmt.Sprintf(` data-depth="%d"`, depth))
+			buf.WriteString(fmt.Sprintf(` style="padding-left: %dpx"`, depth*16))
 		}
 		buf.WriteString(`>`)
-		buf.WriteString(fmt.Sprintf(`<span class="tree-connector">%s%s</span>`, prefix, connector))
 
 		if node.isDir {
-			// Collapse directories at depth >= 2 by default
-			collapsed := depth >= 2
+			// Collapse directories at depth >= 1 by default
+			collapsed := depth >= 1
 			buf.WriteString(fmt.Sprintf(`<span class="tree-directory%s" onclick="toggleDir(this)" data-collapsed="%t">`,
 				func() string {
 					if collapsed {
@@ -1823,15 +1913,16 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 					}
 				}(),
 				collapsed))
-			// Only show arrow on collapsed folders (UX: reduce clutter)
+			// Show chevron for all directories (VS Code style)
 			if collapsed {
-				buf.WriteString(`<span class="expand-icon">▶</span> `)
+				buf.WriteString(`<span class="expand-icon">▶</span>`)
+			} else {
+				buf.WriteString(`<span class="expand-icon">▼</span>`)
 			}
-			buf.WriteString(fmt.Sprintf(`%s/</span>`, template.HTMLEscapeString(node.name)))
+			buf.WriteString(fmt.Sprintf(` %s</span>`, template.HTMLEscapeString(node.name)))
 		} else {
 			buf.WriteString(`<span class="tree-file">`)
 			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, template.URLQueryEscaper(node.path), template.HTMLEscapeString(node.name)))
-			buf.WriteString(fmt.Sprintf(`<span class="file-size">%s</span>`, formatSize(node.size)))
 			buf.WriteString(`</span>`)
 		}
 
@@ -1840,18 +1931,11 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 
 	// Print children
 	if node.isDir && len(node.children) > 0 {
-		childPrefix := prefix
-		if !isRoot {
-			if isLast {
-				childPrefix += "    "
-			} else {
-				childPrefix += "│   "
-			}
-		}
-
+		// Determine if this directory is collapsed
+		collapsed := depth >= 1
 		for i, child := range node.children {
 			isLastChild := i == len(node.children)-1
-			generateTreeHTMLRecursive(child, childPrefix, isLastChild, false, depth+1, buf)
+			generateTreeHTMLRecursive(child, "", isLastChild, false, depth+1, collapsed || parentCollapsed, buf)
 		}
 	}
 }

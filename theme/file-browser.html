@@ -14,17 +14,12 @@
             color: var(--fgColor-default);
             background-color: var(--bgColor-muted);
             min-height: 100vh;
-            padding: 76px 20px 40px 20px;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
         }
 
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            background: var(--bgColor-default);
-            border-radius: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
-            padding: 40px;
-        }
+        /* Container styling moved to .content-area .container for VS Code layout */
 
         h1 {
             font-size: 2em;
@@ -41,34 +36,36 @@
         }
 
         .tree {
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-            font-size: 14px;
-            line-height: 1.8;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
         }
 
         .tree-item {
-            margin: 2px 0;
-            display: flex;
-            align-items: center;
+            padding: 2px 8px;
+            display: block;
+            cursor: pointer;
+            transition: background 0.1s;
         }
 
-        .tree-connector {
-            color: var(--borderColor-default);
-            margin-right: 8px;
-            white-space: pre;
+        .tree-item:hover {
+            background: var(--bgColor-muted);
         }
 
         .tree-directory {
-            color: var(--fgColor-accent);
-            font-weight: 600;
+            color: var(--fgColor-default);
+            font-weight: 400;
             cursor: pointer;
             user-select: none;
+            display: inline-block;
         }
 
         .tree-directory .expand-icon {
             display: inline-block;
-            width: 12px;
+            width: 16px;
             font-size: 10px;
+            color: var(--fgColor-muted);
+            text-align: center;
         }
 
         .tree-item.hidden {
@@ -77,27 +74,22 @@
 
         .tree-file {
             color: var(--fgColor-default);
+            display: inline-block;
         }
 
         .tree-file a {
-            color: var(--fgColor-accent);
+            color: var(--fgColor-default);
             text-decoration: none;
-            transition: all 0.2s;
+            transition: all 0.1s;
         }
 
         .tree-file a:hover {
-            text-decoration: underline;
-        }
-
-        .file-size {
-            color: var(--fgColor-muted);
-            font-size: 0.85em;
-            margin-left: 8px;
+            color: var(--fgColor-accent);
         }
 
         .header-actions {
             display: flex;
-            justify-content: space-between;
+            justify-content: flex-end;
             align-items: center;
             margin-bottom: 20px;
         }
@@ -325,14 +317,46 @@
             flex-shrink: 0;
         }
 
+        .toast-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+        }
+
         .toast-message {
             color: var(--fgColor-default);
             font-size: 14px;
             line-height: 1.4;
+            font-weight: 500;
+        }
+
+        .toast-detail {
+            color: var(--fgColor-muted);
+            font-size: 12px;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .toast-badge {
+            background: var(--fgColor-accent);
+            color: var(--bgColor-default);
+            border-radius: 10px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .toast.batch {
+            border-left-color: var(--fgColor-success);
         }
 
         .toast-close {
-            margin-left: auto;
+            margin-left: 0;
             background: none;
             border: none;
             color: var(--fgColor-muted);
@@ -349,6 +373,139 @@
 
         .toast-close:hover {
             color: var(--fgColor-default);
+        }
+
+        /* Unified Layout Container with Sidebar (VS Code style) */
+        .layout-container {
+            display: flex;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+        }
+
+        .file-sidebar {
+            width: 280px;
+            flex-shrink: 0;
+            background: var(--bgColor-default);
+            border-right: 1px solid var(--borderColor-default);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        [data-sidebar="collapsed"] .file-sidebar {
+            width: 0;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--borderColor-muted);
+            background: var(--bgColor-muted);
+            flex-shrink: 0;
+        }
+
+        .breadcrumb {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 12px;
+            color: var(--fgColor-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .breadcrumb a {
+            color: var(--fgColor-accent);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .breadcrumb span {
+            color: var(--fgColor-default);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 12px 8px;
+        }
+
+        /* Sidebar tree inherits base tree styles */
+
+        /* Current file highlighting in sidebar */
+        .sidebar-content .tree-file a.current {
+            background: var(--bgColor-muted);
+            color: var(--fgColor-accent);
+            font-weight: 500;
+        }
+
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            background: var(--bgColor-default);
+        }
+
+        .content-area .container {
+            max-width: 900px;
+            padding: 40px;
+        }
+
+        /* Empty state styling */
+        .empty-content {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--fgColor-muted);
+        }
+
+        .empty-content code {
+            background: var(--bgColor-muted);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .empty-sidebar {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--fgColor-muted);
+            font-size: 13px;
+        }
+
+        /* Responsive: Overlay sidebar on small screens */
+        @media (max-width: 768px) {
+            .file-sidebar {
+                position: fixed;
+                top: 56px;
+                left: 0;
+                bottom: 0;
+                z-index: 999;
+                box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+            }
+
+            [data-sidebar="expanded"] .file-sidebar {
+                width: 280px;
+            }
+
+            /* Backdrop for mobile */
+            [data-sidebar="expanded"]::before {
+                content: '';
+                position: fixed;
+                top: 56px;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.3);
+                z-index: 998;
+            }
         }
 
         /* Connection status indicator */
@@ -600,8 +757,12 @@
     <!-- Global UI elements (persist across navigation) -->
     <a class="toast" id="toast" href="#" style="display: none;">
         <div class="toast-content">
-            <span class="toast-icon">📄</span>
-            <span class="toast-message" id="toast-message"></span>
+            <span class="toast-icon" id="toast-icon">📄</span>
+            <div class="toast-text">
+                <span class="toast-message" id="toast-message"></span>
+                <span class="toast-detail" id="toast-detail" style="display: none;"></span>
+            </div>
+            <span class="toast-badge" id="toast-badge" style="display: none;">0</span>
             <button class="toast-close" onclick="event.preventDefault(); event.stopPropagation(); hideToast();" title="Close">×</button>
         </div>
     </a>
@@ -609,6 +770,7 @@
     <!-- Unified Top Bar -->
     <header class="top-bar" role="banner">
         <div class="top-bar-left">
+            <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;">☰</button>
             <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory">λ</button>
             <div class="connection-status" role="status" aria-live="polite">
                 <span class="connection-dot" id="connection-dot"></span>
@@ -672,31 +834,53 @@
         <textarea id="markdown-editor" placeholder="Edit your markdown here..."></textarea>
     </div>
 
-    <!-- Main content area (replaced during SPA navigation) -->
-    <main id="content" data-view="{{if .Content}}file{{else}}browser{{end}}" data-path="{{.BrowsePath}}">
-        <div class="container">
-            {{if .ShowBackButton}}
-            <div class="header-actions">
-                <a href="/" class="back-button">← Back to File Browser</a>
-                <div style="display: flex; gap: 8px;">
-                    <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
-                    <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
-                </div>
+    <!-- Main layout container with sidebar and content -->
+    <div class="layout-container" data-sidebar="expanded">
+        <!-- Navigation Sidebar (Persistent Navigation - visible by default) -->
+        <aside class="file-sidebar" aria-label="File tree" tabindex="-1">
+            <div class="sidebar-header">
+                <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">
+                    <!-- Breadcrumb populated by JavaScript -->
+                </nav>
             </div>
-            {{end}}
+            <div class="sidebar-content" id="sidebar-tree">
+                {{if .TreeHTML}}
+                    <div class="tree sidebar-tree">{{.TreeHTML}}</div>
+                {{else}}
+                    <div class="empty-sidebar">
+                        <p>No markdown files found</p>
+                    </div>
+                {{end}}
+            </div>
+        </aside>
 
-            <h1>{{.Title}}</h1>
-            <p class="subtitle">{{.Subtitle}}</p>
+        <!-- Main content area (replaced during SPA navigation) -->
+        <main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" class="content-area">
+            <div class="container">
+                {{if .ShowBackButton}}
+                <div class="header-actions">
+                    <div style="display: flex; gap: 8px; margin-left: auto;">
+                        <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
+                        <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                    </div>
+                </div>
+                {{end}}
 
-            {{if .TreeHTML}}
-            <div class="tree" id="file-tree">{{.TreeHTML}}</div>
-            {{end}}
+                <h1>{{.Title}}</h1>
+                <p class="subtitle">{{.Subtitle}}</p>
 
-            {{if .Content}}
-            {{.Content}}
-            {{end}}
-        </div>
-    </main>
+                {{if .Content}}
+                    {{.Content}}
+                {{else}}
+                    <!-- Empty state -->
+                    <div class="empty-content">
+                        <p>No markdown files found in this directory.</p>
+                        <p>Create a <code>.md</code> file to get started.</p>
+                    </div>
+                {{end}}
+            </div>
+        </main>
+    </div>
 
     <script>
         {{.ThemeManagerJS}}
@@ -813,22 +997,15 @@
             const treeItem = dirElement.closest('.tree-item');
             const depth = parseInt(treeItem.dataset.depth) || 0;
 
-            // Toggle icon visibility (only show arrow on collapsed folders)
+            // Toggle chevron: ▶ when collapsed, ▼ when expanded
             if (isCollapsed) {
-                // Expanding: hide the arrow
+                // Expanding: show down chevron
                 if (icon) {
-                    icon.style.display = 'none';
+                    icon.textContent = '▼';
                 }
             } else {
-                // Collapsing: show the arrow (create if doesn't exist)
-                if (!icon) {
-                    icon = document.createElement('span');
-                    icon.className = 'expand-icon';
-                    icon.textContent = '▶';
-                    dirElement.insertBefore(icon, dirElement.firstChild);
-                    icon.insertAdjacentText('afterend', ' '); // Add space after arrow
-                } else {
-                    icon.style.display = 'inline';
+                // Collapsing: show right chevron
+                if (icon) {
                     icon.textContent = '▶';
                 }
             }

@@ -161,9 +161,9 @@ func TestGenerateTreeHTML(t *testing.T) {
 		t.Error("missing file styling")
 	}
 
-	// Verify collapsible at depth >= 2
+	// Verify collapsible at depth >= 1
 	if !strings.Contains(html, "collapsed") {
-		t.Error("directories should be collapsed by default at depth >= 2")
+		t.Error("directories should be collapsed by default at depth >= 1")
 	}
 
 	// Verify expand icon

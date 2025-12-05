@@ -113,6 +113,9 @@ function connectSSE() {
 // Navigate to a new URL using fetch + content swap (SPA style)
 async function navigate(url, addToHistory = true) {
     try {
+        // Save tree state before navigation (for browser mode)
+        saveTreeState();
+
         // Fetch partial content
         const response = await fetch(url, {
             headers: {
@@ -144,6 +147,13 @@ async function navigate(url, addToHistory = true) {
             oldContent.replaceWith(newContent);
         }
 
+        // Also update sidebar tree if present (for directory navigation)
+        const newSidebarTree = doc.getElementById('sidebar-tree');
+        const oldSidebarTree = document.getElementById('sidebar-tree');
+        if (newSidebarTree && oldSidebarTree) {
+            oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
+        }
+
         // Update browser history
         if (addToHistory) {
             history.pushState({ url }, '', url);
@@ -151,6 +161,9 @@ async function navigate(url, addToHistory = true) {
 
         // Reinitialize page-specific scripts
         reinitializeScripts();
+
+        // Restore tree state after DOM update (for browser mode)
+        restoreTreeState();
 
         console.log('[Navigate] Navigated to:', url);
     } catch (error) {
@@ -189,6 +202,11 @@ function reinitializeScripts() {
         } else if (viewType === 'file') {
             // File mode - no special initialization needed
             // Delete button uses inline onclick handler, no reinitialization required
+        }
+
+        // Initialize sidebar (Focus Mode) - works for both views
+        if (typeof initializeSidebar === 'function') {
+            initializeSidebar();
         }
 
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
@@ -316,22 +334,165 @@ function findParentItem(item, allItems) {
 let toastTimeout;
 let toastFilePath = null;
 
+// Batch notification state
+let batchTimer = null;
+let batchedFiles = new Map(); // Map<filePath, {message, timestamp}>
+
+// Toast configuration constants
+const TOAST_CONFIG = {
+    BATCH_WINDOW: 800,        // ms to wait for batch
+    MAX_BATCH_SIZE: 20,       // safety valve
+    SINGLE_DURATION: 5000,    // ms for single file
+    BATCH_DURATION: 6000,     // ms for batches
+    TRANSITION_TIME: 300      // CSS transition duration
+};
+
 function showToast(message, filePath) {
-    const toast = document.getElementById('toast');
-    const messageEl = document.getElementById('toast-message');
-    if (!toast || !messageEl) return;
+    // Save to notification history immediately
+    saveNotification(message, filePath);
 
-    messageEl.textContent = message;
-    toastFilePath = filePath;
+    // Create file info object
+    const fileInfo = {
+        name: filePath ? filePath.split('/').pop() : null,
+        path: filePath,
+        message: message,
+        timestamp: Date.now()
+    };
 
-    // Set href for native browser behavior (Cmd/Ctrl+Click, context menu, etc.)
+    // Add to batch (deduplicate by file path)
     if (filePath) {
-        toast.href = `/view/${encodeURIComponent(filePath)}`;
+        batchedFiles.set(filePath, fileInfo);
     } else {
-        toast.href = '#';
+        // Non-file notifications (rare) - add with unique key
+        batchedFiles.set(`non-file-${Date.now()}`, fileInfo);
     }
 
-    // Show toast (remove inline display:none, let CSS handle visibility via .show class)
+    // Clear existing timer
+    if (batchTimer) {
+        clearTimeout(batchTimer);
+    }
+
+    // Safety valve: show immediately if batch gets too large
+    if (batchedFiles.size >= TOAST_CONFIG.MAX_BATCH_SIZE) {
+        displayBatchedToast();
+        return;
+    }
+
+    // Start/restart batch timer
+    batchTimer = setTimeout(() => {
+        displayBatchedToast();
+    }, TOAST_CONFIG.BATCH_WINDOW);
+}
+
+// Format batch message based on file count (pure function)
+function formatBatchMessage(files) {
+    const count = files.length;
+
+    if (count === 1) {
+        // Single file - show full message
+        const file = files[0];
+        return {
+            primary: file.message,
+            secondary: null,
+            icon: '📄',
+            href: file.path ? `/view/${encodeURIComponent(file.path)}` : '#',
+            clickAction: null
+        };
+    }
+
+    // Batch formatting
+    const names = files.map(f => f.name);
+    const icon = '📚';
+    const href = '#';
+    const clickAction = function(e) {
+        if (e.target.classList.contains('toast-close')) return;
+        e.preventDefault();
+        toggleNotificationHistory();
+        hideToast();
+    };
+
+    if (count === 2) {
+        // Two files - show both names
+        return {
+            primary: `${count} files updated`,
+            secondary: names.join(', '),
+            icon,
+            href,
+            clickAction
+        };
+    }
+
+    // 3+ files - show preview of first 2
+    const preview = names.slice(0, 2).join(', ');
+    return {
+        primary: `${count} files updated`,
+        secondary: `${preview}, and ${count - 2} more`,
+        icon,
+        href,
+        clickAction
+    };
+}
+
+// Update toast DOM elements with configuration
+function updateToastDOM(config) {
+    const elements = {
+        toast: document.getElementById('toast'),
+        message: document.getElementById('toast-message'),
+        detail: document.getElementById('toast-detail'),
+        icon: document.getElementById('toast-icon'),
+        badge: document.getElementById('toast-badge')
+    };
+
+    // Early return if critical elements missing
+    if (!elements.toast || !elements.message) {
+        console.error('[Toast] Required DOM elements missing');
+        return null;
+    }
+
+    // Update content
+    elements.message.textContent = config.primary;
+
+    // Set secondary text
+    if (elements.detail) {
+        elements.detail.textContent = config.secondary || '';
+        elements.detail.style.display = config.secondary ? 'block' : 'none';
+    }
+
+    // Set icon
+    if (elements.icon) {
+        elements.icon.textContent = config.icon;
+    }
+
+    // Set badge for batches
+    if (elements.badge) {
+        const showBadge = config.count > 1;
+        elements.badge.textContent = showBadge ? config.count : '';
+        elements.badge.style.display = showBadge ? 'inline-block' : 'none';
+        elements.toast.classList.toggle('batch', showBadge);
+    }
+
+    // Set navigation
+    elements.toast.href = config.href;
+    elements.toast.onclick = config.clickAction;
+
+    return elements.toast;
+}
+
+// Display batched toast notification (orchestration)
+function displayBatchedToast() {
+    if (batchedFiles.size === 0) return;
+
+    const files = Array.from(batchedFiles.values());
+    const config = formatBatchMessage(files);
+    config.count = files.length;
+
+    const toast = updateToastDOM(config);
+    if (!toast) return; // Error logged in helper
+
+    // Store single file path for navigation
+    toastFilePath = files.length === 1 ? files[0].path : null;
+
+    // Show toast
     toast.style.display = 'flex';
     toast.classList.add('show');
 
@@ -340,11 +501,13 @@ function showToast(message, filePath) {
         clearTimeout(toastTimeout);
     }
 
-    // Auto-hide after 5 seconds
-    toastTimeout = setTimeout(hideToast, 5000);
+    // Auto-hide after duration
+    const duration = files.length > 1 ? TOAST_CONFIG.BATCH_DURATION : TOAST_CONFIG.SINGLE_DURATION;
+    toastTimeout = setTimeout(hideToast, duration);
 
-    // Save to notification history
-    saveNotification(message, filePath);
+    // Clear batch state
+    batchedFiles.clear();
+    batchTimer = null;
 }
 
 function hideToast() {
@@ -354,10 +517,10 @@ function hideToast() {
     toast.classList.remove('show');
     toastFilePath = null;
 
-    // Hide completely after transition completes (300ms per CSS)
+    // Hide completely after transition completes
     setTimeout(() => {
         toast.style.display = 'none';
-    }, 300);
+    }, TOAST_CONFIG.TRANSITION_TIME);
 }
 
 // ===== Connection Status Functions =====
@@ -557,6 +720,89 @@ function downloadHTML() {
     });
 }
 
+// ===== Tree State Persistence =====
+
+const TREE_STATE_KEY = 'peekm_tree_state';
+
+// Save tree expansion state and scroll position to sessionStorage
+function saveTreeState() {
+    try {
+        const fileTree = document.getElementById('file-tree');
+        if (!fileTree) return;
+
+        const expandedDirs = [];
+        const directories = fileTree.querySelectorAll('.tree-directory');
+
+        directories.forEach(dir => {
+            // Save directories that are NOT collapsed (i.e., expanded)
+            if (dir.dataset.collapsed !== 'true') {
+                // Use directory text (without expand icon) as identifier
+                const text = Array.from(dir.childNodes)
+                    .filter(node => node.nodeType === Node.TEXT_NODE)
+                    .map(node => node.textContent.trim())
+                    .join('');
+
+                if (text) {
+                    expandedDirs.push(text);
+                }
+            }
+        });
+
+        const state = {
+            expandedDirs,
+            scrollY: window.scrollY
+        };
+
+        sessionStorage.setItem(TREE_STATE_KEY, JSON.stringify(state));
+        console.log('[TreeState] Saved state:', state);
+    } catch (error) {
+        console.error('[TreeState] Failed to save:', error);
+    }
+}
+
+// Restore tree expansion state and scroll position from sessionStorage
+function restoreTreeState() {
+    try {
+        const stored = sessionStorage.getItem(TREE_STATE_KEY);
+        if (!stored) return;
+
+        const state = JSON.parse(stored);
+        const fileTree = document.getElementById('file-tree');
+        if (!fileTree) return;
+
+        console.log('[TreeState] Restoring state:', state);
+
+        // Restore expanded directories
+        const directories = fileTree.querySelectorAll('.tree-directory');
+
+        directories.forEach(dir => {
+            // Get directory text (without expand icon)
+            const text = Array.from(dir.childNodes)
+                .filter(node => node.nodeType === Node.TEXT_NODE)
+                .map(node => node.textContent.trim())
+                .join('');
+
+            const shouldBeExpanded = state.expandedDirs.includes(text);
+            const isCurrentlyCollapsed = dir.dataset.collapsed === 'true';
+
+            // If directory should be expanded but is currently collapsed, toggle it
+            if (shouldBeExpanded && isCurrentlyCollapsed) {
+                toggleDir(dir);
+            }
+        });
+
+        // Restore scroll position (after a small delay to ensure DOM is settled)
+        if (state.scrollY !== undefined) {
+            setTimeout(() => {
+                window.scrollTo(0, state.scrollY);
+                console.log('[TreeState] Restored scroll position:', state.scrollY);
+            }, 50);
+        }
+    } catch (error) {
+        console.error('[TreeState] Failed to restore:', error);
+    }
+}
+
 // ===== Notification History Functions =====
 
 const NOTIFICATION_STORAGE_KEY = 'peekm_notification_history';
@@ -724,5 +970,189 @@ document.addEventListener('click', function(e) {
     // If click is outside both dropdown and button, close dropdown
     if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
         dropdown.style.display = 'none';
+    }
+});
+
+// ===== Focus Mode: Toggleable Sidebar Functions =====
+
+const SIDEBAR_STORAGE_KEY = 'peekm_sidebar_state';
+
+// Toggle sidebar visibility
+function toggleSidebar() {
+    const container = document.querySelector('.layout-container');
+    if (!container) return;
+
+    const isExpanded = container.dataset.sidebar === 'expanded';
+    const newState = isExpanded ? 'collapsed' : 'expanded';
+
+    container.dataset.sidebar = newState;
+
+    // Update button tooltip
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    if (toggleBtn) {
+        toggleBtn.title = newState === 'expanded'
+            ? 'Hide navigation (Cmd/Ctrl+B)'
+            : 'Show navigation (Cmd/Ctrl+B)';
+        toggleBtn.setAttribute('aria-label',
+            newState === 'expanded'
+                ? 'Hide navigation sidebar'
+                : 'Show navigation sidebar'
+        );
+    }
+
+    // Save preference to localStorage
+    try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, newState);
+    } catch (error) {
+        console.error('[Sidebar] Failed to save state:', error);
+    }
+
+    console.log('[Sidebar] Toggled to:', newState);
+}
+
+// Initialize sidebar state from localStorage
+function initializeSidebar() {
+    const content = document.getElementById('content');
+    if (!content) return;
+
+    const viewType = content.dataset.view;
+
+    // Unified layout: Always show sidebar (for 'file' and 'empty' views)
+    if (viewType === 'file' || viewType === 'empty') {
+        // Show hamburger button
+        updateSidebarToggleButton();
+
+        // Restore saved state or default to expanded (Persistent Navigation)
+        const container = document.querySelector('.layout-container');
+        if (!container) return;
+
+        try {
+            const savedState = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+            if (savedState === 'collapsed') {
+                // User explicitly hid it before, respect that
+                container.dataset.sidebar = 'collapsed';
+            } else {
+                // Default: show sidebar (visible by default)
+                container.dataset.sidebar = 'expanded';
+            }
+        } catch (error) {
+            console.error('[Sidebar] Failed to load state:', error);
+            // Fallback: show sidebar
+            container.dataset.sidebar = 'expanded';
+        }
+
+        // Update breadcrumb (only for file view)
+        if (viewType === 'file') {
+            updateBreadcrumb();
+            // Highlight current file in sidebar
+            highlightCurrentFile();
+        }
+    }
+}
+
+// Update hamburger button visibility
+function updateSidebarToggleButton() {
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    const content = document.getElementById('content');
+
+    if (!toggleBtn || !content) return;
+
+    const viewType = content.dataset.view;
+
+    // Show hamburger button in unified layout (file or empty views)
+    if (viewType === 'file' || viewType === 'empty') {
+        toggleBtn.style.display = 'inline-block';
+    } else {
+        toggleBtn.style.display = 'none';
+    }
+}
+
+// Note: syncSidebarContent() removed in unified layout
+// Tree is now rendered directly in sidebar by server template
+// and persists during SPA navigation
+
+// Generate and update breadcrumb trail
+function updateBreadcrumb() {
+    const breadcrumb = document.getElementById('breadcrumb');
+    const content = document.getElementById('content');
+
+    if (!breadcrumb || !content) return;
+
+    const browsePath = content.dataset.path || '';
+    const viewType = content.dataset.view;
+
+    if (viewType !== 'file' || !browsePath) {
+        breadcrumb.innerHTML = '';
+        return;
+    }
+
+    // Parse path and generate breadcrumb
+    const homeDir = browsePath.split('/').slice(0, 3).join('/'); // /Users/username
+    let relativePath = browsePath.replace(homeDir, '~');
+
+    // Split into segments
+    const segments = relativePath.split('/').filter(s => s.length > 0);
+
+    let breadcrumbHTML = '<a href="/">~</a>';
+    let currentPath = homeDir;
+
+    for (let i = 1; i < segments.length - 1; i++) {
+        const segment = segments[i];
+        currentPath += '/' + segment;
+        breadcrumbHTML += ` / <span>${escapeHtml(segment)}</span>`;
+    }
+
+    // Add current file (not clickable)
+    if (segments.length > 0) {
+        const fileName = segments[segments.length - 1];
+        breadcrumbHTML += ` / <span>${escapeHtml(fileName)}</span>`;
+    }
+
+    breadcrumb.innerHTML = breadcrumbHTML;
+
+    console.log('[Sidebar] Breadcrumb updated');
+}
+
+// Highlight current file in sidebar tree
+function highlightCurrentFile() {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'file') return;
+
+    // Remove existing highlights
+    const sidebarTree = document.getElementById('sidebar-tree');
+    if (!sidebarTree) return;
+
+    const allLinks = sidebarTree.querySelectorAll('.tree-file a');
+    allLinks.forEach(link => link.classList.remove('current'));
+
+    // Get current file path from URL
+    const currentPath = decodeURIComponent(window.location.pathname.replace('/view/', ''));
+
+    // Find and highlight matching link
+    for (let link of allLinks) {
+        const href = link.getAttribute('href');
+        if (href === `/view/${encodeURIComponent(currentPath)}` || href === `/view/${currentPath}`) {
+            link.classList.add('current');
+
+            // Scroll to highlighted item (with slight delay for transition)
+            setTimeout(() => {
+                link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 250);
+
+            console.log('[Sidebar] Highlighted current file');
+            break;
+        }
+    }
+}
+
+// Keyboard shortcut: Cmd/Ctrl+B toggles sidebar
+document.addEventListener('keydown', function(e) {
+    // Cmd+B (Mac) or Ctrl+B (Windows/Linux)
+    if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        const content = document.getElementById('content');
+        if (content && content.dataset.view === 'file') {
+            e.preventDefault();
+            toggleSidebar();
+        }
     }
 });

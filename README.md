@@ -53,10 +53,16 @@ peekm README.md
 
 ## Features That Matter
 
-### 🎯 **Focus Mode**
-- **Centered 900px layout** — optimized for reading, not scanning
-- **Clean GitHub styling** — familiar and beautiful
-- **Distraction-free** — no ads, popups, or navigation clutter
+### 🎯 **Persistent Navigation with Optional Zen Mode**
+
+Navigate your documentation with a familiar sidebar, just like VS Code or GitHub. Need full-width focus? Hit `Cmd/Ctrl+B` to hide the sidebar — zen mode on demand.
+
+- **Sidebar visible by default** — navigate projects without hunting
+- **280px tree view** — fits perfectly in left margin of centered content
+- **Cmd/Ctrl+B toggles zen mode** — hide sidebar for distraction-free reading
+- **Breadcrumb trail** — stay oriented even when sidebar is hidden
+- **Current file highlighting** — see your location in the project
+- **Smart state** — remembers your sidebar preference
 
 ### ⚡ **Zero Friction**
 - **Single binary** — download and run, nothing to install
@@ -66,7 +72,7 @@ peekm README.md
 ### 🔄 **Live Workflow**
 - **Auto-reload on save** — see changes instantly via Server-Sent Events
 - **Directory browser** — navigate projects without leaving the page
-  - 🌲 Collapsible directories (auto-collapsed at depth 2+)
+  - 🌲 Collapsible directories (auto-collapsed at depth 1+)
   - 📄 Pagination with "Load More" button (shows 5 items initially)
   - 🧭 Console-like navigation (λ button) - navigate between directories
 - **Theme switching** — comfortable reading any time of day (Light/Dark/Auto)
@@ -282,6 +288,7 @@ When you run `peekm README.md`, your markdown is displayed in a clean, centered 
 | **Best For** | Terminal purists | GitHub preview | VS Code users | AI workflows + modern dev |
 | **Live reload on file change** | ❌ Static | ❌ Manual refresh | ✅ | ✅ SSE-based |
 | **AI agent notifications** | ❌ | ❌ | ❌ | ✅ Toast popups |
+| **Persistent sidebar + zen mode** | ❌ | ❌ | ❌ Persistent only | ✅ Visible by default, Cmd/Ctrl+B to hide |
 | **Comfortable reading layout** | ❌ Terminal only | ❌ Full-width | ❌ Splits editor | ✅ Centered 900px |
 | **Interactive directory browser** | ✅ TUI list | ❌ Single file | ❌ File explorer | ✅ Web UI tree |
 | **Quick preview without editor** | ✅ | ✅ | ❌ Launches editor | ✅ |
@@ -298,11 +305,11 @@ When you run `peekm README.md`, your markdown is displayed in a clean, centered 
 
 ### Philosophy
 
-- **Simplicity** — One command, one file, instant preview
+- **Zero Friction** — One command, instant preview, smart defaults
 - **Speed** — Fast startup (< 100ms), instant reload
 - **Focus** — Centered layout for better readability
-- **Minimalism** — No bloat, no configuration files
-- **Quality** — Production-ready code with proper resource management
+- **Zero Dependencies** — Self-contained binary, no Python/Node/external files required
+- **Production Quality** — Proper error handling, security hardening, resource management
 
 ## Development
 
@@ -324,7 +331,7 @@ go build -ldflags "-X main.version=1.0.0 -X main.commit=$(git rev-parse HEAD) -X
 
 ```
 peekm/
-├── main.go                    # Core application (~1000 lines)
+├── main.go                    # Single-file Go implementation with embedded resources
 │   ├── Types                  # Named types with composition (baseTemplateData, etc.)
 │   ├── Helpers                # validateAndResolvePath, withRecovery, route registration
 │   ├── Factories              # newMarkdownRenderer, newBaseTemplateData
@@ -333,8 +340,9 @@ peekm/
     ├── github-markdown.css    # Official GitHub markdown CSS
     ├── theme-overrides.css    # Theme switching CSS
     ├── theme-manager.js       # Shared theme management logic
-    ├── single-file.html       # Single file viewer template
-    └── file-browser.html      # Directory browser template
+    ├── navigation.js          # SPA navigation and download functionality
+    ├── editor.js              # Markdown editing functionality
+    └── file-browser.html      # Unified template (browser + file views)
 ```
 
 ### Testing
@@ -360,7 +368,7 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 ### Development Guidelines
 
-- **Keep it simple** - Resist feature creep, maintain zen philosophy
+- **Focused scope** - Resist feature creep, every feature must solve a real user problem
 - **Code quality** - Follow Go best practices (proper error handling, resource cleanup, named types)
 - **DRY principle** - Extract common patterns to helpers/factories, avoid duplication
 - **Performance** - Minimize memory allocations, use efficient algorithms

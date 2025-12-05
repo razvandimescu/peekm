@@ -1,9 +1,8 @@
-<main id="content" data-view="{{if .Content}}file{{else}}browser{{end}}" data-path="{{.BrowsePath}}">
+<main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container">
         {{if .ShowBackButton}}
         <div class="header-actions">
-            <a href="/" class="back-button">← Back to File Browser</a>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; margin-left: auto;">
                 <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
                 <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
             </div>
@@ -13,12 +12,14 @@
         <h1>{{.Title}}</h1>
         <p class="subtitle">{{.Subtitle}}</p>
 
-        {{if .TreeHTML}}
-        <div class="tree" id="file-tree">{{.TreeHTML}}</div>
-        {{end}}
-
         {{if .Content}}
-        {{.Content}}
+            {{.Content}}
+        {{else}}
+            <!-- Empty state -->
+            <div class="empty-content">
+                <p>No markdown files found in this directory.</p>
+                <p>Create a <code>.md</code> file to get started.</p>
+            </div>
         {{end}}
     </div>
 </main>
