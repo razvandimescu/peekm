@@ -1,3 +1,14 @@
+<!-- Sidebar tree (for SPA navigation updates) -->
+<div id="sidebar-tree" style="display: none;">
+    {{if .TreeHTML}}
+        <div class="tree sidebar-tree">{{.TreeHTML}}</div>
+    {{else}}
+        <div class="empty-sidebar">
+            <p>No markdown files found</p>
+        </div>
+    {{end}}
+</div>
+
 <main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container">
         {{if .ShowBackButton}}
