@@ -817,12 +817,11 @@ async function refreshTree() {
             return;
         }
 
-        // 1. Capture current state
-        const expandedPaths = captureExpandedPaths();
+        // 1. Capture scroll position
         const sidebarContent = document.querySelector('.sidebar-content');
         const scrollPos = sidebarContent ? sidebarContent.scrollTop : 0;
 
-        console.log('[refreshTree] Captured state:', { expandedPaths, scrollPos });
+        console.log('[refreshTree] Refreshing tree, scroll pos:', scrollPos);
 
         // 2. Fetch fresh tree HTML from server
         const response = await fetch('/tree-html', {
@@ -841,8 +840,8 @@ async function refreshTree() {
         // 3. Replace tree DOM
         fileTree.innerHTML = html;
 
-        // 4. Restore expanded state
-        restoreExpandedPaths(expandedPaths);
+        // 4. Restore expanded state from localStorage
+        restoreTreeState();
 
         // 5. Restore scroll position
         if (sidebarContent) {
@@ -854,46 +853,6 @@ async function refreshTree() {
         console.error('[refreshTree] Error:', error);
         // Don't crash - graceful degradation
     }
-}
-
-// Capture expanded directory paths
-function captureExpandedPaths() {
-    const fileTree = document.querySelector('.sidebar-tree');
-    if (!fileTree) return [];
-
-    const expanded = [];
-    const directories = fileTree.querySelectorAll('.tree-directory');
-
-    directories.forEach(dir => {
-        // Capture directories that are NOT collapsed (i.e., expanded)
-        if (dir.dataset.collapsed !== 'true') {
-            const path = dir.dataset.path;
-            if (path) {
-                expanded.push(path);
-            }
-        }
-    });
-
-    return expanded;
-}
-
-// Restore expanded directory paths
-function restoreExpandedPaths(paths) {
-    if (!paths || paths.length === 0) return;
-
-    const fileTree = document.querySelector('.sidebar-tree');
-    if (!fileTree) return;
-
-    paths.forEach(path => {
-        // Find directory by data-path attribute
-        const dir = fileTree.querySelector(`.tree-directory[data-path="${CSS.escape(path)}"]`);
-        if (dir && dir.dataset.collapsed === 'true') {
-            // Toggle to expand it
-            toggleDir(dir);
-        }
-    });
-
-    console.log('[refreshTree] Restored', paths.length, 'expanded directories');
 }
 
 // Schedule tree refresh with debouncing (batches rapid updates)
@@ -967,7 +926,7 @@ function getTreeStateKey() {
     }
 }
 
-// Save tree expansion state and scroll position to sessionStorage
+// Save tree expansion state and scroll position to localStorage
 function saveTreeState() {
     try {
         const storageKey = getTreeStateKey();
@@ -996,20 +955,20 @@ function saveTreeState() {
             scrollY: window.scrollY
         };
 
-        sessionStorage.setItem(storageKey, JSON.stringify(state));
+        localStorage.setItem(storageKey, JSON.stringify(state));
         console.log('[TreeState] Saved state for', storageKey, ':', state);
     } catch (error) {
         console.error('[TreeState] Failed to save:', error);
     }
 }
 
-// Restore tree expansion state and scroll position from sessionStorage
+// Restore tree expansion state and scroll position from localStorage
 function restoreTreeState() {
     try {
         const storageKey = getTreeStateKey();
         if (!storageKey) return;
 
-        const stored = sessionStorage.getItem(storageKey);
+        const stored = localStorage.getItem(storageKey);
         if (!stored) return;
 
         const state = JSON.parse(stored);
@@ -1026,10 +985,21 @@ function restoreTreeState() {
             const path = dir.dataset.path;
 
             const shouldBeExpanded = state.expandedDirs.includes(path);
-            const isCurrentlyCollapsed = dir.dataset.collapsed === 'true';
 
-            // If directory should be expanded but is currently collapsed, toggle it
+            // Check actual visual state by looking at childrenContainer display
+            const treeItem = dir.closest('.tree-item');
+            const childrenContainer = treeItem?.querySelector('.tree-children');
+
+            if (!childrenContainer) return; // No children, skip
+
+            const isCurrentlyCollapsed = childrenContainer.style.display === 'none';
+
+            // Toggle if current state doesn't match desired state
             if (shouldBeExpanded && isCurrentlyCollapsed) {
+                // Should be expanded but is collapsed - expand it
+                toggleDir(dir);
+            } else if (!shouldBeExpanded && !isCurrentlyCollapsed) {
+                // Should be collapsed but is expanded - collapse it
                 toggleDir(dir);
             }
         });

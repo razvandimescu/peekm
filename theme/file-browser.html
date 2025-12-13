@@ -73,11 +73,6 @@
             border-left: 1px solid var(--borderColor-muted);
             margin-left: 18px; /* Align with chevron center (20px width / 2 - 1px border) */
             padding-left: 0;
-            opacity: 0.6;
-        }
-
-        [data-color-mode="dark"] .tree-children {
-            opacity: 0.4;
         }
 
         .tree-directory {
@@ -1841,6 +1836,8 @@
         });
 
         // Directory collapse/expand functionality
+        // Note: Tree state persistence functions (getTreeState, saveTreeState, restoreTreeState)
+        // are now defined in navigation.js for unified state management
         function toggleDir(dirElement) {
             const treeItem = dirElement.closest('.tree-item');
             const childrenContainer = treeItem.querySelector('.tree-children');
@@ -1849,14 +1846,22 @@
             if (!childrenContainer || !icon) return;
 
             // Toggle visibility
-            if (childrenContainer.style.display === 'none') {
+            const isExpanded = childrenContainer.style.display === 'none';
+            if (isExpanded) {
                 // Expand
                 childrenContainer.style.display = 'block';
                 icon.textContent = '▼';
+                dirElement.dataset.collapsed = 'false';
             } else {
                 // Collapse
                 childrenContainer.style.display = 'none';
                 icon.textContent = '▶';
+                dirElement.dataset.collapsed = 'true';
+            }
+
+            // Save state to localStorage (function defined in navigation.js)
+            if (typeof saveTreeState === 'function') {
+                saveTreeState();
             }
         }
 
@@ -2148,6 +2153,11 @@
         // Call initialization when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             initializeSessionInfo();
+
+            // Restore tree state from localStorage (function defined in navigation.js)
+            if (typeof restoreTreeState === 'function') {
+                restoreTreeState();
+            }
 
             // Update timestamps every minute
             setInterval(() => {
