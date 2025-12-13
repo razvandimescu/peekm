@@ -580,6 +580,20 @@ function updateConnectionStatus(count) {
 
 // ===== Dynamic Tree Manipulation =====
 
+// Update the file count in the subtitle
+function updateFileCount(delta) {
+    const subtitle = document.querySelector('.subtitle');
+    if (subtitle) {
+        const match = subtitle.textContent.match(/(\d+) markdown file/);
+        if (match) {
+            const currentCount = parseInt(match[1]);
+            const newCount = Math.max(0, currentCount + delta);
+            subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
+            console.log(`[updateFileCount] Updated count from ${currentCount} to ${newCount}`);
+        }
+    }
+}
+
 // Dynamically insert a new file into the tree
 // Note: Event delegation from body.addEventListener('click', interceptLinks)
 // automatically handles SPA navigation for dynamically inserted links
@@ -692,15 +706,7 @@ function insertFileIntoTree(filePath) {
         }
 
         // Update file count in subtitle
-        const subtitle = document.querySelector('.subtitle');
-        if (subtitle) {
-            const match = subtitle.textContent.match(/(\d+) markdown file/);
-            if (match) {
-                const newCount = parseInt(match[1]) + 1;
-                subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-                console.log('[insertFileIntoTree] Updated count to:', newCount);
-            }
-        }
+        updateFileCount(1);
 
         console.log('[insertFileIntoTree] Successfully added file');
     } catch (error) {
@@ -753,15 +759,7 @@ function removeFileFromTree(filePath) {
         }
 
         // Update file count in subtitle
-        const subtitle = document.querySelector('.subtitle');
-        if (subtitle) {
-            const match = subtitle.textContent.match(/(\d+) markdown file/);
-            if (match) {
-                const newCount = Math.max(0, parseInt(match[1]) - 1);
-                subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-                console.log('[removeFileFromTree] Updated count to:', newCount);
-            }
-        }
+        updateFileCount(-1);
 
         console.log('[removeFileFromTree] Successfully removed file');
     } catch (error) {
