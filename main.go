@@ -827,6 +827,48 @@ func main() {
 }
 
 
+// getRelativePath converts absolute file path to relative path (thread-safe)
+func getRelativePath(absPath string) string {
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+
+	relPath := absPath
+	if browseDir != "" {
+		if rel, err := filepath.Rel(browseDir, absPath); err == nil {
+			relPath = rel
+		}
+	}
+	return relPath
+}
+
+// removeFromWhitelist removes a file from the markdown files list (thread-safe)
+func removeFromWhitelist(filePath string) {
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+
+	for i, f := range markdownFiles {
+		if f == filePath {
+			markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
+			break
+		}
+	}
+}
+
+// sendFileEvent sends a file event notification to clients
+func sendFileEvent(eventType, relPath, sessionID string) {
+	msg := fileEventMessage{
+		Type:    eventType,
+		Path:    relPath,
+		Session: sessionID,
+	}
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Error marshaling %s message: %v", eventType, err)
+	} else {
+		notifyClientsWithMessage(string(msgBytes))
+	}
+}
+
 func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePath string) {
 	for {
 		select {
@@ -899,59 +941,36 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 					markdownFiles = append(markdownFiles, event.Name)
 					fileMutex.Unlock()
 
-					// Notify clients about the new file with JSON message
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
-						}
-					}
-					fileMutex.RUnlock()
+					// Delay notification to wait for PostToolUse hook (up to 5s)
+					go func(filePath string) {
+						sessionID := ""
+						if globalSessionStore != nil {
+							// Poll for session registration (check every 100ms, max 5s)
+							timeout := time.After(5 * time.Second)
+							ticker := time.NewTicker(100 * time.Millisecond)
+							defer ticker.Stop()
 
-				// Delay notification to wait for PostToolUse hook (up to 5s)
-				go func(filePath, relPath string) {
-					sessionID := ""
-					if globalSessionStore != nil {
-						// Poll for session registration (check every 100ms, max 5s)
-						timeout := time.After(5 * time.Second)
-						ticker := time.NewTicker(100 * time.Millisecond)
-						defer ticker.Stop()
-
-						for {
-							select {
-							case <-timeout:
-								// Timeout reached, send notification with or without session
-								if metadata, found := globalSessionStore.get(filePath); found {
-									sessionID = metadata.SessionID
-								}
-								goto sendNotification
-							case <-ticker.C:
-								// Check if session has been registered
-								if metadata, found := globalSessionStore.get(filePath); found {
-									sessionID = metadata.SessionID
+							for {
+								select {
+								case <-timeout:
+									// Timeout reached, send notification with or without session
+									if metadata, found := globalSessionStore.get(filePath); found {
+										sessionID = metadata.SessionID
+									}
 									goto sendNotification
+								case <-ticker.C:
+									// Check if session has been registered
+									if metadata, found := globalSessionStore.get(filePath); found {
+										sessionID = metadata.SessionID
+										goto sendNotification
+									}
 								}
 							}
 						}
-					}
 
-				sendNotification:
-					// Use json.Marshal for proper escaping (prevents JSON injection)
-					msg := fileEventMessage{
-						Type:    "file_added",
-						Path:    relPath,
-						Session: sessionID,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file added message: %v", err)
-					} else {
-						notifyClientsWithMessage(string(msgBytes))
-					}
-				}(event.Name, relPath)
-
-					// Note: No scheduleRefresh() needed - client handles insertion dynamically
+					sendNotification:
+						sendFileEvent("file_added", getRelativePath(filePath), sessionID)
+					}(event.Name)
 				}
 			}
 
@@ -959,40 +978,8 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 			if event.Op&fsnotify.Remove == fsnotify.Remove {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					log.Printf("Deleted file: %s", event.Name)
-
-					// Remove from whitelist immediately
-					fileMutex.Lock()
-					for i, f := range markdownFiles {
-						if f == event.Name {
-							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
-							break
-						}
-					}
-					fileMutex.Unlock()
-
-					// Notify clients about the removed file with JSON message
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
-						}
-					}
-					fileMutex.RUnlock()
-
-					// Use json.Marshal for proper escaping
-					msg := fileEventMessage{
-						Type: "file_removed",
-						Path: relPath,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file removed message: %v", err)
-					} else {
-						notifyClientsWithMessage(string(msgBytes))
-					}
-
-					// Note: No scheduleRefresh() needed - client handles removal dynamically
+					removeFromWhitelist(event.Name)
+					sendFileEvent("file_removed", getRelativePath(event.Name), "")
 				}
 			}
 
@@ -1001,39 +988,8 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 			if event.Op&fsnotify.Rename == fsnotify.Rename {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					log.Printf("Renamed file: %s", event.Name)
-
-					// Remove from whitelist (CREATE event will add it back with new name)
-					fileMutex.Lock()
-					for i, f := range markdownFiles {
-						if f == event.Name {
-							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
-							break
-						}
-					}
-					fileMutex.Unlock()
-
-					// Notify clients about the removed file (new name will trigger CREATE event)
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
-						}
-					}
-					fileMutex.RUnlock()
-
-					msg := fileEventMessage{
-						Type: "file_removed",
-						Path: relPath,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file removed message: %v", err)
-					} else{
-						notifyClientsWithMessage(string(msgBytes))
-					}
-
-					// Note: No scheduleRefresh() needed - client handles removal dynamically
+					removeFromWhitelist(event.Name)
+					sendFileEvent("file_removed", getRelativePath(event.Name), "")
 				}
 			}
 
