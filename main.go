@@ -586,6 +586,26 @@ func validateAndResolvePath(targetPath string) (string, error) {
 	return targetPath, nil
 }
 
+// resolveFilePath converts a relative file path to absolute using browseDir
+// Thread-safe helper to eliminate duplication across handlers
+func resolveFilePath(relativePath string) string {
+	// Get current browse directory (thread-safe)
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	// Convert relative path to absolute by joining with browseDir
+	var absFilePath string
+	if filepath.IsAbs(relativePath) {
+		absFilePath = relativePath
+	} else {
+		absFilePath = filepath.Join(currentBrowseDir, relativePath)
+	}
+
+	// Clean the absolute path
+	return filepath.Clean(absFilePath)
+}
+
 func init() {
 	// Load CSS files
 	cssData, err := themeFS.ReadFile("theme/github-markdown.css")
@@ -1034,21 +1054,8 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 	// Clean the path
 	filePath = filepath.Clean(filePath)
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(filePath) {
-		absFilePath = filePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, filePath)
-	}
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -1085,16 +1092,8 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	// Clean the path and strip leading slash (web paths are relative to browse dir)
 	filePath = filepath.Clean(strings.TrimPrefix(filePath, "/"))
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	// Always join with browse directory (web paths are relative)
-	absFilePath := filepath.Join(currentBrowseDir, filePath)
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -1657,25 +1656,13 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	// Clean the path
 	filePath = filepath.Clean(filePath)
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(filePath) {
-		absFilePath = filePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, filePath)
-	}
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
-
-	// Security: check if file is in our markdown files whitelist
+	// Security: check if file is in our markdown files whitelist (thread-safe)
 	// This prevents directory traversal attacks by only allowing pre-scanned files
 	fileMutex.RLock()
+	currentBrowseDir := browseDir // Also capture for template data
 	found := false
 	for _, f := range markdownFiles {
 		if f == absFilePath {
