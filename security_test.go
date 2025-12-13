@@ -190,26 +190,31 @@ func TestCollectMarkdownFiles_SymlinkSecurity(t *testing.T) {
 	}
 }
 
-// TestCollectMarkdownFiles_HiddenDirectories tests that hidden dirs are skipped
-func TestCollectMarkdownFiles_HiddenDirectories(t *testing.T) {
+// TestCollectMarkdownFiles_HardcodedExclusions tests that hardcoded exclusions are skipped
+func TestCollectMarkdownFiles_HardcodedExclusions(t *testing.T) {
 	testDir := t.TempDir()
 
 	// Create files in various locations
 	os.WriteFile(filepath.Join(testDir, "root.md"), []byte("# Root"), 0644)
 
-	// Hidden directory (should be skipped)
+	// Hidden directory (.hidden - should be EXCLUDED)
 	os.Mkdir(filepath.Join(testDir, ".hidden"), 0755)
 	os.WriteFile(filepath.Join(testDir, ".hidden", "secret.md"), []byte("# Secret"), 0644)
 
-	// node_modules (should be skipped)
+	// .claude directory (should be INCLUDED - whitelisted for AI workflows)
+	os.Mkdir(filepath.Join(testDir, ".claude"), 0755)
+	os.Mkdir(filepath.Join(testDir, ".claude", "plans"), 0755)
+	os.WriteFile(filepath.Join(testDir, ".claude", "plans", "feature.md"), []byte("# Feature"), 0644)
+
+	// node_modules (should be skipped - hardcoded exclusion)
 	os.Mkdir(filepath.Join(testDir, "node_modules"), 0755)
 	os.WriteFile(filepath.Join(testDir, "node_modules", "lib.md"), []byte("# Lib"), 0644)
 
-	// vendor (should be skipped)
+	// vendor (should be skipped - hardcoded exclusion)
 	os.Mkdir(filepath.Join(testDir, "vendor"), 0755)
 	os.WriteFile(filepath.Join(testDir, "vendor", "dep.md"), []byte("# Dep"), 0644)
 
-	// dist (should be skipped)
+	// dist (should be skipped - hardcoded exclusion)
 	os.Mkdir(filepath.Join(testDir, "dist"), 0755)
 	os.WriteFile(filepath.Join(testDir, "dist", "build.md"), []byte("# Build"), 0644)
 
@@ -219,28 +224,36 @@ func TestCollectMarkdownFiles_HiddenDirectories(t *testing.T) {
 
 	files := collectMarkdownFiles(testDir)
 
-	if len(files) != 2 {
-		t.Errorf("expected 2 files, got %d: %v", len(files), files)
+	if len(files) != 3 {
+		t.Errorf("expected 3 files (root.md, feature.md, doc.md), got %d: %v", len(files), files)
 	}
 
-	// Verify only root.md and doc.md are included
+	// Verify root.md, feature.md, and doc.md are included
 	hasRoot := false
+	hasClaude := false
 	hasDoc := false
 	for _, f := range files {
 		if strings.Contains(f, "root.md") {
 			hasRoot = true
 		}
+		if strings.Contains(f, "feature.md") {
+			hasClaude = true
+		}
 		if strings.Contains(f, "doc.md") {
 			hasDoc = true
 		}
+		// Verify exclusions are NOT included
 		if strings.Contains(f, "secret.md") || strings.Contains(f, "lib.md") ||
 			strings.Contains(f, "dep.md") || strings.Contains(f, "build.md") {
-			t.Errorf("should not include files from hidden/excluded dirs: %s", f)
+			t.Errorf("should not include files from excluded dirs: %s", f)
 		}
 	}
 
 	if !hasRoot {
 		t.Error("root.md should be included")
+	}
+	if !hasClaude {
+		t.Error("feature.md from .claude folder should be included (whitelisted)")
 	}
 	if !hasDoc {
 		t.Error("doc.md should be included")
