@@ -646,17 +646,25 @@ func init() {
 		},
 	}
 
+	// Load shared session info panel template
+	sessionInfoPanelHTML, err := themeFS.ReadFile("theme/session-info-panel.html")
+	if err != nil {
+		log.Fatalf("Failed to load session-info-panel template: %v", err)
+	}
+
 	fileBrowserHTML, err := themeFS.ReadFile("theme/file-browser.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
 	}
 	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
 
 	fileBrowserPartialHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser-partial template: %v", err)
 	}
 	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserPartialHTML)))
+	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
 }
 
 func main() {
