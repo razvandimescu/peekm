@@ -1319,6 +1319,7 @@
         }
 
         /* Session Badges - Consolidated with CSS Custom Properties */
+        /* Badge Base Styles */
         .session-operation-badge,
         .session-permission-badge {
             display: inline-block;
@@ -1334,14 +1335,16 @@
             border: 1px solid var(--badge-border);
         }
 
-        /* Operation Badge Colors */
-        .session-operation-Write {
+        /* Color Variants (Green, Orange, Purple, Blue) */
+        .session-operation-Write,
+        .session-permission-default {
             --badge-bg: rgba(46, 164, 79, 0.15);
             --badge-color: #2ea44f;
             --badge-border: rgba(46, 164, 79, 0.3);
         }
 
-        .session-operation-Edit {
+        .session-operation-Edit,
+        .session-permission-plan {
             --badge-bg: rgba(255, 165, 0, 0.15);
             --badge-color: #d97706;
             --badge-border: rgba(255, 165, 0, 0.3);
@@ -1353,26 +1356,13 @@
             --badge-border: rgba(139, 92, 246, 0.3);
         }
 
-        /* Permission Badge Colors */
-        .session-permission-default {
-            --badge-bg: rgba(46, 164, 79, 0.15);
-            --badge-color: #2ea44f;
-            --badge-border: rgba(46, 164, 79, 0.3);
-        }
-
-        .session-permission-plan {
-            --badge-bg: rgba(255, 165, 0, 0.15);
-            --badge-color: #d97706;
-            --badge-border: rgba(255, 165, 0, 0.3);
-        }
-
         .session-permission-acceptEdits {
             --badge-bg: rgba(59, 130, 246, 0.15);
             --badge-color: #2563eb;
             --badge-border: rgba(59, 130, 246, 0.3);
         }
 
-        /* Dark Theme Overrides */
+        /* Dark Theme */
         [data-theme="dark"] .session-operation-Write,
         [data-theme="dark"] .session-permission-default {
             --badge-bg: rgba(46, 164, 79, 0.2);

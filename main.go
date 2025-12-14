@@ -209,12 +209,6 @@ func (eb *eventBuffer) getAfter(lastID string) []eventRecord {
 	return result
 }
 
-// sessionMapping tracks which Claude Code session last modified a file
-type sessionMapping struct {
-	metadata  *SessionMetadata
-	timestamp time.Time
-}
-
 // SessionMetadata contains complete Claude Code session information
 type SessionMetadata struct {
 	SessionID      string    `json:"session_id"`
@@ -229,40 +223,29 @@ type SessionMetadata struct {
 // sessionStore maintains persistent mapping of file paths to session metadata
 type sessionStore struct {
 	mu       sync.RWMutex
-	mappings map[string]sessionMapping
-	ttl      time.Duration // Kept for potential future cleanup, but not used for expiration
+	mappings map[string]*SessionMetadata
 }
 
 // newSessionStore creates a session store (session data persists indefinitely)
-func newSessionStore(ttl time.Duration) *sessionStore {
+func newSessionStore() *sessionStore {
 	return &sessionStore{
-		mappings: make(map[string]sessionMapping),
-		ttl:      ttl,
+		mappings: make(map[string]*SessionMetadata),
 	}
 }
 
-// register stores session metadata for a file path with current timestamp
+// register stores session metadata for a file path (persists indefinitely)
 func (ss *sessionStore) register(filePath string, metadata *SessionMetadata) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-
-	ss.mappings[filePath] = sessionMapping{
-		metadata:  metadata,
-		timestamp: time.Now(),
-	}
+	ss.mappings[filePath] = metadata
 }
 
-// get retrieves session metadata for a file path (persists indefinitely)
+// get retrieves session metadata for a file path
 func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
-
-	mapping, exists := ss.mappings[filePath]
-	if !exists {
-		return nil, false
-	}
-
-	return mapping.metadata, true
+	metadata, exists := ss.mappings[filePath]
+	return metadata, exists
 }
 
 // newBaseTemplateData creates a baseTemplateData with embedded resources
@@ -713,10 +696,8 @@ func main() {
 
 	// Initialize Claude Code session tracking if enabled
 	if *enableClaudeHook {
-		globalSessionStore = newSessionStore(5 * time.Second)
+		globalSessionStore = newSessionStore()
 		log.Println("Claude Code hook integration enabled (session data persists indefinitely)")
-
-		// Note: No cleanup goroutine - sessions persist indefinitely in memory
 	}
 
 	// Determine target path (default to current directory)
