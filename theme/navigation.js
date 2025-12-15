@@ -939,14 +939,18 @@ function saveTreeState() {
         const directories = fileTree.querySelectorAll('.tree-directory');
 
         directories.forEach(dir => {
-            // Save directories that are NOT collapsed (i.e., expanded)
-            if (dir.dataset.collapsed !== 'true') {
-                // Use data-path attribute for unique identification
-                const path = dir.dataset.path;
+            const path = dir.dataset.path;
+            if (!path) return;
 
-                if (path) {
-                    expandedDirs.push(path);
-                }
+            // Check actual visual state (not data attribute, which may not be set by server)
+            const treeItem = dir.closest('.tree-item');
+            const childrenContainer = treeItem?.querySelector('.tree-children');
+            if (!childrenContainer) return;
+
+            // Save only directories that are visually expanded
+            const isCollapsed = childrenContainer.style.display === 'none';
+            if (!isCollapsed) {
+                expandedDirs.push(path);
             }
         });
 
