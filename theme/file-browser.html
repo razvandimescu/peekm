@@ -44,6 +44,10 @@
         }
 
         .tree-item {
+            /* Container for tree nodes - no direct styling, just structure */
+        }
+
+        .tree-node {
             height: 22px;
             padding: 0 8px;
             display: flex;
@@ -55,13 +59,20 @@
             min-width: 0;
         }
 
-        .tree-item:hover {
+        .tree-node:hover {
             background: rgba(128, 128, 128, 0.07);
         }
 
-        .tree-item:focus-visible {
+        .tree-node:focus-visible {
             outline: 1px solid var(--fgColor-accent);
             outline-offset: -1px;
+        }
+
+        .tree-children {
+            /* Nested children container with vertical guide line */
+            border-left: 1px solid var(--borderColor-muted);
+            margin-left: 18px; /* Align with chevron center (20px width / 2 - 1px border) */
+            padding-left: 0;
         }
 
         .tree-directory {
@@ -69,9 +80,9 @@
             font-weight: 500;
             cursor: pointer;
             user-select: none;
-            display: inline-flex;
+            display: flex;
             align-items: center;
-            max-width: 100%;
+            width: 100%;
             overflow: hidden;
         }
 
@@ -100,16 +111,12 @@
             opacity: 1;
         }
 
-        .tree-item.hidden {
-            display: none;
-        }
-
 
         .tree-file {
             color: var(--fgColor-default);
-            display: inline-block;
+            display: block;
             font-weight: 400;
-            max-width: 100%;
+            width: 100%;
             overflow: hidden;
         }
 
@@ -122,6 +129,11 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        .tree-file a:visited {
+            color: var(--fgColor-default);
+            opacity: 0.9;
         }
 
         .tree-file a:hover {
@@ -463,13 +475,23 @@
             position: fixed;
             top: 76px;
             right: 20px;
-            background: var(--bgColor-muted);
-            border: 1px solid var(--borderColor-default);
+            /* Ensure solid, opaque backgrounds */
+            background: rgb(255, 255, 255) !important;
+            /* Add backdrop blur for additional isolation */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--borderColor-emphasis);
             border-left: 4px solid var(--fgColor-accent);
             border-radius: 6px;
             padding: 16px 20px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            z-index: 3000;
+            /* Enhanced shadow for better depth perception */
+            box-shadow:
+                0 4px 6px rgba(0, 0, 0, 0.1),
+                0 8px 24px rgba(0, 0, 0, 0.2),
+                0 12px 48px rgba(0, 0, 0, 0.15);
+            /* Ensure toast is above everything */
+            z-index: 10000;
+            isolation: isolate;
             opacity: 0;
             transform: translateY(-20px);
             transition: all 0.3s ease;
@@ -477,18 +499,42 @@
             max-width: 400px;
             cursor: pointer;
             text-decoration: none;
-            color: var(--fgColor-default);
+            color: rgb(36, 41, 47) !important;
+            /* Force hardware acceleration */
+            will-change: transform, opacity;
+        }
+
+        [data-theme="dark"] .toast {
+            color: rgb(230, 237, 243) !important;
+            /* Solid dark background */
+            background: rgb(28, 33, 40) !important;
+            /* Stronger shadow for dark theme */
+            box-shadow:
+                0 4px 6px rgba(0, 0, 0, 0.3),
+                0 8px 24px rgba(0, 0, 0, 0.5),
+                0 12px 48px rgba(0, 0, 0, 0.4);
         }
 
         .toast.show {
-            opacity: 1;
+            opacity: 1 !important;
             transform: translateY(0);
             pointer-events: auto;
         }
 
         .toast:hover {
-            background: var(--bgColor-neutral-muted);
-            border-color: var(--borderColor-emphasis);
+            /* Use solid colors for hover state */
+            transform: translateY(-2px);
+            box-shadow:
+                0 6px 8px rgba(0, 0, 0, 0.15),
+                0 10px 32px rgba(0, 0, 0, 0.25),
+                0 16px 56px rgba(0, 0, 0, 0.2);
+        }
+
+        [data-theme="dark"] .toast:hover {
+            box-shadow:
+                0 6px 8px rgba(0, 0, 0, 0.4),
+                0 10px 32px rgba(0, 0, 0, 0.6),
+                0 16px 56px rgba(0, 0, 0, 0.5);
         }
 
         .toast-content {
@@ -511,19 +557,27 @@
         }
 
         .toast-message {
-            color: var(--fgColor-default);
+            color: rgb(36, 41, 47) !important;
             font-size: 14px;
             line-height: 1.4;
             font-weight: 500;
         }
 
+        [data-theme="dark"] .toast-message {
+            color: rgb(230, 237, 243) !important;
+        }
+
         .toast-detail {
-            color: var(--fgColor-muted);
+            color: rgb(87, 96, 106) !important;
             font-size: 12px;
             line-height: 1.3;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        [data-theme="dark"] .toast-detail {
+            color: rgb(139, 148, 158) !important;
         }
 
         .toast-badge {
@@ -581,6 +635,7 @@
             flex-direction: column;
             overflow: hidden;
             position: relative;
+            transition: width 0.2s ease-out;
         }
 
         [data-color-mode="dark"] .file-sidebar {
@@ -588,8 +643,14 @@
             box-shadow: 1px 0 0 rgba(255, 255, 255, 0.04);
         }
 
-        [data-sidebar="collapsed"] .file-sidebar {
-            width: 0;
+        .layout-container[data-sidebar="collapsed"] .file-sidebar {
+            width: 0 !important;
+            border-right: none;
+            box-shadow: none;
+        }
+
+        .layout-container[data-sidebar="collapsed"] .sidebar-resize-handle {
+            display: none;
         }
 
         .sidebar-resize-handle {
@@ -721,7 +782,7 @@
             opacity: 1;
         }
 
-        .sidebar-content .tree-file a.current::before {
+        .sidebar-content .tree-node:has(.tree-file a.current)::before {
             content: "";
             position: absolute;
             left: 0;
@@ -810,12 +871,18 @@
                 box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
             }
 
-            [data-sidebar="expanded"] .file-sidebar {
+            .layout-container[data-sidebar="expanded"] .file-sidebar {
                 width: 280px;
             }
 
+            .layout-container[data-sidebar="collapsed"] .file-sidebar {
+                width: 0 !important;
+                border-right: none;
+                box-shadow: none;
+            }
+
             /* Backdrop for mobile */
-            [data-sidebar="expanded"]::before {
+            .layout-container[data-sidebar="expanded"]::before {
                 content: '';
                 position: fixed;
                 top: 56px;
@@ -1066,15 +1133,331 @@
             line-height: 1.4;
         }
 
+        .notification-item-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+
         .notification-item-time {
             font-size: 11px;
             color: var(--fgColor-muted);
+            flex-shrink: 0;
+        }
+
+        .session-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            background: var(--bgColor-accent-muted);
+            color: var(--fgColor-accent);
+            border-radius: 3px;
+            border: 1px solid var(--borderColor-accent-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+
+        /* Session Info Button */
+        .session-info-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            background-color: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            color: var(--fgColor-default);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .session-info-button:hover {
+            background-color: var(--bgColor-muted);
+            border-color: var(--borderColor-emphasis);
+        }
+
+        .session-info-button[aria-expanded="true"] {
+            background-color: rgba(9, 105, 218, 0.1);
+            border-color: var(--fgColor-accent);
+        }
+
+        [data-theme="dark"] .session-info-button[aria-expanded="true"] {
+            background-color: rgba(68, 147, 248, 0.15);
+        }
+
+        .session-info-button svg {
+            flex-shrink: 0;
+        }
+
+        .session-info-ai-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            line-height: 1;
+        }
+
+        /* Session Info Panel */
+        .session-info-panel {
+            margin: 20px 0;
+            padding: 16px;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-top: 3px solid var(--fgColor-accent);
+            border-radius: 6px;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            max-height: 0;
+            opacity: 0;
+        }
+
+        .session-info-panel[aria-hidden="false"] {
+            max-height: 800px;
+            opacity: 1;
+        }
+
+        .session-info-content {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .session-info-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .session-info-field {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--borderColor-muted);
+        }
+
+        .session-info-field:last-child {
+            border-bottom: none;
+        }
+
+        .session-info-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--fgColor-muted);
+            flex-shrink: 0;
+            min-width: 140px;
+        }
+
+        .session-info-value {
+            font-size: 13px;
+            color: var(--fgColor-default);
+            text-align: right;
+            word-break: break-all;
+            flex: 1;
+        }
+
+        .session-info-value code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 12px;
+            background: var(--bgColor-default);
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid var(--borderColor-muted);
+        }
+
+        .session-info-value-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            justify-content: flex-end;
+        }
+
+        .session-id-value {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Copy Button */
+        .session-copy-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            background: transparent;
+            border: 1px solid var(--borderColor-default);
+            border-radius: 4px;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .session-copy-button:hover {
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            border-color: var(--borderColor-emphasis);
+        }
+
+        .session-copy-button.copied {
+            background: #2ea44f;
+            color: white;
+            border-color: #2ea44f;
+        }
+
+        /* Session Badges - Consolidated with CSS Custom Properties */
+        /* Badge Base Styles */
+        .session-operation-badge,
+        .session-permission-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 10px;
+            line-height: 1;
+            background: var(--badge-bg);
+            color: var(--badge-color);
+            border: 1px solid var(--badge-border);
+        }
+
+        /* Color Variants (Green, Orange, Purple, Blue) */
+        .session-operation-Write,
+        .session-permission-default {
+            --badge-bg: rgba(46, 164, 79, 0.15);
+            --badge-color: #2ea44f;
+            --badge-border: rgba(46, 164, 79, 0.3);
+        }
+
+        .session-operation-Edit,
+        .session-permission-plan {
+            --badge-bg: rgba(255, 165, 0, 0.15);
+            --badge-color: #d97706;
+            --badge-border: rgba(255, 165, 0, 0.3);
+        }
+
+        .session-operation-NotebookEdit {
+            --badge-bg: rgba(139, 92, 246, 0.15);
+            --badge-color: #7c3aed;
+            --badge-border: rgba(139, 92, 246, 0.3);
+        }
+
+        .session-permission-acceptEdits {
+            --badge-bg: rgba(59, 130, 246, 0.15);
+            --badge-color: #2563eb;
+            --badge-border: rgba(59, 130, 246, 0.3);
+        }
+
+        /* Dark Theme */
+        [data-theme="dark"] .session-operation-Write,
+        [data-theme="dark"] .session-permission-default {
+            --badge-bg: rgba(46, 164, 79, 0.2);
+            --badge-color: #3fb950;
+        }
+
+        [data-theme="dark"] .session-operation-Edit,
+        [data-theme="dark"] .session-permission-plan {
+            --badge-bg: rgba(255, 165, 0, 0.2);
+            --badge-color: #f59e0b;
+        }
+
+        [data-theme="dark"] .session-operation-NotebookEdit {
+            --badge-bg: rgba(139, 92, 246, 0.2);
+            --badge-color: #a78bfa;
+        }
+
+        [data-theme="dark"] .session-permission-acceptEdits {
+            --badge-bg: rgba(59, 130, 246, 0.2);
+            --badge-color: #60a5fa;
+        }
+
+        /* Technical Details Collapsible */
+        .session-technical-details {
+            border-top: 1px solid var(--borderColor-muted);
+            padding-top: 12px;
+        }
+
+        .session-technical-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--fgColor-default);
+            padding: 8px 0;
+            list-style: none;
+            user-select: none;
+        }
+
+        .session-technical-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .session-technical-summary:hover {
+            color: var(--fgColor-accent);
+        }
+
+        .session-chevron {
+            transition: transform 0.2s ease-out;
+            flex-shrink: 0;
+        }
+
+        .session-technical-details[open] .session-chevron {
+            transform: rotate(90deg);
+        }
+
+        .session-technical-content {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        /* Timestamp styling */
+        .session-timestamp {
+            font-style: normal;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        }
+
+        /* Responsive: Hide technical details on mobile */
+        @media (max-width: 768px) {
+            .session-technical-details {
+                display: none;
+            }
+
+            .session-info-label {
+                min-width: 100px;
+                font-size: 12px;
+            }
+
+            .session-info-value {
+                font-size: 12px;
+            }
+
+            .session-id-value {
+                max-width: 150px;
+            }
         }
     </style>
 </head>
 <body class="markdown-body">
     <!-- Global UI elements (persist across navigation) -->
-    <a class="toast" id="toast" href="#" style="display: none;">
+    <a class="toast" id="toast" href="#">
         <div class="toast-content">
             <span class="toast-icon" id="toast-icon">📄</span>
             <div class="toast-text">
@@ -1235,14 +1618,33 @@
                 {{if .ShowBackButton}}
                 <div class="header-actions">
                     <div style="display: flex; gap: 8px; margin-left: auto;">
+                        {{if .SessionData}}
+                        <button
+                            id="sessionInfoButton"
+                            class="session-info-button"
+                            onclick="toggleSessionInfo()"
+                            aria-label="Show AI session information"
+                            aria-expanded="false"
+                            title="View AI session details"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-3a1 1 0 0 1 1 1v4a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1Zm0-2a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/>
+                            </svg>
+                            <span class="session-info-ai-badge">AI</span>
+                        </button>
+                        {{end}}
                         <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
-                        <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                        <button class="delete-button" onclick="confirmDelete()" title="Move this file to trash">🗑️ Delete File</button>
                     </div>
                 </div>
                 {{end}}
 
                 <h1>{{.Title}}</h1>
                 <p class="subtitle">{{.Subtitle}}</p>
+
+                {{if .SessionData}}
+                {{template "session-info-panel" .}}
+                {{end}}
 
                 {{if .Content}}
                     {{.Content}}
@@ -1378,7 +1780,7 @@
             const filePath = document.querySelector('.subtitle').textContent;
             const fileName = document.querySelector('h1').textContent;
 
-            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.`)) {
+            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.\n\nPress OK to delete or Cancel to abort (Esc to cancel)`)) {
                 deleteFile(filePath);
             }
         }
@@ -1406,6 +1808,7 @@
                 }
             })
             .catch(error => {
+                console.error('[Delete] Error:', error);
                 alert('Delete error: ' + error.message);
             });
         }
@@ -1423,53 +1826,340 @@
         });
 
         // Directory collapse/expand functionality
+        // Note: Tree state persistence functions (getTreeState, saveTreeState, restoreTreeState)
+        // are now defined in navigation.js for unified state management
         function toggleDir(dirElement) {
-            const isCollapsed = dirElement.dataset.collapsed === 'true';
-            let icon = dirElement.querySelector('.expand-icon');
             const treeItem = dirElement.closest('.tree-item');
-            const depth = parseInt(treeItem.dataset.depth) || 0;
+            const childrenContainer = treeItem.querySelector('.tree-children');
+            const icon = dirElement.querySelector('.expand-icon');
 
-            // Toggle chevron: ▶ when collapsed, ▼ when expanded
-            if (isCollapsed) {
-                // Expanding: show down chevron
-                if (icon) {
-                    icon.textContent = '▼';
-                }
-            } else {
-                // Collapsing: show right chevron
-                if (icon) {
-                    icon.textContent = '▶';
-                }
-            }
-            dirElement.dataset.collapsed = !isCollapsed;
+            if (!childrenContainer || !icon) return;
 
-            if (isCollapsed) {
-                dirElement.classList.remove('collapsed');
+            // Toggle visibility
+            const isExpanded = childrenContainer.style.display === 'none';
+            if (isExpanded) {
+                // Expand
+                childrenContainer.style.display = 'block';
+                icon.textContent = '▼';
+                dirElement.dataset.collapsed = 'false';
             } else {
-                dirElement.classList.add('collapsed');
+                // Collapse
+                childrenContainer.style.display = 'none';
+                icon.textContent = '▶';
+                dirElement.dataset.collapsed = 'true';
             }
 
-            // Toggle children visibility
-            let nextItem = treeItem.nextElementSibling;
-            while (nextItem && nextItem.classList.contains('tree-item')) {
-                const nextDepth = parseInt(nextItem.dataset.depth) || 0;
-                if (nextDepth <= depth) break;
-
-                if (nextDepth === depth + 1) {
-                    // Direct children - toggle visibility
-                    if (isCollapsed) {
-                        nextItem.classList.remove('hidden');
-                    } else {
-                        nextItem.classList.add('hidden');
-                    }
-                } else if (!isCollapsed) {
-                    // Nested children - hide when parent collapses
-                    nextItem.classList.add('hidden');
-                }
-
-                nextItem = nextItem.nextElementSibling;
+            // Save state to localStorage (function defined in navigation.js)
+            if (typeof saveTreeState === 'function') {
+                saveTreeState();
             }
         }
+
+        // Session Info Panel Toggle
+        function toggleSessionInfo() {
+            const button = document.getElementById('sessionInfoButton');
+            const panel = document.getElementById('sessionInfoPanel');
+
+            if (!button || !panel) return;
+
+            const isExpanded = button.getAttribute('aria-expanded') === 'true';
+
+            if (isExpanded) {
+                // Collapse
+                button.setAttribute('aria-expanded', 'false');
+                panel.setAttribute('aria-hidden', 'true');
+                panel.style.display = 'none';
+            } else {
+                // Expand
+                button.setAttribute('aria-expanded', 'true');
+                panel.setAttribute('aria-hidden', 'false');
+                panel.style.display = 'block';
+
+                // Smooth scroll into view
+                setTimeout(() => {
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 100);
+            }
+        }
+
+        // Copy to Clipboard with Visual Feedback
+        function copyToClipboard(text) {
+            if (!navigator.clipboard) {
+                // Fallback for browsers without clipboard API
+                console.warn('Clipboard API not available');
+                return;
+            }
+
+            navigator.clipboard.writeText(text).then(() => {
+                // Find the button that was clicked (event.target)
+                const buttons = document.querySelectorAll('.session-copy-button');
+                buttons.forEach(btn => {
+                    if (btn.onclick && btn.onclick.toString().includes(text)) {
+                        // Add copied class for visual feedback
+                        btn.classList.add('copied');
+                        btn.setAttribute('aria-label', 'Copied!');
+
+                        // Reset after 2 seconds
+                        setTimeout(() => {
+                            btn.classList.remove('copied');
+                            btn.setAttribute('aria-label', 'Copy session ID');
+                        }, 2000);
+                    }
+                });
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+
+        // Format ISO timestamp to relative time
+        function formatRelativeTime(isoTimestamp) {
+            const now = new Date();
+            const timestamp = new Date(isoTimestamp);
+            const diffMs = now - timestamp;
+            const diffSec = Math.floor(diffMs / 1000);
+            const diffMin = Math.floor(diffSec / 60);
+            const diffHour = Math.floor(diffMin / 60);
+            const diffDay = Math.floor(diffHour / 24);
+
+            if (diffSec < 10) {
+                return 'just now';
+            } else if (diffSec < 60) {
+                return `${diffSec} seconds ago`;
+            } else if (diffMin === 1) {
+                return '1 minute ago';
+            } else if (diffMin < 60) {
+                return `${diffMin} minutes ago`;
+            } else if (diffHour === 1) {
+                return '1 hour ago';
+            } else if (diffHour < 24) {
+                return `${diffHour} hours ago`;
+            } else if (diffDay === 1) {
+                return '1 day ago';
+            } else if (diffDay < 7) {
+                return `${diffDay} days ago`;
+            } else {
+                // For older timestamps, show the date
+                return timestamp.toLocaleDateString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    year: timestamp.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+                });
+            }
+        }
+
+        // Initialize session info timestamps on page load
+        function initializeSessionInfo() {
+            // Format timestamps
+            const timestampElements = document.querySelectorAll('.session-timestamp');
+            timestampElements.forEach(element => {
+                const isoTime = element.getAttribute('datetime');
+                if (isoTime) {
+                    element.textContent = formatRelativeTime(isoTime);
+                }
+            });
+
+            // Handle session persistence via localStorage
+            handleSessionPersistence();
+        }
+
+        // Handle session persistence - save to/restore from localStorage
+        function handleSessionPersistence() {
+            const panel = document.getElementById('sessionInfoPanel');
+            const content = document.getElementById('content');
+            if (!content) return;
+
+            // Get current file path from URL
+            const match = window.location.pathname.match(/\/view\/(.+)/);
+            if (!match) return; // Not a file view
+
+            const filePath = '/' + decodeURIComponent(match[1]);
+
+            // If server provided session data, save it to localStorage
+            if (panel && panel.querySelector('.session-info-content')) {
+                const sessionData = extractSessionDataFromDOM(panel);
+                if (sessionData && typeof saveSessionMetadata === 'function') {
+                    saveSessionMetadata(filePath, sessionData);
+                    console.log('[Session] Saved to localStorage:', filePath);
+                }
+            }
+            // If no server data, try to restore from localStorage
+            else if (typeof getSessionMetadata === 'function') {
+                const storedData = getSessionMetadata(filePath);
+                if (storedData) {
+                    console.log('[Session] Restoring from localStorage:', filePath);
+                    renderSessionPanel(filePath, storedData);
+                }
+            }
+        }
+
+        // Extract session data from existing DOM panel
+        function extractSessionDataFromDOM(panel) {
+            try {
+                const sessionIdEl = panel.querySelector('.session-id-value');
+                const operationEl = panel.querySelector('.session-operation-badge');
+                const permissionEl = panel.querySelector('.session-permission-badge');
+                const timestampEl = panel.querySelector('.session-timestamp');
+                const cwdEl = panel.querySelector('.session-info-value code');
+                const toolUseIdEl = Array.from(panel.querySelectorAll('.session-info-label'))
+                    .find(el => el.textContent.includes('Tool Use ID'))
+                    ?.nextElementSibling?.querySelector('code');
+                const transcriptEl = Array.from(panel.querySelectorAll('.session-info-label'))
+                    .find(el => el.textContent.includes('Transcript Path'))
+                    ?.nextElementSibling?.querySelector('code');
+
+                if (!sessionIdEl || !operationEl || !timestampEl) return null;
+
+                return {
+                    session_id: sessionIdEl.textContent.trim(),
+                    tool_name: operationEl.textContent.trim(),
+                    permission_mode: permissionEl ? permissionEl.textContent.trim() : '',
+                    timestamp: timestampEl.getAttribute('datetime'),
+                    cwd: cwdEl ? cwdEl.textContent.trim() : '',
+                    tool_use_id: toolUseIdEl ? toolUseIdEl.textContent.trim() : '',
+                    transcript_path: transcriptEl ? transcriptEl.textContent.trim() : ''
+                };
+            } catch (error) {
+                console.error('[Session] Failed to extract session data:', error);
+                return null;
+            }
+        }
+
+        // Render session panel from localStorage data
+        function renderSessionPanel(filePath, sessionData) {
+            // Check if panel already exists
+            if (document.getElementById('sessionInfoPanel')) return;
+
+            const content = document.getElementById('content');
+            if (!content) return;
+
+            // Find the header actions div to insert the button
+            const headerActions = content.querySelector('.header-actions > div');
+            if (!headerActions) return;
+
+            // Create session info button
+            const button = document.createElement('button');
+            button.id = 'sessionInfoButton';
+            button.className = 'session-info-button';
+            button.setAttribute('onclick', 'toggleSessionInfo()');
+            button.setAttribute('aria-label', 'Show session information');
+            button.setAttribute('aria-expanded', 'false');
+            button.innerHTML = `
+                <span style="display: inline-flex; align-items: center; gap: 4px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    <span class="session-ai-badge">AI</span>
+                </span>
+            `;
+
+            // Insert button before edit button
+            const editBtn = headerActions.querySelector('button[onclick*="editFile"]');
+            if (editBtn) {
+                headerActions.insertBefore(button, editBtn);
+            } else {
+                headerActions.appendChild(button);
+            }
+
+            // Create session info panel
+            const panel = document.createElement('div');
+            panel.id = 'sessionInfoPanel';
+            panel.className = 'session-info-panel';
+            panel.setAttribute('aria-hidden', 'true');
+            panel.style.display = 'none';
+
+            panel.innerHTML = `
+                <div class="session-info-content">
+                    <div class="session-info-main">
+                        <div class="session-info-field">
+                            <span class="session-info-label">Session ID:</span>
+                            <div class="session-info-value-group">
+                                <code class="session-info-value session-id-value">${sessionData.session_id}</code>
+                                <button class="session-copy-button" onclick="copyToClipboard('${sessionData.session_id}')"
+                                        aria-label="Copy session ID" title="Copy session ID">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="session-info-field">
+                            <span class="session-info-label">Operation:</span>
+                            <span class="session-info-value">
+                                <span class="session-operation-badge session-operation-${sessionData.tool_name}">${sessionData.tool_name}</span>
+                            </span>
+                        </div>
+                        <div class="session-info-field">
+                            <span class="session-info-label">Permission Mode:</span>
+                            <span class="session-info-value">
+                                <span class="session-permission-badge session-permission-${sessionData.permission_mode}">${sessionData.permission_mode}</span>
+                            </span>
+                        </div>
+                        <div class="session-info-field">
+                            <span class="session-info-label">Timestamp:</span>
+                            <span class="session-info-value">
+                                <time class="session-timestamp" datetime="${sessionData.timestamp}">${formatRelativeTime(sessionData.timestamp)}</time>
+                            </span>
+                        </div>
+                    </div>
+                    ${sessionData.cwd || sessionData.tool_use_id || sessionData.transcript_path ? `
+                    <div class="session-technical-details">
+                        <button class="session-technical-toggle" onclick="toggleTechnicalDetails()" aria-expanded="false">
+                            <span class="session-technical-chevron">▶</span>
+                            Technical Details
+                        </button>
+                        <div class="session-technical-content" style="display: none;">
+                            ${sessionData.cwd ? `
+                            <div class="session-info-field">
+                                <span class="session-info-label">Working Directory:</span>
+                                <code class="session-info-value">${sessionData.cwd}</code>
+                            </div>` : ''}
+                            ${sessionData.tool_use_id ? `
+                            <div class="session-info-field">
+                                <span class="session-info-label">Tool Use ID:</span>
+                                <code class="session-info-value">${sessionData.tool_use_id}</code>
+                            </div>` : ''}
+                            ${sessionData.transcript_path ? `
+                            <div class="session-info-field">
+                                <span class="session-info-label">Transcript Path:</span>
+                                <code class="session-info-value">${sessionData.transcript_path}</code>
+                            </div>` : ''}
+                        </div>
+                    </div>` : ''}
+                </div>
+            `;
+
+            // Insert panel after subtitle
+            const subtitle = content.querySelector('.subtitle');
+            if (subtitle && subtitle.parentNode) {
+                subtitle.parentNode.insertBefore(panel, subtitle.nextSibling);
+            }
+
+            console.log('[Session] Rendered panel from localStorage');
+        }
+
+        // Call initialization when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeSessionInfo();
+
+            // Restore tree state from localStorage (function defined in navigation.js)
+            if (typeof restoreTreeState === 'function') {
+                restoreTreeState();
+            }
+
+            // Update timestamps every minute
+            setInterval(() => {
+                const timestampElements = document.querySelectorAll('.session-timestamp');
+                timestampElements.forEach(element => {
+                    const isoTime = element.getAttribute('datetime');
+                    if (isoTime) {
+                        element.textContent = formatRelativeTime(isoTime);
+                    }
+                });
+            }, 60000); // Update every 60 seconds
+        });
 
         // Note: setupCollapse() and findParentItem() are defined in navigation.js
         // They will be called automatically by the DOMContentLoaded handler in navigation.js

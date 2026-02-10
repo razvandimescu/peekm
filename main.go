@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -61,10 +62,11 @@ var (
 	}
 
 	// Flags
-	port        = flag.Int("port", 6419, "Port to serve on")
-	openBrowser = flag.Bool("browser", true, "Open browser automatically")
-	showVersion = flag.Bool("version", false, "Show version information")
-	showIgnored = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
+	port            = flag.Int("port", 6419, "Port to serve on")
+	openBrowser     = flag.Bool("browser", true, "Open browser automatically")
+	showVersion     = flag.Bool("version", false, "Show version information")
+	showIgnored     = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
+	enableClaudeHook = flag.Bool("hook-claude-code", false, "Enable Claude Code hook integration for session tracking")
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
 	clients      = make(map[chan string]bool)
@@ -78,9 +80,6 @@ var (
 	fileWatcher   watcherManager
 	dirWatcher    watcherManager
 
-	// Event debouncing for directory watching
-	refreshTimer *time.Timer
-	refreshMutex sync.Mutex
 
 	// Ignore pattern cache (reduces file I/O on navigation)
 	globalIgnoreCache struct {
@@ -100,6 +99,9 @@ var (
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
 	globalEventBuffer = newEventBuffer(50)
+
+	// Claude Code session tracking (5s TTL for hook-to-fsnotify correlation)
+	globalSessionStore *sessionStore
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -127,12 +129,14 @@ type browserTemplateData struct {
 	ShowBackButton bool
 	Content        template.HTML
 	BrowsePath     string
+	SessionData    *SessionMetadata // Claude Code session info for this file
 }
 
 // fileEventMessage is used for SSE notifications about file changes
 type fileEventMessage struct {
-	Type string `json:"type"` // "file_added" or "file_removed"
-	Path string `json:"path"`
+	Type    string `json:"type"`              // "file_added" or "file_removed"
+	Path    string `json:"path"`
+	Session string `json:"session,omitempty"` // Optional Claude Code session ID
 }
 
 // connectionStatusMessage is used for SSE notifications about connection status
@@ -205,17 +209,43 @@ func (eb *eventBuffer) getAfter(lastID string) []eventRecord {
 	return result
 }
 
-// has checks if an event ID exists in the buffer
-func (eb *eventBuffer) has(id string) bool {
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
+// SessionMetadata contains complete Claude Code session information
+type SessionMetadata struct {
+	SessionID      string    `json:"session_id"`
+	ToolName       string    `json:"tool_name"`
+	PermissionMode string    `json:"permission_mode,omitempty"`
+	ToolUseID      string    `json:"tool_use_id,omitempty"`
+	CWD            string    `json:"cwd,omitempty"`
+	TranscriptPath string    `json:"transcript_path,omitempty"`
+	Timestamp      time.Time `json:"timestamp"`
+}
 
-	for _, evt := range eb.events {
-		if evt.id == id {
-			return true
-		}
+// sessionStore maintains persistent mapping of file paths to session metadata
+type sessionStore struct {
+	mu       sync.RWMutex
+	mappings map[string]*SessionMetadata
+}
+
+// newSessionStore creates a session store (session data persists indefinitely)
+func newSessionStore() *sessionStore {
+	return &sessionStore{
+		mappings: make(map[string]*SessionMetadata),
 	}
-	return false
+}
+
+// register stores session metadata for a file path (persists indefinitely)
+func (ss *sessionStore) register(filePath string, metadata *SessionMetadata) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.mappings[filePath] = metadata
+}
+
+// get retrieves session metadata for a file path
+func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	metadata, exists := ss.mappings[filePath]
+	return metadata, exists
 }
 
 // newBaseTemplateData creates a baseTemplateData with embedded resources
@@ -252,7 +282,9 @@ func (m *watcherManager) watch(filePath string) error {
 	m.current = watcher
 
 	if err := watcher.Add(filePath); err != nil {
-		watcher.Close()
+		if closeErr := watcher.Close(); closeErr != nil {
+			log.Printf("Failed to close watcher after add error: %v", closeErr)
+		}
 		cancel()
 		return err
 	}
@@ -285,7 +317,9 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 
 	// Add root directory
 	if err := watcher.Add(rootDir); err != nil {
-		watcher.Close()
+		if closeErr := watcher.Close(); closeErr != nil {
+			log.Printf("Failed to close watcher after add error: %v", closeErr)
+		}
 		cancel()
 		m.current = nil
 		m.cancel = nil
@@ -302,7 +336,9 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 		m.mu.Lock()
 		// Clean up if we still own this watcher
 		if m.current == watcher {
-			watcher.Close()
+			if closeErr := watcher.Close(); closeErr != nil {
+				log.Printf("Failed to close watcher after directory walk error: %v", closeErr)
+			}
 			cancel()
 			m.current = nil
 			m.cancel = nil
@@ -318,7 +354,9 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	// Check if watcher was replaced during walk
 	if m.current != watcher {
 		// Another call won the race, abandon this setup
-		watcher.Close()
+		if closeErr := watcher.Close(); closeErr != nil {
+			log.Printf("Failed to close abandoned watcher: %v", closeErr)
+		}
 		cancel()
 		return fmt.Errorf("watcher setup cancelled (replaced during walk)")
 	}
@@ -359,10 +397,12 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 		// Skip hidden and excluded directories
 		if info.IsDir() {
 			name := info.Name()
-			if strings.HasPrefix(name, ".") && path != rootDir {
+			// Skip hidden dirs EXCEPT .claude (for AI workflows)
+			if strings.HasPrefix(name, ".") && path != rootDir && name != ".claude" {
 				return filepath.SkipDir
 			}
-			if name == "node_modules" || name == "vendor" || name == "dist" || name == "venv" {
+			// Skip hardcoded exclusions (O(1) map lookup)
+			if isHardcodedExclusion(name) {
 				return filepath.SkipDir
 			}
 
@@ -437,6 +477,13 @@ func registerRoutes() {
 	http.HandleFunc("/save", withRecovery(handleSave))
 	http.HandleFunc("/download", withRecovery(handleDownload))
 	http.HandleFunc("/events", withRecovery(serveSSE))
+	http.HandleFunc("/tree-html", withRecovery(serveTreeHTML))
+
+	// Register Claude Code hook endpoint if enabled
+	if *enableClaudeHook {
+		http.HandleFunc("/hook/file-modified", withRecovery(handleClaudeHook))
+		log.Println("Registered Claude Code hook endpoint: /hook/file-modified")
+	}
 }
 
 // validateSymlinkSecurity checks if a symlink is safe to follow
@@ -522,6 +569,26 @@ func validateAndResolvePath(targetPath string) (string, error) {
 	return targetPath, nil
 }
 
+// resolveFilePath converts a relative file path to absolute using browseDir
+// Thread-safe helper to eliminate duplication across handlers
+func resolveFilePath(relativePath string) string {
+	// Get current browse directory (thread-safe)
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	// Convert relative path to absolute by joining with browseDir
+	var absFilePath string
+	if filepath.IsAbs(relativePath) {
+		absFilePath = relativePath
+	} else {
+		absFilePath = filepath.Join(currentBrowseDir, relativePath)
+	}
+
+	// Clean the absolute path
+	return filepath.Clean(absFilePath)
+}
+
 func init() {
 	// Load CSS files
 	cssData, err := themeFS.ReadFile("theme/github-markdown.css")
@@ -555,18 +622,32 @@ func init() {
 	}
 	navigationJS = string(navigationData)
 
-	// Load HTML templates
+	// Load HTML templates with custom functions
+	funcMap := template.FuncMap{
+		"formatISO": func(t time.Time) string {
+			return t.Format(time.RFC3339)
+		},
+	}
+
+	// Load shared session info panel template
+	sessionInfoPanelHTML, err := themeFS.ReadFile("theme/session-info-panel.html")
+	if err != nil {
+		log.Fatalf("Failed to load session-info-panel template: %v", err)
+	}
+
 	fileBrowserHTML, err := themeFS.ReadFile("theme/file-browser.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
 	}
-	fileBrowserTmpl = template.Must(template.New("file-browser").Parse(string(fileBrowserHTML)))
+	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
 
 	fileBrowserPartialHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser-partial template: %v", err)
 	}
-	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Parse(string(fileBrowserPartialHTML)))
+	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserPartialHTML)))
+	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
 }
 
 func main() {
@@ -579,7 +660,7 @@ func main() {
 
 	if *showIgnored {
 		fmt.Println("Hardcoded exclusions:")
-		fmt.Println("  .* (hidden directories)")
+		fmt.Println("  .* (hidden directories, except .claude)")
 		for _, dir := range hardcodedExclusions {
 			fmt.Printf("  %s\n", dir)
 		}
@@ -611,6 +692,12 @@ func main() {
 			fmt.Printf("\nNo .peekmignore file found in %s\n", checkDir)
 		}
 		os.Exit(0)
+	}
+
+	// Initialize Claude Code session tracking if enabled
+	if *enableClaudeHook {
+		globalSessionStore = newSessionStore()
+		log.Println("Claude Code hook integration enabled (session data persists indefinitely)")
 	}
 
 	// Determine target path (default to current directory)
@@ -729,6 +816,48 @@ func main() {
 }
 
 
+// getRelativePath converts absolute file path to relative path (thread-safe)
+func getRelativePath(absPath string) string {
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+
+	relPath := absPath
+	if browseDir != "" {
+		if rel, err := filepath.Rel(browseDir, absPath); err == nil {
+			relPath = rel
+		}
+	}
+	return relPath
+}
+
+// removeFromWhitelist removes a file from the markdown files list (thread-safe)
+func removeFromWhitelist(filePath string) {
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+
+	for i, f := range markdownFiles {
+		if f == filePath {
+			markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
+			break
+		}
+	}
+}
+
+// sendFileEvent sends a file event notification to clients
+func sendFileEvent(eventType, relPath, sessionID string) {
+	msg := fileEventMessage{
+		Type:    eventType,
+		Path:    relPath,
+		Session: sessionID,
+	}
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Error marshaling %s message: %v", eventType, err)
+	} else {
+		notifyClientsWithMessage(string(msgBytes))
+	}
+}
+
 func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePath string) {
 	for {
 		select {
@@ -801,29 +930,36 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 					markdownFiles = append(markdownFiles, event.Name)
 					fileMutex.Unlock()
 
-					// Notify clients about the new file with JSON message
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
+					// Delay notification to wait for PostToolUse hook (up to 5s)
+					go func(filePath string) {
+						sessionID := ""
+						if globalSessionStore != nil {
+							// Poll for session registration (check every 100ms, max 5s)
+							timeout := time.After(5 * time.Second)
+							ticker := time.NewTicker(100 * time.Millisecond)
+							defer ticker.Stop()
+
+							for {
+								select {
+								case <-timeout:
+									// Timeout reached, send notification with or without session
+									if metadata, found := globalSessionStore.get(filePath); found {
+										sessionID = metadata.SessionID
+									}
+									goto sendNotification
+								case <-ticker.C:
+									// Check if session has been registered
+									if metadata, found := globalSessionStore.get(filePath); found {
+										sessionID = metadata.SessionID
+										goto sendNotification
+									}
+								}
+							}
 						}
-					}
-					fileMutex.RUnlock()
 
-					// Use json.Marshal for proper escaping (prevents JSON injection)
-					msg := fileEventMessage{
-						Type: "file_added",
-						Path: relPath,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file added message: %v", err)
-					} else {
-						notifyClientsWithMessage(string(msgBytes))
-					}
-
-					// Note: No scheduleRefresh() needed - client handles insertion dynamically
+					sendNotification:
+						sendFileEvent("file_added", getRelativePath(filePath), sessionID)
+					}(event.Name)
 				}
 			}
 
@@ -831,40 +967,8 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 			if event.Op&fsnotify.Remove == fsnotify.Remove {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					log.Printf("Deleted file: %s", event.Name)
-
-					// Remove from whitelist immediately
-					fileMutex.Lock()
-					for i, f := range markdownFiles {
-						if f == event.Name {
-							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
-							break
-						}
-					}
-					fileMutex.Unlock()
-
-					// Notify clients about the removed file with JSON message
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
-						}
-					}
-					fileMutex.RUnlock()
-
-					// Use json.Marshal for proper escaping
-					msg := fileEventMessage{
-						Type: "file_removed",
-						Path: relPath,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file removed message: %v", err)
-					} else {
-						notifyClientsWithMessage(string(msgBytes))
-					}
-
-					// Note: No scheduleRefresh() needed - client handles removal dynamically
+					removeFromWhitelist(event.Name)
+					sendFileEvent("file_removed", getRelativePath(event.Name), "")
 				}
 			}
 
@@ -873,39 +977,8 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 			if event.Op&fsnotify.Rename == fsnotify.Rename {
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					log.Printf("Renamed file: %s", event.Name)
-
-					// Remove from whitelist (CREATE event will add it back with new name)
-					fileMutex.Lock()
-					for i, f := range markdownFiles {
-						if f == event.Name {
-							markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
-							break
-						}
-					}
-					fileMutex.Unlock()
-
-					// Notify clients about the removed file (new name will trigger CREATE event)
-					relPath := event.Name
-					fileMutex.RLock()
-					if browseDir != "" {
-						if rel, err := filepath.Rel(browseDir, event.Name); err == nil {
-							relPath = rel
-						}
-					}
-					fileMutex.RUnlock()
-
-					msg := fileEventMessage{
-						Type: "file_removed",
-						Path: relPath,
-					}
-					msgBytes, err := json.Marshal(msg)
-					if err != nil {
-						log.Printf("Error marshaling file removed message: %v", err)
-					} else{
-						notifyClientsWithMessage(string(msgBytes))
-					}
-
-					// Note: No scheduleRefresh() needed - client handles removal dynamically
+					removeFromWhitelist(event.Name)
+					sendFileEvent("file_removed", getRelativePath(event.Name), "")
 				}
 			}
 
@@ -918,47 +991,6 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 	}
 }
 
-// scheduleRefresh schedules a directory refresh with debouncing
-// Multiple rapid calls within 300ms are batched into a single refresh
-func scheduleRefresh() {
-	refreshMutex.Lock()
-	defer refreshMutex.Unlock()
-
-	if refreshTimer != nil {
-		refreshTimer.Stop()
-	}
-
-	refreshTimer = time.AfterFunc(300*time.Millisecond, func() {
-		refreshFileList()
-		refreshMutex.Lock()
-		refreshTimer = nil
-		refreshMutex.Unlock()
-	})
-}
-
-// refreshFileList rescans the directory and notifies clients
-func refreshFileList() {
-	// Re-scan directory structure
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	newMarkdownFiles := collectMarkdownFiles(currentBrowseDir)
-
-	// Update state thread-safely
-	fileMutex.Lock()
-	markdownFiles = newMarkdownFiles
-	fileMutex.Unlock()
-
-	log.Printf("Updated file list: %d markdown file(s)", len(newMarkdownFiles))
-
-	// Note: No need to restart watcher - new directories are already added
-	// via watcher.Add() in watchDirectoryWithContext() event handler
-
-	// Note: No need to notify clients with reload - the file_added notification
-	// is already sent and the frontend will insert the file dynamically
-}
-
 
 func serveRaw(w http.ResponseWriter, r *http.Request) {
 	filePath := strings.TrimPrefix(r.URL.Path, "/raw")
@@ -967,21 +999,8 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 	// Clean the path
 	filePath = filepath.Clean(filePath)
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(filePath) {
-		absFilePath = filePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, filePath)
-	}
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -996,7 +1015,9 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write(content)
+	if _, err := w.Write(content); err != nil {
+		log.Printf("Failed to write raw file response: %v", err)
+	}
 }
 
 func handleSave(w http.ResponseWriter, r *http.Request) {
@@ -1013,28 +1034,20 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	filePath := r.FormValue("file")
 	content := r.FormValue("content")
 
-	// Clean the path
-	filePath = filepath.Clean(filePath)
+	// Clean the path and strip leading slash (web paths are relative to browse dir)
+	filePath = filepath.Clean(strings.TrimPrefix(filePath, "/"))
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(filePath) {
-		absFilePath = filePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, filePath)
-	}
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
-		http.Error(w, "Invalid path", http.StatusForbidden)
+		// Return specific error message (file doesn't exist, permission denied, etc.)
+		statusCode := http.StatusForbidden
+		if strings.Contains(err.Error(), "does not exist") {
+			statusCode = http.StatusNotFound
+		}
+		http.Error(w, fmt.Sprintf("Cannot save file: %v", err), statusCode)
 		return
 	}
 
@@ -1134,7 +1147,28 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(html)))
 
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write download response: %v", err)
+	}
+}
+
+func serveTreeHTML(w http.ResponseWriter, r *http.Request) {
+	// Get state snapshot (thread-safe)
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	// Generate tree HTML
+	treeHTML := generateTreeHTML()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	if _, err := w.Write([]byte(treeHTML)); err != nil {
+		log.Printf("Failed to write tree HTML response: %v", err)
+	}
+
+	log.Printf("Served tree HTML for directory: %s", currentBrowseDir)
 }
 
 func serveSSE(w http.ResponseWriter, r *http.Request) {
@@ -1328,6 +1362,59 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleClaudeHook receives file modification events from Claude Code hooks
+func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID      string `json:"session_id"`
+		ToolName       string `json:"tool_name"`
+		FilePath       string `json:"file_path"`
+		PermissionMode string `json:"permission_mode"`
+		ToolUseID      string `json:"tool_use_id"`
+		CWD            string `json:"cwd"`
+		TranscriptPath string `json:"transcript_path"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.SessionID == "" || req.FilePath == "" {
+		http.Error(w, "Missing required fields: session_id and file_path", http.StatusBadRequest)
+		return
+	}
+
+	// Create session metadata
+	metadata := &SessionMetadata{
+		SessionID:      req.SessionID,
+		ToolName:       req.ToolName,
+		PermissionMode: req.PermissionMode,
+		ToolUseID:      req.ToolUseID,
+		CWD:            req.CWD,
+		TranscriptPath: req.TranscriptPath,
+		Timestamp:      time.Now(),
+	}
+
+	// Register session mapping for file
+	globalSessionStore.register(req.FilePath, metadata)
+
+	// Truncate session ID for logging (first 8 chars)
+	shortSession := req.SessionID
+	if len(shortSession) > 8 {
+		shortSession = shortSession[:8]
+	}
+
+	log.Printf("Registered Claude Code session %s for file: %s (mode: %s)", shortSession, req.FilePath, req.PermissionMode)
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleNavigate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1397,6 +1484,44 @@ func handleNavigate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// moveToTrash attempts to move a file to the OS trash/recycle bin.
+// Falls back to permanent deletion (os.Remove) if trash commands fail.
+// Supports macOS (osascript), Linux (gio trash), and Windows (PowerShell).
+func moveToTrash(filePath string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin": // macOS
+		// Use AppleScript to move to Trash
+		script := fmt.Sprintf(`tell application "Finder" to delete POSIX file "%s"`, filePath)
+		cmd = exec.Command("osascript", "-e", script)
+
+	case "linux":
+		// Try gio trash (GNOME/modern Linux)
+		cmd = exec.Command("gio", "trash", filePath)
+
+	case "windows":
+		// Use PowerShell to move to Recycle Bin
+		script := fmt.Sprintf(`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('%s', 'OnlyErrorDialogs', 'SendToRecycleBin')`, filePath)
+		cmd = exec.Command("powershell", "-Command", script)
+
+	default:
+		// Unsupported OS, fall back to permanent deletion
+		log.Printf("Warning: Trash not supported on %s, permanently deleting file: %s", runtime.GOOS, filePath)
+		return os.Remove(filePath)
+	}
+
+	// Attempt to move to trash
+	if err := cmd.Run(); err != nil {
+		log.Printf("Warning: Failed to move to trash (attempting permanent deletion): %v", err)
+		// Fallback to permanent deletion
+		return os.Remove(filePath)
+	}
+
+	log.Printf("Moved to trash: %s", filePath)
+	return nil
+}
+
 func handleDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1448,8 +1573,8 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the file
-	if err := os.Remove(targetPath); err != nil {
+	// Move file to trash (with fallback to permanent deletion)
+	if err := moveToTrash(targetPath); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1476,25 +1601,13 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	// Clean the path
 	filePath = filepath.Clean(filePath)
 
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	// Resolve to absolute path using browseDir
+	absFilePath := resolveFilePath(filePath)
 
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(filePath) {
-		absFilePath = filePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, filePath)
-	}
-
-	// Clean the absolute path
-	absFilePath = filepath.Clean(absFilePath)
-
-	// Security: check if file is in our markdown files whitelist
+	// Security: check if file is in our markdown files whitelist (thread-safe)
 	// This prevents directory traversal attacks by only allowing pre-scanned files
 	fileMutex.RLock()
+	currentBrowseDir := browseDir // Also capture for template data
 	found := false
 	for _, f := range markdownFiles {
 		if f == absFilePath {
@@ -1530,6 +1643,14 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		treeHTML = generateTreeHTML()
 	}
 
+	// Fetch session metadata for this file (if available)
+	var sessionData *SessionMetadata
+	if globalSessionStore != nil {
+		if metadata, found := globalSessionStore.get(absFilePath); found {
+			sessionData = metadata
+		}
+	}
+
 	data := browserTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		Title:            filepath.Base(absFilePath),
@@ -1538,6 +1659,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		Content:          template.HTML(buf.String()),
 		ShowBackButton:   true,
 		BrowsePath:       currentBrowseDir,
+		SessionData:      sessionData,
 	}
 
 	// Set current file for watching
@@ -1773,11 +1895,11 @@ func collectMarkdownFiles(rootDir string) []string {
 			info = resolvedInfo
 		}
 
-		// Skip hidden directories and common build/dependency directories
+		// Skip hidden and excluded directories (hardcoded + custom .peekmignore)
 		if info.IsDir() {
 			name := info.Name()
-			// Skip hidden dirs, but allow the root directory even if it starts with "."
-			if strings.HasPrefix(name, ".") && path != rootDir {
+			// Skip hidden dirs EXCEPT .claude (for AI workflows)
+			if strings.HasPrefix(name, ".") && path != rootDir && name != ".claude" {
 				return filepath.SkipDir
 			}
 			// Skip hardcoded exclusions (O(1) map lookup)
@@ -1896,53 +2018,53 @@ func generateTreeHTML() string {
 
 func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoot bool, depth int, parentCollapsed bool, buf *bytes.Buffer) {
 	if !isRoot {
-		buf.WriteString(`<div class="tree-item`)
-		// Hide children of collapsed parents
-		if parentCollapsed {
-			buf.WriteString(` hidden`)
-		}
-		buf.WriteString(`"`)
-		buf.WriteString(fmt.Sprintf(` data-depth="%d"`, depth))
-		if depth > 0 {
-			buf.WriteString(fmt.Sprintf(` style="padding-left: %dpx"`, depth*16))
-		}
-		buf.WriteString(`>`)
+		// Start tree item container
+		buf.WriteString(`<div class="tree-item">`)
 
 		if node.isDir {
 			// Collapse directories at depth >= 1 by default
 			collapsed := depth >= 1
-			buf.WriteString(fmt.Sprintf(`<span class="tree-directory%s" onclick="toggleDir(this)" data-collapsed="%t">`,
-				func() string {
-					if collapsed {
-						return " collapsed"
-					} else {
-						return ""
-					}
-				}(),
-				collapsed))
-			// Show chevron for all directories (VS Code style)
+
+			// Directory node with chevron and name
+			buf.WriteString(fmt.Sprintf(`<div class="tree-node"><span class="tree-directory" onclick="toggleDir(this)" data-path="%s">`,
+				template.HTMLEscapeString(node.path)))
+
+			// Chevron icon
 			if collapsed {
 				buf.WriteString(`<span class="expand-icon">▶</span>`)
 			} else {
 				buf.WriteString(`<span class="expand-icon">▼</span>`)
 			}
-			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span>`, template.HTMLEscapeString(node.name)))
+
+			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span></div>`, template.HTMLEscapeString(node.name)))
+
+			// Children container (collapsed by default at depth >= 1)
+			if len(node.children) > 0 {
+				if collapsed {
+					buf.WriteString(`<div class="tree-children" style="display: none;">`)
+				} else {
+					buf.WriteString(`<div class="tree-children">`)
+				}
+
+				// Render children recursively
+				for _, child := range node.children {
+					generateTreeHTMLRecursive(child, "", false, false, depth+1, false, buf)
+				}
+
+				buf.WriteString(`</div>`) // Close tree-children
+			}
 		} else {
-			buf.WriteString(`<span class="tree-file">`)
+			// File node (leaf)
+			buf.WriteString(`<div class="tree-node"><span class="tree-file">`)
 			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, template.URLQueryEscaper(node.path), template.HTMLEscapeString(node.name)))
-			buf.WriteString(`</span>`)
+			buf.WriteString(`</span></div>`)
 		}
 
-		buf.WriteString(`</div>`)
-	}
-
-	// Print children
-	if node.isDir && len(node.children) > 0 {
-		// Determine if this directory is collapsed
-		collapsed := depth >= 1
-		for i, child := range node.children {
-			isLastChild := i == len(node.children)-1
-			generateTreeHTMLRecursive(child, "", isLastChild, false, depth+1, collapsed || parentCollapsed, buf)
+		buf.WriteString(`</div>`) // Close tree-item
+	} else {
+		// Root node - just render children
+		for _, child := range node.children {
+			generateTreeHTMLRecursive(child, "", false, false, depth, false, buf)
 		}
 	}
 }
@@ -1964,7 +2086,9 @@ func openURL(url string) {
 	}
 
 	exec := exec.Command(cmd, args...)
-	exec.Start()
+	if err := exec.Start(); err != nil {
+		log.Printf("Failed to open URL %s: %v", url, err)
+	}
 }
 
 func fileExists(path string) bool {
@@ -2015,12 +2139,4 @@ func sortTree(node *fileNode) {
 	for _, child := range node.children {
 		sortTree(child)
 	}
-}
-
-func formatSize(size int64) string {
-	kb := size / 1024
-	if kb == 0 {
-		return fmt.Sprintf("(%d bytes)", size)
-	}
-	return fmt.Sprintf("(%d KB)", kb)
 }

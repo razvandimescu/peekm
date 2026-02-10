@@ -5,6 +5,7 @@
 let eventSource = null;
 let reconnectAttempts = 0;
 const maxReconnectDelay = 30000; // 30 seconds max
+let refreshTreeTimer = null; // For debouncing tree refreshes
 
 // Connect to SSE and maintain persistent connection
 function connectSSE() {
@@ -36,14 +37,17 @@ function connectSSE() {
 
             if (data.type === 'file_added') {
                 console.log('[SSE] Handling file_added for:', data.path);
-                showToast(`New file: ${data.path}`, data.path);
-                // Dynamically insert file instead of reloading
+                showToast(`New file: ${data.path}`, data.path, data.session);
+                // Optimistic update: insert immediately (fast, may be buggy)
                 insertFileIntoTree(data.path);
+                // Self-healing: debounced refresh from server (batches rapid updates)
+                scheduleTreeRefresh();
             } else if (data.type === 'file_removed') {
                 console.log('[SSE] Handling file_removed for:', data.path);
-                showToast(`File removed: ${data.path}`, null);
-                // Dynamically remove file from tree
+                // Optimistic update: remove immediately
                 removeFileFromTree(data.path);
+                // Self-healing: debounced refresh from server
+                scheduleTreeRefresh();
             } else if (data.type === 'file_modified') {
                 console.log('[SSE] Handling file_modified for:', data.path);
 
@@ -59,13 +63,18 @@ function connectSSE() {
                         // Auto-refresh the current page
                         console.log('[SSE] Auto-refreshing current page');
                         navigate(window.location.pathname, false);
+
+                        // Show notification if modified by Claude Code session
+                        if (data.session) {
+                            showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
+                        }
                     } else {
                         // Different file modified, show notification
-                        showToast(`File updated: ${data.path}`, data.path);
+                        showToast(`File updated: ${data.path}`, data.path, data.session);
                     }
                 } else {
                     // In browser view, just show notification
-                    showToast(`File updated: ${data.path}`, data.path);
+                    showToast(`File updated: ${data.path}`, data.path, data.session);
                 }
             } else if (data.type === 'connection_status') {
                 console.log('[SSE] Handling connection_status:', data.count);
@@ -168,6 +177,12 @@ async function navigate(url, addToHistory = true) {
         // Restore tree state after DOM update (for browser mode)
         restoreTreeState();
 
+        // Auto-expand parent directories for file navigation
+        if (url.startsWith('/view/')) {
+            const filePath = url.replace('/view/', '');
+            expandParentDirectories(filePath);
+        }
+
         console.log('[Navigate] Navigated to:', url);
     } catch (error) {
         console.error('[Navigate] Error:', error);
@@ -210,6 +225,11 @@ function reinitializeScripts() {
         // Initialize sidebar (Focus Mode) - works for both views
         if (typeof initializeSidebar === 'function') {
             initializeSidebar();
+        }
+
+        // Initialize session info timestamps (if present)
+        if (typeof initializeSessionInfo === 'function') {
+            initializeSessionInfo();
         }
 
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
@@ -353,15 +373,23 @@ const TOAST_CONFIG = {
     TRANSITION_TIME: 300      // CSS transition duration
 };
 
-function showToast(message, filePath) {
+function showToast(message, filePath, session) {
     // Save to notification history immediately
-    saveNotification(message, filePath);
+    saveNotification(message, filePath, session);
+
+    // Check if notification dropdown is visible - if so, don't show toast
+    const dropdown = document.getElementById('notification-dropdown');
+    if (dropdown && dropdown.style.display !== 'none') {
+        console.log('[Toast] Skipping toast - notification dropdown is visible');
+        return;
+    }
 
     // Create file info object
     const fileInfo = {
         name: filePath ? filePath.split('/').pop() : null,
         path: filePath,
         message: message,
+        session: session || null,
         timestamp: Date.now()
     };
 
@@ -395,10 +423,11 @@ function formatBatchMessage(files) {
     const count = files.length;
 
     if (count === 1) {
-        // Single file - show full message
+        // Single file - show full message with session if available
         const file = files[0];
+        const primary = file.session ? `${file.message} (Session: ${file.session})` : file.message;
         return {
-            primary: file.message,
+            primary: primary,
             secondary: null,
             icon: '📄',
             href: file.path ? `/view/${encodeURIComponent(file.path)}` : '#',
@@ -498,9 +527,12 @@ function displayBatchedToast() {
     // Store single file path for navigation
     toastFilePath = files.length === 1 ? files[0].path : null;
 
-    // Show toast
-    toast.style.display = 'flex';
-    toast.classList.add('show');
+    // Show toast - remove any inline display style and use class
+    toast.style.display = '';
+    // Small delay to ensure DOM updates properly
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
 
     // Clear existing timeout
     if (toastTimeout) {
@@ -523,10 +555,8 @@ function hideToast() {
     toast.classList.remove('show');
     toastFilePath = null;
 
-    // Hide completely after transition completes
-    setTimeout(() => {
-        toast.style.display = 'none';
-    }, TOAST_CONFIG.TRANSITION_TIME);
+    // Let CSS handle visibility through opacity and pointer-events
+    // No need to set display:none as CSS handles it through pointer-events: none
 }
 
 // ===== Connection Status Functions =====
@@ -550,6 +580,20 @@ function updateConnectionStatus(count) {
 
 // ===== Dynamic Tree Manipulation =====
 
+// Update the file count in the subtitle
+function updateFileCount(delta) {
+    const subtitle = document.querySelector('.subtitle');
+    if (subtitle) {
+        const match = subtitle.textContent.match(/(\d+) markdown file/);
+        if (match) {
+            const currentCount = parseInt(match[1]);
+            const newCount = Math.max(0, currentCount + delta);
+            subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
+            console.log(`[updateFileCount] Updated count from ${currentCount} to ${newCount}`);
+        }
+    }
+}
+
 // Dynamically insert a new file into the tree
 // Note: Event delegation from body.addEventListener('click', interceptLinks)
 // automatically handles SPA navigation for dynamically inserted links
@@ -557,47 +601,87 @@ function insertFileIntoTree(filePath) {
     try {
         console.log('[insertFileIntoTree] Adding file:', filePath);
         const fileName = filePath.split('/').pop();
-        const fileTree = document.getElementById('file-tree');
+        const fileTree = document.querySelector('.sidebar-tree');
 
         if (!fileTree) {
-            console.log('[insertFileIntoTree] No file-tree element found, skipping');
+            console.log('[insertFileIntoTree] No sidebar-tree element found, skipping');
             return;
         }
 
-        // Check if file already exists in tree (atomic write = CREATE event for existing file)
+        // Check if file already exists in tree
         const existingLinks = fileTree.querySelectorAll('.tree-item .tree-file a');
         for (let link of existingLinks) {
-            if (link.textContent.trim() === fileName) {
+            const href = link.getAttribute('href');
+            if (href === `/view/${encodeURIComponent(filePath)}`) {
                 console.log('[insertFileIntoTree] File already exists in tree, skipping insertion');
                 return;
             }
         }
 
-        // Create new tree item HTML
+        // Calculate depth from path (count slashes + 1)
+        const pathParts = filePath.split('/');
+        const depth = pathParts.length;
+        console.log('[insertFileIntoTree] Depth:', depth, 'Parts:', pathParts);
+
+        // Create new tree item HTML (VS Code style - indent-based, no ASCII art)
         const div = document.createElement('div');
         div.className = 'tree-item';
-        div.dataset.depth = '1';
+        div.dataset.depth = depth.toString();
+        if (depth > 0) {
+            div.style.paddingLeft = (depth * 16) + 'px';
+        }
         div.innerHTML = `
-            <span class="tree-connector">├── </span>
             <span class="tree-file">
                 <a href="/view/${encodeURIComponent(filePath)}">${escapeHtml(fileName)}</a>
-                <span class="file-size">(0 bytes)</span>
             </span>
         `;
 
-        // Find correct position (alphabetically among depth=1 files)
-        const allItems = fileTree.querySelectorAll('.tree-item[data-depth="1"]');
+        // Find parent directory if nested
+        let parentNode = fileTree;
+        let insertDepth = depth;
+
+        if (depth > 1) {
+            // Find the parent directory node
+            const parentPath = pathParts.slice(0, -1).join('/');
+            console.log('[insertFileIntoTree] Looking for parent directory:', parentPath);
+
+            const allDirs = fileTree.querySelectorAll('.tree-directory');
+            for (let dir of allDirs) {
+                const dirName = dir.querySelector('.dir-name');
+                if (dirName) {
+                    // Check if this is the correct parent by comparing the full path
+                    const dirItem = dir.closest('.tree-item');
+                    const dirDepth = parseInt(dirItem.dataset.depth);
+
+                    // Parent should be at depth-1 and match the path
+                    if (dirDepth === depth - 1) {
+                        // Build expected parent path by checking siblings
+                        const dirNameText = dirName.textContent.trim();
+                        if (pathParts[depth - 2] === dirNameText) {
+                            parentNode = dirItem.parentNode;
+                            console.log('[insertFileIntoTree] Found parent directory:', dirNameText);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Find correct position (alphabetically among siblings at same depth)
+        const allItems = parentNode.querySelectorAll(`.tree-item[data-depth="${depth}"]`);
         let inserted = false;
 
         for (let item of allItems) {
+            // Skip if this item is not a direct child of parentNode
+            if (item.parentNode !== parentNode) continue;
+
             const link = item.querySelector('.tree-file a');
             if (link) {
-                // Get just the link text (filename), not the entire tree-file content
                 const itemName = link.textContent.trim();
                 console.log('[insertFileIntoTree] Comparing:', fileName, 'vs', itemName);
 
                 if (fileName.localeCompare(itemName) < 0) {
-                    item.parentNode.insertBefore(div, item);
+                    parentNode.insertBefore(div, item);
                     inserted = true;
                     console.log('[insertFileIntoTree] Inserted before:', itemName);
                     break;
@@ -605,22 +689,24 @@ function insertFileIntoTree(filePath) {
             }
         }
 
-        // If not inserted, append at end
+        // If not inserted, append at end of parent's children
         if (!inserted) {
-            fileTree.appendChild(div);
-            console.log('[insertFileIntoTree] Appended at end');
+            // Find the last child of this parent at the same depth
+            const children = Array.from(parentNode.querySelectorAll('.tree-item')).filter(
+                item => item.parentNode === parentNode
+            );
+            if (children.length > 0) {
+                const lastChild = children[children.length - 1];
+                parentNode.insertBefore(div, lastChild.nextSibling);
+                console.log('[insertFileIntoTree] Inserted after last sibling');
+            } else {
+                parentNode.appendChild(div);
+                console.log('[insertFileIntoTree] Appended to parent');
+            }
         }
 
         // Update file count in subtitle
-        const subtitle = document.querySelector('.subtitle');
-        if (subtitle) {
-            const match = subtitle.textContent.match(/(\d+) markdown file/);
-            if (match) {
-                const newCount = parseInt(match[1]) + 1;
-                subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-                console.log('[insertFileIntoTree] Updated count to:', newCount);
-            }
-        }
+        updateFileCount(1);
 
         console.log('[insertFileIntoTree] Successfully added file');
     } catch (error) {
@@ -634,10 +720,10 @@ function removeFileFromTree(filePath) {
     try {
         console.log('[removeFileFromTree] Removing file:', filePath);
         const fileName = filePath.split('/').pop();
-        const fileTree = document.getElementById('file-tree');
+        const fileTree = document.querySelector('.sidebar-tree');
 
         if (!fileTree) {
-            console.log('[removeFileFromTree] No file-tree element found, skipping');
+            console.log('[removeFileFromTree] No sidebar-tree element found, skipping');
             return;
         }
 
@@ -673,21 +759,116 @@ function removeFileFromTree(filePath) {
         }
 
         // Update file count in subtitle
-        const subtitle = document.querySelector('.subtitle');
-        if (subtitle) {
-            const match = subtitle.textContent.match(/(\d+) markdown file/);
-            if (match) {
-                const newCount = Math.max(0, parseInt(match[1]) - 1);
-                subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-                console.log('[removeFileFromTree] Updated count to:', newCount);
-            }
-        }
+        updateFileCount(-1);
 
         console.log('[removeFileFromTree] Successfully removed file');
     } catch (error) {
         console.error('[removeFileFromTree] Error:', error);
         // Don't crash the page - just log the error
     }
+}
+
+// Expand all parent directories for a given file path
+function expandParentDirectories(filePath) {
+    if (!filePath) return false;
+
+    // Decode URL encoding (handles spaces, unicode, etc.)
+    const decoded = decodeURIComponent(filePath);
+
+    // Parse parent paths: "a/b/c/file.md" → ["a", "a/b", "a/b/c"]
+    const segments = decoded.split('/');
+    if (segments.length <= 1) {
+        // Root-level file, no parents to expand
+        return true;
+    }
+
+    const parentPaths = [];
+    for (let i = 1; i < segments.length; i++) {
+        parentPaths.push(segments.slice(0, i).join('/'));
+    }
+
+    let allFound = true;
+    parentPaths.forEach(path => {
+        const selector = `.tree-directory[data-path="${CSS.escape(path)}"]`;
+        const dir = document.querySelector(selector);
+
+        if (!dir) {
+            console.warn(`[expandParents] Parent directory not found: ${path}`);
+            allFound = false;
+            return;
+        }
+
+        // Only expand if currently collapsed
+        if (dir.dataset.collapsed === 'true') {
+            toggleDir(dir);
+        }
+    });
+
+    console.log(`[expandParents] Expanded ${parentPaths.length} parent directories for: ${decoded}`);
+    return allFound;
+}
+
+// Refresh tree from server (self-healing mechanism)
+async function refreshTree() {
+    try {
+        const fileTree = document.querySelector('.sidebar-tree');
+        if (!fileTree) {
+            console.log('[refreshTree] No sidebar-tree element found, skipping');
+            return;
+        }
+
+        // 1. Capture scroll position
+        const sidebarContent = document.querySelector('.sidebar-content');
+        const scrollPos = sidebarContent ? sidebarContent.scrollTop : 0;
+
+        console.log('[refreshTree] Refreshing tree, scroll pos:', scrollPos);
+
+        // 2. Fetch fresh tree HTML from server
+        const response = await fetch('/tree-html', {
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('[refreshTree] Server returned', response.status);
+            return;
+        }
+
+        const html = await response.text();
+
+        // 3. Replace tree DOM
+        fileTree.innerHTML = html;
+
+        // 4. Restore expanded state from localStorage
+        restoreTreeState();
+
+        // 5. Restore scroll position
+        if (sidebarContent) {
+            sidebarContent.scrollTop = scrollPos;
+        }
+
+        console.log('[refreshTree] Tree refreshed successfully');
+    } catch (error) {
+        console.error('[refreshTree] Error:', error);
+        // Don't crash - graceful degradation
+    }
+}
+
+// Schedule tree refresh with debouncing (batches rapid updates)
+function scheduleTreeRefresh() {
+    // Clear any pending refresh
+    if (refreshTreeTimer) {
+        clearTimeout(refreshTreeTimer);
+    }
+
+    // Schedule new refresh after 800ms of inactivity
+    refreshTreeTimer = setTimeout(() => {
+        refreshTree();
+        refreshTreeTimer = null;
+    }, 800);
+
+    console.log('[scheduleTreeRefresh] Tree refresh scheduled');
 }
 
 // Download HTML functionality
@@ -745,7 +926,7 @@ function getTreeStateKey() {
     }
 }
 
-// Save tree expansion state and scroll position to sessionStorage
+// Save tree expansion state and scroll position to localStorage
 function saveTreeState() {
     try {
         const storageKey = getTreeStateKey();
@@ -758,15 +939,18 @@ function saveTreeState() {
         const directories = fileTree.querySelectorAll('.tree-directory');
 
         directories.forEach(dir => {
-            // Save directories that are NOT collapsed (i.e., expanded)
-            if (dir.dataset.collapsed !== 'true') {
-                // Use .dir-name element for reliable text extraction
-                const dirNameEl = dir.querySelector('.dir-name');
-                const name = dirNameEl ? dirNameEl.textContent.trim() : '';
+            const path = dir.dataset.path;
+            if (!path) return;
 
-                if (name) {
-                    expandedDirs.push(name);
-                }
+            // Check actual visual state (not data attribute, which may not be set by server)
+            const treeItem = dir.closest('.tree-item');
+            const childrenContainer = treeItem?.querySelector('.tree-children');
+            if (!childrenContainer) return;
+
+            // Save only directories that are visually expanded
+            const isCollapsed = childrenContainer.style.display === 'none';
+            if (!isCollapsed) {
+                expandedDirs.push(path);
             }
         });
 
@@ -775,20 +959,20 @@ function saveTreeState() {
             scrollY: window.scrollY
         };
 
-        sessionStorage.setItem(storageKey, JSON.stringify(state));
+        localStorage.setItem(storageKey, JSON.stringify(state));
         console.log('[TreeState] Saved state for', storageKey, ':', state);
     } catch (error) {
         console.error('[TreeState] Failed to save:', error);
     }
 }
 
-// Restore tree expansion state and scroll position from sessionStorage
+// Restore tree expansion state and scroll position from localStorage
 function restoreTreeState() {
     try {
         const storageKey = getTreeStateKey();
         if (!storageKey) return;
 
-        const stored = sessionStorage.getItem(storageKey);
+        const stored = localStorage.getItem(storageKey);
         if (!stored) return;
 
         const state = JSON.parse(stored);
@@ -801,15 +985,25 @@ function restoreTreeState() {
         const directories = fileTree.querySelectorAll('.tree-directory');
 
         directories.forEach(dir => {
-            // Use .dir-name element for reliable text extraction
-            const dirNameEl = dir.querySelector('.dir-name');
-            const name = dirNameEl ? dirNameEl.textContent.trim() : '';
+            // Use data-path attribute for unique identification
+            const path = dir.dataset.path;
 
-            const shouldBeExpanded = state.expandedDirs.includes(name);
-            const isCurrentlyCollapsed = dir.dataset.collapsed === 'true';
+            const shouldBeExpanded = state.expandedDirs.includes(path);
 
-            // If directory should be expanded but is currently collapsed, toggle it
+            // Check actual visual state by looking at childrenContainer display
+            const treeItem = dir.closest('.tree-item');
+            const childrenContainer = treeItem?.querySelector('.tree-children');
+
+            if (!childrenContainer) return; // No children, skip
+
+            const isCurrentlyCollapsed = childrenContainer.style.display === 'none';
+
+            // Toggle if current state doesn't match desired state
             if (shouldBeExpanded && isCurrentlyCollapsed) {
+                // Should be expanded but is collapsed - expand it
+                toggleDir(dir);
+            } else if (!shouldBeExpanded && !isCurrentlyCollapsed) {
+                // Should be collapsed but is expanded - collapse it
                 toggleDir(dir);
             }
         });
@@ -833,20 +1027,32 @@ const MAX_NOTIFICATIONS = 10;
 const RECENT_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 // Save notification to sessionStorage
-function saveNotification(message, filePath) {
+function saveNotification(message, filePath, session) {
     try {
         const notifications = getNotificationHistory();
-        const notification = {
-            id: Date.now(),
-            message: message,
-            filePath: filePath,
-            timestamp: Date.now()
-        };
 
-        // Add to beginning, keep max 10
-        notifications.unshift(notification);
-        if (notifications.length > MAX_NOTIFICATIONS) {
-            notifications.pop();
+        // Check if the most recent notification is for the same file
+        // If so, update its timestamp instead of creating a duplicate
+        if (notifications.length > 0 && notifications[0].filePath === filePath) {
+            notifications[0].timestamp = Date.now();
+            notifications[0].id = Date.now();
+            notifications[0].session = session || notifications[0].session; // Update session if provided
+            console.log(`[Notification] Updated timestamp for existing notification: ${filePath}`);
+        } else {
+            // Different file or first notification - add new entry
+            const notification = {
+                id: Date.now(),
+                message: message,
+                filePath: filePath,
+                session: session || null,
+                timestamp: Date.now()
+            };
+
+            notifications.unshift(notification);
+            if (notifications.length > MAX_NOTIFICATIONS) {
+                notifications.pop();
+            }
+            console.log(`[Notification] Added new notification: ${filePath}`);
         }
 
         sessionStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(notifications));
@@ -880,6 +1086,117 @@ function clearNotificationHistory() {
     updateNotificationBadge();
     renderNotificationList();
     closeNotificationDropdown();
+}
+
+// =============================================================================
+// Session Metadata Persistence (localStorage with 7-day TTL)
+// =============================================================================
+
+const SESSION_STORAGE_KEY_PREFIX = 'peekm:sessions:';
+const SESSION_TTL_DAYS = 7;
+const MAX_SESSIONS_PER_DIR = 100;
+
+// Get localStorage key for current browse directory
+function getSessionStorageKey() {
+    // Use current directory path as key suffix
+    const content = document.getElementById('content');
+    const browsePath = content ? (content.dataset.path || '') : '';
+    return SESSION_STORAGE_KEY_PREFIX + browsePath;
+}
+
+// Save session metadata to localStorage
+function saveSessionMetadata(filePath, sessionData) {
+    try {
+        const storageKey = getSessionStorageKey();
+        const sessions = getSessionsFromStorage(storageKey);
+
+        const sessionEntry = {
+            filePath: filePath,
+            sessionData: sessionData,
+            storedAt: Date.now()
+        };
+
+        // Update existing or add new
+        const existingIndex = sessions.findIndex(s => s.filePath === filePath);
+        if (existingIndex !== -1) {
+            sessions[existingIndex] = sessionEntry;
+        } else {
+            sessions.push(sessionEntry);
+        }
+
+        // Limit to MAX_SESSIONS_PER_DIR
+        if (sessions.length > MAX_SESSIONS_PER_DIR) {
+            sessions.sort((a, b) => b.storedAt - a.storedAt);
+            sessions.splice(MAX_SESSIONS_PER_DIR);
+        }
+
+        localStorage.setItem(storageKey, JSON.stringify(sessions));
+        console.log('[Session] Saved metadata for:', filePath);
+    } catch (error) {
+        console.error('[Session] Failed to save metadata:', error);
+    }
+}
+
+// Get session metadata for a file path
+function getSessionMetadata(filePath) {
+    try {
+        const storageKey = getSessionStorageKey();
+        const sessions = getSessionsFromStorage(storageKey);
+
+        const entry = sessions.find(s => s.filePath === filePath);
+        if (!entry) return null;
+
+        // Check if expired (7 days)
+        const age = Date.now() - entry.storedAt;
+        const maxAge = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+        if (age > maxAge) {
+            console.log('[Session] Metadata expired for:', filePath);
+            return null;
+        }
+
+        return entry.sessionData;
+    } catch (error) {
+        console.error('[Session] Failed to retrieve metadata:', error);
+        return null;
+    }
+}
+
+// Get all sessions from localStorage (with pruning)
+function getSessionsFromStorage(storageKey) {
+    try {
+        const stored = localStorage.getItem(storageKey);
+        if (!stored) return [];
+
+        const sessions = JSON.parse(stored);
+
+        // Prune expired entries
+        const maxAge = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const validSessions = sessions.filter(s => (now - s.storedAt) <= maxAge);
+
+        // Update storage if we pruned anything
+        if (validSessions.length !== sessions.length) {
+            localStorage.setItem(storageKey, JSON.stringify(validSessions));
+            console.log('[Session] Pruned', sessions.length - validSessions.length, 'expired entries');
+        }
+
+        return validSessions;
+    } catch (error) {
+        console.error('[Session] Failed to load sessions:', error);
+        return [];
+    }
+}
+
+// Clear all session metadata for current directory
+function clearSessionMetadata() {
+    try {
+        const storageKey = getSessionStorageKey();
+        localStorage.removeItem(storageKey);
+        console.log('[Session] Cleared all metadata');
+    } catch (error) {
+        console.error('[Session] Failed to clear metadata:', error);
+    }
 }
 
 // Toggle notification history dropdown
@@ -925,11 +1242,15 @@ function renderNotificationList() {
     listEl.innerHTML = notifications.map(notif => {
         const timeAgo = getTimeAgo(notif.timestamp);
         const href = notif.filePath ? `/view/${encodeURIComponent(notif.filePath)}` : '#';
+        const sessionBadge = notif.session ? `<span class="session-badge">${escapeHtml(notif.session)}</span>` : '';
 
         return `
             <a href="${href}" class="notification-item" onclick="handleNotificationClick(event, '${href}')">
                 <div class="notification-item-message">${escapeHtml(notif.message)}</div>
-                <div class="notification-item-time">${timeAgo}</div>
+                <div class="notification-item-meta">
+                    <span class="notification-item-time">${timeAgo}</span>
+                    ${sessionBadge}
+                </div>
             </a>
         `;
     }).join('');
@@ -1166,6 +1487,9 @@ function highlightCurrentFile() {
     // Get current file path from URL
     const currentPath = decodeURIComponent(window.location.pathname.replace('/view/', ''));
 
+    // Auto-expand parent directories before highlighting
+    expandParentDirectories(currentPath);
+
     // Find and highlight matching link
     for (let link of allLinks) {
         const href = link.getAttribute('href');
@@ -1224,6 +1548,48 @@ function getAllFiles() {
     return files;
 }
 
+// Fuzzy match score: returns score (higher is better), -1 if no match
+function fuzzyMatchScore(str, query) {
+    str = str.toLowerCase();
+    query = query.toLowerCase();
+
+    // Exact match gets highest score
+    if (str === query) return 1000;
+
+    // Starts with query gets very high score
+    if (str.startsWith(query)) return 900;
+
+    // Contains query as substring gets high score
+    if (str.includes(query)) return 800;
+
+    // Fuzzy match: all query chars must appear in order
+    let strIndex = 0;
+    let queryIndex = 0;
+    let score = 0;
+    let consecutiveMatches = 0;
+
+    while (strIndex < str.length && queryIndex < query.length) {
+        if (str[strIndex] === query[queryIndex]) {
+            // Bonus for consecutive character matches
+            consecutiveMatches++;
+            score += 10 + (consecutiveMatches * 5);
+            queryIndex++;
+        } else {
+            consecutiveMatches = 0;
+            score -= 1; // Penalty for gaps
+        }
+        strIndex++;
+    }
+
+    // All query characters must match
+    if (queryIndex !== query.length) return -1;
+
+    // Bonus for shorter strings (more precise matches)
+    score += Math.max(0, 100 - str.length);
+
+    return score;
+}
+
 // Search files and show dropdown
 function searchFiles(query) {
     const dropdown = document.getElementById('search-dropdown');
@@ -1243,13 +1609,19 @@ function searchFiles(query) {
         return;
     }
 
-    const searchQuery = query.toLowerCase().trim();
+    const searchQuery = query.trim();
     const allFiles = getAllFiles();
 
-    // Filter matching files
-    searchResults = allFiles.filter(file =>
-        file.name.toLowerCase().includes(searchQuery)
-    );
+    // Fuzzy match and score files
+    const scoredFiles = allFiles
+        .map(file => ({
+            ...file,
+            score: fuzzyMatchScore(file.name, searchQuery)
+        }))
+        .filter(file => file.score > 0)
+        .sort((a, b) => b.score - a.score); // Sort by score descending
+
+    searchResults = scoredFiles;
 
     // Show dropdown with results
     if (dropdown && resultsContainer) {

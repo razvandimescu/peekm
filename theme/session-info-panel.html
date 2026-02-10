@@ -1,0 +1,78 @@
+{{define "session-info-panel"}}
+<!-- Session Info Panel -->
+<div id="sessionInfoPanel" class="session-info-panel" aria-hidden="true" style="display: none;">
+    <div class="session-info-content">
+        <!-- Essential Section -->
+        <div class="session-info-section">
+            <div class="session-info-field">
+                <span class="session-info-label">Session ID:</span>
+                <div class="session-info-value-group">
+                    <code class="session-info-value session-id-value">{{.SessionData.SessionID}}</code>
+                    <button
+                        class="session-copy-button"
+                        onclick="copyToClipboard('{{.SessionData.SessionID}}')"
+                        aria-label="Copy session ID"
+                        title="Copy session ID"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path>
+                            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="session-info-field">
+                <span class="session-info-label">Operation:</span>
+                <span class="session-info-value">
+                    <span class="session-operation-badge session-operation-{{.SessionData.ToolName}}">{{.SessionData.ToolName}}</span>
+                </span>
+            </div>
+
+            <div class="session-info-field">
+                <span class="session-info-label">Permission Mode:</span>
+                <span class="session-info-value">
+                    <span class="session-permission-badge session-permission-{{.SessionData.PermissionMode}}">{{.SessionData.PermissionMode}}</span>
+                </span>
+            </div>
+
+            <div class="session-info-field">
+                <span class="session-info-label">Timestamp:</span>
+                <span class="session-info-value">
+                    <time class="session-timestamp" datetime="{{formatISO .SessionData.Timestamp}}">{{formatISO .SessionData.Timestamp}}</time>
+                </span>
+            </div>
+        </div>
+
+        <!-- Technical Details Section (Collapsible) -->
+        <details class="session-technical-details">
+            <summary class="session-technical-summary">
+                <svg class="session-chevron" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"></path>
+                </svg>
+                <span>Technical Details</span>
+            </summary>
+            <div class="session-technical-content">
+                <div class="session-info-field">
+                    <span class="session-info-label">Working Directory:</span>
+                    <code class="session-info-value">{{.SessionData.CWD}}</code>
+                </div>
+
+                {{if .SessionData.ToolUseID}}
+                <div class="session-info-field">
+                    <span class="session-info-label">Tool Use ID:</span>
+                    <code class="session-info-value">{{.SessionData.ToolUseID}}</code>
+                </div>
+                {{end}}
+
+                {{if .SessionData.TranscriptPath}}
+                <div class="session-info-field">
+                    <span class="session-info-label">Transcript Path:</span>
+                    <code class="session-info-value">{{.SessionData.TranscriptPath}}</code>
+                </div>
+                {{end}}
+            </div>
+        </details>
+    </div>
+</div>
+{{end}}

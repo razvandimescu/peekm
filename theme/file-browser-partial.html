@@ -14,14 +14,33 @@
         {{if .ShowBackButton}}
         <div class="header-actions">
             <div style="display: flex; gap: 8px; margin-left: auto;">
+                {{if .SessionData}}
+                <button
+                    id="sessionInfoButton"
+                    class="session-info-button"
+                    onclick="toggleSessionInfo()"
+                    aria-label="Show AI session information"
+                    aria-expanded="false"
+                    title="View AI session details"
+                >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-3a1 1 0 0 1 1 1v4a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1Zm0-2a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/>
+                    </svg>
+                    <span class="session-info-ai-badge">AI</span>
+                </button>
+                {{end}}
                 <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
-                <button class="delete-button" onclick="confirmDelete()">🗑️ Delete Document</button>
+                <button class="delete-button" onclick="confirmDelete()" title="Move this file to trash">🗑️ Delete File</button>
             </div>
         </div>
         {{end}}
 
         <h1>{{.Title}}</h1>
         <p class="subtitle">{{.Subtitle}}</p>
+
+        {{if .SessionData}}
+        {{template "session-info-panel" .}}
+        {{end}}
 
         {{if .Content}}
             {{.Content}}
