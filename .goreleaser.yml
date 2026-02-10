@@ -1,3 +1,5 @@
+version: 2
+
 project_name: peekm
 
 before:
@@ -29,7 +31,8 @@ builds:
 
 archives:
   - id: peekm
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -37,7 +40,8 @@ archives:
       {{- .Arch }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE
       - README.md
@@ -65,8 +69,10 @@ changelog:
     - title: Others
       order: 999
 
-brews:
+homebrew_casks:
   - name: peekm
+    binaries:
+      - peekm
     repository:
       owner: razvandimescu
       name: homebrew-tap
@@ -76,11 +82,6 @@ brews:
       email: bot@goreleaser.com
     homepage: "https://github.com/razvandimescu/peekm"
     description: "Zen-like markdown viewer with live reload"
-    license: "MIT"
-    install: |
-      bin.install "peekm"
-    test: |
-      system "#{bin}/peekm", "--version"
 
 release:
   github:
