@@ -68,13 +68,13 @@ changelog:
 brews:
   - name: peekm
     repository:
-      owner: rd
+      owner: razvandimescu
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    homepage: "https://github.com/rd/peekm"
+    homepage: "https://github.com/razvandimescu/peekm"
     description: "Zen-like markdown viewer with live reload"
     license: "MIT"
     install: |
@@ -84,7 +84,7 @@ brews:
 
 release:
   github:
-    owner: rd
+    owner: razvandimescu
     name: peekm
   draft: false
   prerelease: auto
@@ -94,4 +94,4 @@ release:
 
     Zen-like markdown viewer with live reload.
   footer: |
-    **Full Changelog**: https://github.com/rd/peekm/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/razvandimescu/peekm/compare/{{ .PreviousTag }}...{{ .Tag }}

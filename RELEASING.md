@@ -1,11 +1,11 @@
 # Release Process
 
-This document describes how to create a new release of peek.
+This document describes how to create a new release of peekm.
 
 ## Prerequisites
 
 1. **GitHub repository**: Ensure you have push access to the repository
-2. **Homebrew tap repository**: Create `homebrew-tap` repository at https://github.com/rd/homebrew-tap
+2. **Homebrew tap repository**: Create `homebrew-tap` repository at https://github.com/razvandimescu/homebrew-tap
 3. **npm account**: Create account at https://www.npmjs.com and generate access token
 4. **GitHub secrets**: Add the following secrets to your repository:
    - `HOMEBREW_TAP_GITHUB_TOKEN`: Personal access token with repo write access
@@ -49,7 +49,7 @@ After the GitHub release is complete, publish to npm:
 
 **Option A: Using GitHub Actions** (Recommended)
 
-1. Go to Actions → "Publish to npm"
+1. Go to Actions > "Publish to npm"
 2. Click "Run workflow"
 3. Enter the version number (e.g., `0.1.0`)
 4. Click "Run workflow"
@@ -69,30 +69,30 @@ gh release download "v${VERSION}" -D dist
 
 **GitHub Releases**:
 ```bash
-# Visit: https://github.com/rd/peek/releases
+# Visit: https://github.com/razvandimescu/peekm/releases
 # Verify binaries are present and checksums are correct
 ```
 
 **Homebrew**:
 ```bash
-brew tap rd/tap
-brew install peek
-peek --version
+brew tap razvandimescu/tap
+brew install peekm
+peekm --version
 ```
 
 **npm**:
 ```bash
-npm install -g peek
-peek --version
+npm install -g peekm
+peekm --version
 ```
 
 ## Version Numbering
 
 We follow [Semantic Versioning](https://semver.org/):
 
-- **MAJOR** version (v1.0.0 → v2.0.0): Breaking changes
-- **MINOR** version (v0.1.0 → v0.2.0): New features, backwards compatible
-- **PATCH** version (v0.1.0 → v0.1.1): Bug fixes, backwards compatible
+- **MAJOR** version (v1.0.0 > v2.0.0): Breaking changes
+- **MINOR** version (v0.1.0 > v0.2.0): New features, backwards compatible
+- **PATCH** version (v0.1.0 > v0.1.1): Bug fixes, backwards compatible
 
 ## Rollback
 
@@ -108,9 +108,9 @@ If a release has issues:
 
 3. **Unpublish from npm** (within 72 hours):
    ```bash
-   npm unpublish peek@0.1.0
+   npm unpublish peekm@0.1.0
    # Also unpublish platform packages
-   npm unpublish @peek/darwin-arm64@0.1.0
+   npm unpublish @peekm/darwin-arm64@0.1.0
    # ... etc
    ```
 
@@ -121,7 +121,7 @@ If a release has issues:
 After a successful release:
 
 1. Update README if needed (remove "Coming soon" labels)
-2. Announce on social media / relevant channels
+2. Announce on relevant channels
 3. Monitor GitHub issues for bug reports
 
 ## Testing Pre-releases
@@ -151,4 +151,4 @@ git push origin v0.1.0-alpha.1
 **npm publish fails**:
 - Verify `NPM_TOKEN` secret is set
 - Ensure package name is available (first release only)
-- Check npm package naming: `@peek/*` scope
+- Check npm package naming: `@peekm/*` scope

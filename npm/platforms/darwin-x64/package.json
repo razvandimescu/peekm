@@ -1,15 +1,15 @@
 {
-  "name": "@peek/darwin-x64",
+  "name": "@peekm/darwin-x64",
   "version": "0.1.0",
-  "description": "peek binary for macOS x64",
+  "description": "peekm binary for macOS x64",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rd/peek.git"
+    "url": "https://github.com/razvandimescu/peekm.git"
   },
   "license": "MIT",
   "os": ["darwin"],
   "cpu": ["x64"],
   "files": [
-    "bin/peek"
+    "bin/peekm"
   ]
 }

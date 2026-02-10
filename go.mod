@@ -1,4 +1,4 @@
-module github.com/rd/peekm
+module github.com/razvandimescu/peekm
 
 go 1.23.8
 

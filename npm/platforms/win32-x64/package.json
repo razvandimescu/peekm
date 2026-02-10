@@ -1,15 +1,15 @@
 {
-  "name": "@peek/win32-x64",
+  "name": "@peekm/win32-x64",
   "version": "0.1.0",
-  "description": "peek binary for Windows x64",
+  "description": "peekm binary for Windows x64",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rd/peek.git"
+    "url": "https://github.com/razvandimescu/peekm.git"
   },
   "license": "MIT",
   "os": ["win32"],
   "cpu": ["x64"],
   "files": [
-    "bin/peek.exe"
+    "bin/peekm.exe"
   ]
 }

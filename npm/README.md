@@ -1,50 +1,50 @@
-# peek
+# peekm
 
-> Zen-like markdown viewer with centered layout and live reload
+> Zen-like markdown viewer with live reload
 
-A lightweight, fast markdown viewer that displays your markdown files with a clean, centered layout. Perfect for reading documentation, writing content, or previewing markdown in real-time.
+A lightweight, fast markdown viewer that displays your markdown files with a clean, VS Code-style layout. Perfect for reading documentation, writing content, or previewing markdown in real-time.
 
 ## Features
 
-- 📁 **Directory Browser** - Browse and navigate all markdown files in a directory with a visual tree
-- ✨ **Centered Layout** - Clean, readable 900px max-width design
-- 🔄 **Live Reload** - Auto-refresh when file changes
-- 🎨 **GitHub-Flavored Markdown** - Full GFM support with syntax highlighting
-- ⚡ **Fast & Lightweight** - Single binary, zero dependencies
-- 🖥️ **Cross-Platform** - Works on macOS, Linux, and Windows
+- **Directory Browser** - Browse and navigate all markdown files in a directory with a visual tree
+- **VS Code Layout** - Fixed sidebar with independent scrolling
+- **Live Reload** - Auto-refresh when file changes (SSE-based)
+- **GitHub-Flavored Markdown** - Full GFM support with syntax highlighting
+- **Fast & Lightweight** - Single binary, zero dependencies
+- **Cross-Platform** - Works on macOS, Linux, and Windows
 
 ## Installation
 
 ```bash
-npm install -g peek
+npm install -g peekm
 ```
 
 Or use with `npx` (no installation required):
 
 ```bash
-npx peek README.md
+npx peekm README.md
 ```
 
 ## Usage
 
 ```bash
 # Browse all markdown files in current directory
-peek
+peekm
 
 # Browse a specific directory
-peek ../docs
+peekm ../docs
 
 # View a single markdown file
-peek README.md
+peekm README.md
 
 # Custom port
-peek -port 8080 document.md
+peekm -port 8080
 
 # Don't auto-open browser
-peek -browser=false notes.md
+peekm -browser=false
 
 # Show version
-peek -version
+peekm -version
 ```
 
 ### Options
@@ -76,4 +76,4 @@ MIT
 
 ## More Information
 
-Visit [github.com/rd/peek](https://github.com/rd/peek) for full documentation.
+Visit [github.com/razvandimescu/peekm](https://github.com/razvandimescu/peekm) for full documentation.

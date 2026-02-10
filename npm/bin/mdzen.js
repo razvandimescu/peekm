@@ -30,12 +30,12 @@ if (!platformMap[platform] || !platformMap[platform][arch]) {
 }
 
 const packageName = platformMap[platform][arch];
-const binaryName = platform === 'win32' ? 'peek.exe' : 'peek';
-const binaryPath = join(__dirname, '..', 'node_modules', `@peek/${packageName}`, 'bin', binaryName);
+const binaryName = platform === 'win32' ? 'peekm.exe' : 'peekm';
+const binaryPath = join(__dirname, '..', 'node_modules', `@peekm/${packageName}`, 'bin', binaryName);
 
 // Check if binary exists
 if (!existsSync(binaryPath)) {
-  console.error(`peek binary not found for ${platform}-${arch}`);
+  console.error(`peekm binary not found for ${platform}-${arch}`);
   console.error(`Expected at: ${binaryPath}`);
   console.error(`\nTry reinstalling: npm install --force`);
   process.exit(1);
@@ -48,7 +48,7 @@ const result = spawnSync(binaryPath, process.argv.slice(2), {
 });
 
 if (result.error) {
-  console.error(`Failed to execute peek: ${result.error.message}`);
+  console.error(`Failed to execute peekm: ${result.error.message}`);
   process.exit(1);
 }
 
