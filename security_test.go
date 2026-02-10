@@ -22,8 +22,13 @@ func TestValidateAndResolvePath(t *testing.T) {
 		setup       func() (string, func()) // Returns test path and cleanup function
 	}{
 		{
-			name:    "valid path with tilde",
-			input:   "~/Documents",
+			name: "valid path with tilde",
+			setup: func() (string, func()) {
+				testPath := filepath.Join(homeDir, "peekm_test_tilde")
+				os.Mkdir(testPath, 0755)
+				cleanup := func() { os.Remove(testPath) }
+				return "~/peekm_test_tilde", cleanup
+			},
 			wantErr: false,
 		},
 		{
