@@ -377,38 +377,27 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 	var dirsToWatch []string
 	homeDir, _ := os.UserHomeDir()
 
+	customPatterns := getIgnorePatterns(rootDir)
+
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Security: Skip symlinks outside $HOME
-		resolvedInfo, shouldSkip, err := validateSymlinkSecurity(path, info, homeDir)
-		if shouldSkip {
-			return filepath.SkipDir
-		}
-		if err != nil {
+		resolvedInfo, _, resolveErr := validateSymlinkSecurity(path, info, homeDir)
+		if resolveErr != nil {
 			return nil
 		}
 		if resolvedInfo != nil {
 			info = resolvedInfo
 		}
 
-		// Skip hidden and excluded directories
-		if info.IsDir() {
-			name := info.Name()
-			// Skip hidden dirs EXCEPT .claude (for AI workflows)
-			if strings.HasPrefix(name, ".") && path != rootDir && name != ".claude" {
+		if info.IsDir() && path != rootDir {
+			if isExcludedDir(info.Name(), customPatterns) {
 				return filepath.SkipDir
 			}
-			// Skip hardcoded exclusions (O(1) map lookup)
-			if isHardcodedExclusion(name) {
-				return filepath.SkipDir
-			}
-
-			if path != rootDir {
-				dirsToWatch = append(dirsToWatch, path)
-			}
+			dirsToWatch = append(dirsToWatch, path)
 		}
 
 		return nil
@@ -467,15 +456,29 @@ func withRecovery(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// withCSRFCheck rejects cross-origin POST requests by validating the Origin header
+func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
+	allowedLocal := fmt.Sprintf("http://localhost:%d", *port)
+	allowedLoopback := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && origin != allowedLocal && origin != allowedLoopback {
+			log.Printf("CSRF: rejected cross-origin POST from %s", origin)
+			http.Error(w, "Forbidden: cross-origin request", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // registerRoutes registers all HTTP routes
 func registerRoutes() {
 	http.HandleFunc("/", withRecovery(serveBrowser))
 	http.HandleFunc("/view/", withRecovery(serveFile))
-	http.HandleFunc("/navigate", withRecovery(handleNavigate))
-	http.HandleFunc("/delete", withRecovery(handleDelete))
+	http.HandleFunc("/navigate", withRecovery(withCSRFCheck(handleNavigate)))
+	http.HandleFunc("/delete", withRecovery(withCSRFCheck(handleDelete)))
 	http.HandleFunc("/raw/", withRecovery(serveRaw))
-	http.HandleFunc("/save", withRecovery(handleSave))
-	http.HandleFunc("/download", withRecovery(handleDownload))
+	http.HandleFunc("/save", withRecovery(withCSRFCheck(handleSave)))
+	http.HandleFunc("/download", withRecovery(withCSRFCheck(handleDownload)))
 	http.HandleFunc("/events", withRecovery(serveSSE))
 	http.HandleFunc("/tree-html", withRecovery(serveTreeHTML))
 
@@ -496,20 +499,20 @@ func validateSymlinkSecurity(path string, info os.FileInfo, homeDir string) (os.
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		log.Printf("Warning: Skipping unresolvable symlink: %s", path)
-		return nil, info.IsDir(), err
+		return nil, false, err
 	}
 
 	// Check if resolved path is within $HOME
 	if homeDir != "" && !strings.HasPrefix(resolved, homeDir) {
 		log.Printf("Security: Skipping symlink outside home directory: %s -> %s", path, resolved)
-		return nil, info.IsDir(), fmt.Errorf("symlink outside home")
+		return nil, false, fmt.Errorf("symlink outside home")
 	}
 
 	// Update info to reflect the resolved target
 	resolvedInfo, err := os.Stat(resolved)
 	if err != nil {
 		log.Printf("Warning: Cannot stat symlink target: %s", resolved)
-		return nil, info.IsDir(), err
+		return nil, false, err
 	}
 
 	return resolvedInfo, false, nil
@@ -520,6 +523,24 @@ func validateSymlinkSecurity(path string, info os.FileInfo, homeDir string) (os.
 // isPartialRequest detects if the request is an AJAX/fetch request for partial content
 func isPartialRequest(r *http.Request) bool {
 	return r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+}
+
+// renderTemplate selects full/partial template, executes to buffer, and writes the response.
+// Returns true on success, false if an error was written to w.
+func renderTemplate(w http.ResponseWriter, r *http.Request, data any) bool {
+	tmpl := fileBrowserTmpl
+	if isPartialRequest(r) {
+		tmpl = fileBrowserPartialTmpl
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		log.Printf("Template execution error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return false
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
+	return true
 }
 
 func validateAndResolvePath(targetPath string) (string, error) {
@@ -587,6 +608,18 @@ func resolveFilePath(relativePath string) string {
 
 	// Clean the absolute path
 	return filepath.Clean(absFilePath)
+}
+
+// isWhitelistedFile checks if a path is in the current markdownFiles whitelist (thread-safe)
+func isWhitelistedFile(path string) bool {
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+	for _, f := range markdownFiles {
+		if f == path {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {
@@ -1008,6 +1041,11 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !isWhitelistedFile(validated) {
+		http.Error(w, "File not found or access denied", http.StatusForbidden)
+		return
+	}
+
 	content, err := os.ReadFile(validated)
 	if err != nil {
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
@@ -1042,12 +1080,16 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
-		// Return specific error message (file doesn't exist, permission denied, etc.)
 		statusCode := http.StatusForbidden
 		if strings.Contains(err.Error(), "does not exist") {
 			statusCode = http.StatusNotFound
 		}
 		http.Error(w, fmt.Sprintf("Cannot save file: %v", err), statusCode)
+		return
+	}
+
+	if !isWhitelistedFile(validated) {
+		http.Error(w, "File not found or access denied", http.StatusForbidden)
 		return
 	}
 
@@ -1062,7 +1104,7 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 
 func atomicWriteFile(path, content string) error {
 	dir := filepath.Dir(path)
-	tmpFile, err := os.CreateTemp(dir, ".peek-tmp-*")
+	tmpFile, err := os.CreateTemp(dir, ".peekm-tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -1092,13 +1134,25 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get currently viewed file
-	fileMutex.RLock()
-	filePath := currentFile
-	fileMutex.RUnlock()
+	// Accept file path from request body (avoids global state race between tabs)
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Path) == "" {
+		http.Error(w, "Missing file path", http.StatusBadRequest)
+		return
+	}
 
-	if filePath == "" {
-		http.Error(w, "No file currently open", http.StatusBadRequest)
+	absFilePath := resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(req.Path), "/")))
+
+	filePath, err := validateAndResolvePath(absFilePath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusForbidden)
+		return
+	}
+
+	if !isWhitelistedFile(filePath) {
+		http.Error(w, "File not found or access denied", http.StatusForbidden)
 		return
 	}
 
@@ -1348,18 +1402,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		BrowsePath:       currentBrowseDir,
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Choose template based on request type (SPA partial vs full page)
-	tmpl := fileBrowserTmpl
-	if isPartialRequest(r) {
-		tmpl = fileBrowserPartialTmpl
-	}
-
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("Template execution error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	renderTemplate(w, r, data)
 }
 
 // handleClaudeHook receives file modification events from Claude Code hooks
@@ -1492,17 +1535,20 @@ func moveToTrash(filePath string) error {
 
 	switch runtime.GOOS {
 	case "darwin": // macOS
-		// Use AppleScript to move to Trash
-		script := fmt.Sprintf(`tell application "Finder" to delete POSIX file "%s"`, filePath)
+		// Escape backslashes and double quotes to prevent AppleScript injection
+		escaped := strings.ReplaceAll(filePath, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		script := fmt.Sprintf(`tell application "Finder" to delete POSIX file "%s"`, escaped)
 		cmd = exec.Command("osascript", "-e", script)
 
 	case "linux":
-		// Try gio trash (GNOME/modern Linux)
+		// gio trash passes filePath as an argument, safe from injection
 		cmd = exec.Command("gio", "trash", filePath)
 
 	case "windows":
-		// Use PowerShell to move to Recycle Bin
-		script := fmt.Sprintf(`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('%s', 'OnlyErrorDialogs', 'SendToRecycleBin')`, filePath)
+		// Escape single quotes for PowerShell single-quoted string
+		escaped := strings.ReplaceAll(filePath, `'`, `''`)
+		script := fmt.Sprintf(`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('%s', 'OnlyErrorDialogs', 'SendToRecycleBin')`, escaped)
 		cmd = exec.Command("powershell", "-Command", script)
 
 	default:
@@ -1557,18 +1603,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	targetPath = validatedPath
 
-	// Security: check if file is in our markdown files whitelist
-	fileMutex.RLock()
-	found := false
-	for _, f := range markdownFiles {
-		if f == targetPath {
-			found = true
-			break
-		}
-	}
-	fileMutex.RUnlock()
-
-	if !found {
+	if !isWhitelistedFile(targetPath) {
 		http.Error(w, "File not found or access denied", http.StatusForbidden)
 		return
 	}
@@ -1604,23 +1639,14 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	// Resolve to absolute path using browseDir
 	absFilePath := resolveFilePath(filePath)
 
-	// Security: check if file is in our markdown files whitelist (thread-safe)
-	// This prevents directory traversal attacks by only allowing pre-scanned files
-	fileMutex.RLock()
-	currentBrowseDir := browseDir // Also capture for template data
-	found := false
-	for _, f := range markdownFiles {
-		if f == absFilePath {
-			found = true
-			break
-		}
-	}
-	fileMutex.RUnlock()
-
-	if !found {
+	if !isWhitelistedFile(absFilePath) {
 		http.NotFound(w, r)
 		return
 	}
+
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
 
 	// Render the markdown file
 	content, err := os.ReadFile(absFilePath)
@@ -1675,18 +1701,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Choose template based on request type (SPA partial vs full page)
-	tmpl := fileBrowserTmpl
-	if isPartialRequest(r) {
-		tmpl = fileBrowserPartialTmpl
-	}
-
-	if err := tmpl.Execute(w, data); err != nil {
-		log.Printf("Template execution error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	renderTemplate(w, r, data)
 }
 
 // parseIgnoreFile reads and parses .peekmignore file
@@ -1863,65 +1878,95 @@ func selectDefaultFile(files []string) string {
 }
 
 func collectMarkdownFiles(rootDir string) []string {
-	var files []string
-
-	// Load .peekmignore patterns from rootDir (with caching)
 	customPatterns := getIgnorePatterns(rootDir)
 	if len(customPatterns) > 0 {
 		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(customPatterns))
 	}
 
-	// Get home directory for security boundary checks
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Printf("Warning: Cannot determine home directory for security checks: %v", err)
-		homeDir = "" // Disable boundary check if we can't determine home
+	homeDir, _ := os.UserHomeDir()
+
+	visited := make(map[string]bool)
+	var files []string
+	collectMarkdownFilesWalk(rootDir, rootDir, homeDir, customPatterns, visited, &files)
+
+	sort.Strings(files)
+	return files
+}
+
+// isExcludedDir returns true if the directory name should be skipped
+func isExcludedDir(name string, customPatterns []string) bool {
+	if strings.HasPrefix(name, ".") && name != ".claude" {
+		return true
 	}
+	if isHardcodedExclusion(name) {
+		return true
+	}
+	if len(customPatterns) > 0 && matchesIgnorePattern(name, customPatterns) {
+		return true
+	}
+	return false
+}
 
-	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+// remapPath translates a resolved filesystem path back to its symlink-based equivalent
+func remapPath(resolved, walkDir, path string) string {
+	if walkDir == resolved {
+		return path
+	}
+	relPath, err := filepath.Rel(resolved, path)
+	if err != nil {
+		return path
+	}
+	return filepath.Join(walkDir, relPath)
+}
 
-		// Security: Skip symlinks that point outside $HOME
-		resolvedInfo, shouldSkip, err := validateSymlinkSecurity(path, info, homeDir)
-		if shouldSkip {
-			return filepath.SkipDir
-		}
+func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns []string, visited map[string]bool, files *[]string) {
+	// Resolve symlinks to get the real path for walking and cycle detection
+	resolved, err := filepath.EvalSymlinks(walkDir)
+	if err != nil {
+		return
+	}
+	if visited[resolved] {
+		return
+	}
+	visited[resolved] = true
+
+	// Walk the resolved path (filepath.Walk won't descend into symlink roots)
+	// Remap resolved paths back to the original symlink prefix for tree display
+	filepath.Walk(resolved, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+
+		// Security: Skip symlinks that point outside $HOME
+		resolvedInfo, shouldSkip, resolveErr := validateSymlinkSecurity(path, info, homeDir)
+		if shouldSkip {
+			return filepath.SkipDir
+		}
+		if resolveErr != nil {
+			return nil
+		}
+
+		isSymlink := info.Mode()&os.ModeSymlink != 0
 		if resolvedInfo != nil {
 			info = resolvedInfo
 		}
 
-		// Skip hidden and excluded directories (hardcoded + custom .peekmignore)
 		if info.IsDir() {
-			name := info.Name()
-			// Skip hidden dirs EXCEPT .claude (for AI workflows)
-			if strings.HasPrefix(name, ".") && path != rootDir && name != ".claude" {
+			if path != resolved && isExcludedDir(info.Name(), customPatterns) {
 				return filepath.SkipDir
 			}
-			// Skip hardcoded exclusions (O(1) map lookup)
-			if isHardcodedExclusion(name) {
-				return filepath.SkipDir
-			}
-			// Apply custom .peekmignore patterns (skip check if no patterns loaded)
-			if len(customPatterns) > 0 && matchesIgnorePattern(name, customPatterns) {
-				return filepath.SkipDir
+			if isSymlink && path != resolved {
+				collectMarkdownFilesWalk(remapPath(resolved, walkDir, path), rootDir, homeDir, customPatterns, visited, files)
+				return nil
 			}
 		}
 
-		// Collect .md files
 		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
-			files = append(files, path)
+			*files = append(*files, remapPath(resolved, walkDir, path))
 		}
 
 		return nil
 	})
-
-	sort.Strings(files)
-	return files
 }
 
 func generateTreeHTML() string {

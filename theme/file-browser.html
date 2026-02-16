@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>peek - Markdown Browser</title>
+    <title>peekm - Markdown Browser</title>
     <style>
         {{.GitHubCSS}}
         {{.ThemeOverrides}}
@@ -1885,28 +1885,10 @@
         // Copy to Clipboard with Visual Feedback
         function copyToClipboard(text) {
             if (!navigator.clipboard) {
-                // Fallback for browsers without clipboard API
                 console.warn('Clipboard API not available');
                 return;
             }
-
-            navigator.clipboard.writeText(text).then(() => {
-                // Find the button that was clicked (event.target)
-                const buttons = document.querySelectorAll('.session-copy-button');
-                buttons.forEach(btn => {
-                    if (btn.onclick && btn.onclick.toString().includes(text)) {
-                        // Add copied class for visual feedback
-                        btn.classList.add('copied');
-                        btn.setAttribute('aria-label', 'Copied!');
-
-                        // Reset after 2 seconds
-                        setTimeout(() => {
-                            btn.classList.remove('copied');
-                            btn.setAttribute('aria-label', 'Copy session ID');
-                        }, 2000);
-                    }
-                });
-            }).catch(err => {
+            navigator.clipboard.writeText(text).catch(err => {
                 console.error('Failed to copy:', err);
             });
         }
@@ -2025,36 +2007,57 @@
         }
 
         // Render session panel from localStorage data
+        // Sanitize a string for safe use in textContent (strips control chars)
+        function sanitizeSessionValue(val) {
+            return String(val || '').replace(/[\x00-\x1f]/g, '');
+        }
+
+        // Safe CSS class suffix: only allow alphanumeric, hyphen, underscore
+        function safeCssClass(val) {
+            return String(val || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        }
+
         function renderSessionPanel(filePath, sessionData) {
-            // Check if panel already exists
             if (document.getElementById('sessionInfoPanel')) return;
 
             const content = document.getElementById('content');
             if (!content) return;
 
-            // Find the header actions div to insert the button
             const headerActions = content.querySelector('.header-actions > div');
             if (!headerActions) return;
 
-            // Create session info button
+            // DOM construction helpers (no innerHTML with user data)
+            function el(tag, className, children) {
+                const node = document.createElement(tag);
+                if (className) node.className = className;
+                if (Array.isArray(children)) children.forEach(function(c) { node.appendChild(c); });
+                else if (typeof children === 'string') node.textContent = children;
+                return node;
+            }
+
+            function field(label, valueEl) {
+                const labelSpan = el('span', 'session-info-label', label);
+                return el('div', 'session-info-field', [labelSpan, valueEl]);
+            }
+
+            function badgeField(label, badgeClass, modifierPrefix, value) {
+                const badge = el('span', badgeClass + ' ' + modifierPrefix + '-' + safeCssClass(value), sanitizeSessionValue(value));
+                return field(label, el('span', 'session-info-value', [badge]));
+            }
+
+            function codeField(label, value) {
+                return field(label, el('code', 'session-info-value', sanitizeSessionValue(value)));
+            }
+
+            // Session info button (static HTML, no user data)
             const button = document.createElement('button');
             button.id = 'sessionInfoButton';
             button.className = 'session-info-button';
             button.setAttribute('onclick', 'toggleSessionInfo()');
             button.setAttribute('aria-label', 'Show session information');
             button.setAttribute('aria-expanded', 'false');
-            button.innerHTML = `
-                <span style="display: inline-flex; align-items: center; gap: 4px;">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="16" x2="12" y2="12"/>
-                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                    </svg>
-                    <span class="session-ai-badge">AI</span>
-                </span>
-            `;
+            button.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span class="session-ai-badge">AI</span></span>';
 
-            // Insert button before edit button
             const editBtn = headerActions.querySelector('button[onclick*="editFile"]');
             if (editBtn) {
                 headerActions.insertBefore(button, editBtn);
@@ -2062,74 +2065,68 @@
                 headerActions.appendChild(button);
             }
 
-            // Create session info panel
-            const panel = document.createElement('div');
+            // Session ID field with copy button
+            const sanitizedId = sanitizeSessionValue(sessionData.session_id);
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'session-copy-button';
+            copyBtn.setAttribute('aria-label', 'Copy session ID');
+            copyBtn.title = 'Copy session ID';
+            copyBtn.addEventListener('click', function() {
+                copyToClipboard(sanitizedId);
+                copyBtn.classList.add('copied');
+                copyBtn.setAttribute('aria-label', 'Copied!');
+                setTimeout(function() {
+                    copyBtn.classList.remove('copied');
+                    copyBtn.setAttribute('aria-label', 'Copy session ID');
+                }, 2000);
+            });
+            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+            const idGroup = el('div', 'session-info-value-group', [
+                el('code', 'session-info-value session-id-value', sanitizedId),
+                copyBtn
+            ]);
+
+            // Timestamp field
+            const timeEl = el('time', 'session-timestamp', formatRelativeTime(sessionData.timestamp));
+            timeEl.setAttribute('datetime', sanitizeSessionValue(sessionData.timestamp));
+
+            // Main section
+            const mainSection = el('div', 'session-info-main', [
+                field('Session ID:', idGroup),
+                badgeField('Operation:', 'session-operation-badge', 'session-operation', sessionData.tool_name),
+                badgeField('Permission Mode:', 'session-permission-badge', 'session-permission', sessionData.permission_mode),
+                field('Timestamp:', el('span', 'session-info-value', [timeEl]))
+            ]);
+
+            // Technical details (optional)
+            const techEntries = [
+                ['Working Directory:', sessionData.cwd],
+                ['Tool Use ID:', sessionData.tool_use_id],
+                ['Transcript Path:', sessionData.transcript_path]
+            ].filter(function(e) { return e[1]; });
+
+            const panelChildren = [mainSection];
+
+            if (techEntries.length > 0) {
+                const toggleBtn = document.createElement('button');
+                toggleBtn.className = 'session-technical-toggle';
+                toggleBtn.setAttribute('aria-expanded', 'false');
+                toggleBtn.addEventListener('click', function() { toggleTechnicalDetails(); });
+                toggleBtn.innerHTML = '<span class="session-technical-chevron">&#9654;</span> Technical Details';
+
+                const techContent = el('div', 'session-technical-content');
+                techContent.style.display = 'none';
+                techEntries.forEach(function(e) { techContent.appendChild(codeField(e[0], e[1])); });
+
+                panelChildren.push(el('div', 'session-technical-details', [toggleBtn, techContent]));
+            }
+
+            // Assemble panel
+            const panel = el('div', 'session-info-panel', [el('div', 'session-info-content', panelChildren)]);
             panel.id = 'sessionInfoPanel';
-            panel.className = 'session-info-panel';
             panel.setAttribute('aria-hidden', 'true');
             panel.style.display = 'none';
-
-            panel.innerHTML = `
-                <div class="session-info-content">
-                    <div class="session-info-main">
-                        <div class="session-info-field">
-                            <span class="session-info-label">Session ID:</span>
-                            <div class="session-info-value-group">
-                                <code class="session-info-value session-id-value">${sessionData.session_id}</code>
-                                <button class="session-copy-button" onclick="copyToClipboard('${sessionData.session_id}')"
-                                        aria-label="Copy session ID" title="Copy session ID">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="session-info-field">
-                            <span class="session-info-label">Operation:</span>
-                            <span class="session-info-value">
-                                <span class="session-operation-badge session-operation-${sessionData.tool_name}">${sessionData.tool_name}</span>
-                            </span>
-                        </div>
-                        <div class="session-info-field">
-                            <span class="session-info-label">Permission Mode:</span>
-                            <span class="session-info-value">
-                                <span class="session-permission-badge session-permission-${sessionData.permission_mode}">${sessionData.permission_mode}</span>
-                            </span>
-                        </div>
-                        <div class="session-info-field">
-                            <span class="session-info-label">Timestamp:</span>
-                            <span class="session-info-value">
-                                <time class="session-timestamp" datetime="${sessionData.timestamp}">${formatRelativeTime(sessionData.timestamp)}</time>
-                            </span>
-                        </div>
-                    </div>
-                    ${sessionData.cwd || sessionData.tool_use_id || sessionData.transcript_path ? `
-                    <div class="session-technical-details">
-                        <button class="session-technical-toggle" onclick="toggleTechnicalDetails()" aria-expanded="false">
-                            <span class="session-technical-chevron">▶</span>
-                            Technical Details
-                        </button>
-                        <div class="session-technical-content" style="display: none;">
-                            ${sessionData.cwd ? `
-                            <div class="session-info-field">
-                                <span class="session-info-label">Working Directory:</span>
-                                <code class="session-info-value">${sessionData.cwd}</code>
-                            </div>` : ''}
-                            ${sessionData.tool_use_id ? `
-                            <div class="session-info-field">
-                                <span class="session-info-label">Tool Use ID:</span>
-                                <code class="session-info-value">${sessionData.tool_use_id}</code>
-                            </div>` : ''}
-                            ${sessionData.transcript_path ? `
-                            <div class="session-info-field">
-                                <span class="session-info-label">Transcript Path:</span>
-                                <code class="session-info-value">${sessionData.transcript_path}</code>
-                            </div>` : ''}
-                        </div>
-                    </div>` : ''}
-                </div>
-            `;
 
             // Insert panel after subtitle
             const subtitle = content.querySelector('.subtitle');

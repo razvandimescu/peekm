@@ -873,8 +873,18 @@ function scheduleTreeRefresh() {
 
 // Download HTML functionality
 function downloadHTML() {
+    // Extract current file path from URL
+    const match = window.location.pathname.match(/\/view\/(.+)/);
+    const filePath = match ? '/' + decodeURIComponent(match[1]) : '';
+    if (!filePath) {
+        alert('No file currently open');
+        return;
+    }
+
     fetch('/download', {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath })
     })
     .then(response => {
         if (!response.ok) {
@@ -1239,21 +1249,38 @@ function renderNotificationList() {
         return;
     }
 
-    listEl.innerHTML = notifications.map(notif => {
+    listEl.innerHTML = '';
+    notifications.forEach(notif => {
         const timeAgo = getTimeAgo(notif.timestamp);
         const href = notif.filePath ? `/view/${encodeURIComponent(notif.filePath)}` : '#';
-        const sessionBadge = notif.session ? `<span class="session-badge">${escapeHtml(notif.session)}</span>` : '';
 
-        return `
-            <a href="${href}" class="notification-item" onclick="handleNotificationClick(event, '${href}')">
-                <div class="notification-item-message">${escapeHtml(notif.message)}</div>
-                <div class="notification-item-meta">
-                    <span class="notification-item-time">${timeAgo}</span>
-                    ${sessionBadge}
-                </div>
-            </a>
-        `;
-    }).join('');
+        const a = document.createElement('a');
+        a.href = href;
+        a.className = 'notification-item';
+        a.addEventListener('click', function(event) { handleNotificationClick(event, href); });
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'notification-item-message';
+        msgDiv.textContent = notif.message;
+        a.appendChild(msgDiv);
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'notification-item-meta';
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'notification-item-time';
+        timeSpan.textContent = timeAgo;
+        metaDiv.appendChild(timeSpan);
+
+        if (notif.session) {
+            const badge = document.createElement('span');
+            badge.className = 'session-badge';
+            badge.textContent = notif.session;
+            metaDiv.appendChild(badge);
+        }
+
+        a.appendChild(metaDiv);
+        listEl.appendChild(a);
+    });
 }
 
 // Handle notification item click (close dropdown + navigate)
