@@ -1,5 +1,6 @@
 # Binaries
-peek
+peekm
+peekm-optimized
 *.exe
 *.exe~
 *.dll
@@ -35,8 +36,8 @@ dist/
 # npm
 node_modules/
 npm/node_modules/
-npm/platforms/*/bin/peek
-npm/platforms/*/bin/peek.exe
+npm/platforms/*/bin/peekm
+npm/platforms/*/bin/peekm.exe
 *.log
 .npmrc
 .claude

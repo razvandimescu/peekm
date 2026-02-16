@@ -155,16 +155,14 @@ func TestCollectMarkdownFiles_SymlinkSecurity(t *testing.T) {
 	// Create symlink to file outside $HOME
 	evilSymlink := filepath.Join(testDir, "evil.md")
 	os.Symlink("/etc/passwd", evilSymlink)
-	defer os.Remove(evilSymlink)
 
 	// Create symlink to file inside $HOME (should be included)
 	goodTarget := filepath.Join(homeDir, "peekm_test_target.md")
 	os.WriteFile(goodTarget, []byte("# Good"), 0644)
-	defer os.Remove(goodTarget)
+	defer os.Remove(goodTarget) // outside testDir, needs explicit cleanup
 
 	goodSymlink := filepath.Join(testDir, "good.md")
 	os.Symlink(goodTarget, goodSymlink)
-	defer os.Remove(goodSymlink)
 
 	files := collectMarkdownFiles(testDir)
 
@@ -370,5 +368,67 @@ func TestCollectMarkdownFiles_CaseInsensitive(t *testing.T) {
 
 	if len(files) != 3 {
 		t.Errorf("expected 3 files (case insensitive), got %d: %v", len(files), files)
+	}
+}
+
+// TestCollectMarkdownFiles_SymlinkDirectory tests that symlinked directories are followed
+func TestCollectMarkdownFiles_SymlinkDirectory(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	// Create test structure in $HOME (required for security boundary)
+	rootDir := filepath.Join(homeDir, "peekm_test_symdir")
+	targetDir := filepath.Join(homeDir, "peekm_test_symdir_target")
+	os.MkdirAll(rootDir, 0755)
+	os.MkdirAll(targetDir, 0755)
+	defer os.RemoveAll(rootDir)
+	defer os.RemoveAll(targetDir)
+
+	// File in root
+	os.WriteFile(filepath.Join(rootDir, "root.md"), []byte("# Root"), 0644)
+
+	// Files in target directory
+	os.WriteFile(filepath.Join(targetDir, "linked.md"), []byte("# Linked"), 0644)
+
+	// Symlink directory inside root pointing to target
+	os.Symlink(targetDir, filepath.Join(rootDir, "docs"))
+
+	files := collectMarkdownFiles(rootDir)
+
+	if len(files) != 2 {
+		t.Errorf("expected 2 files (root.md + linked.md via symlink dir), got %d: %v", len(files), files)
+	}
+
+	// Verify paths use symlink prefix, not resolved target
+	for _, f := range files {
+		if strings.Contains(f, "linked.md") && !strings.Contains(f, "docs/linked.md") {
+			t.Errorf("symlinked file should use symlink path, got: %s", f)
+		}
+	}
+}
+
+// TestCollectMarkdownFiles_SymlinkCycle tests that circular symlinks don't cause infinite loops
+func TestCollectMarkdownFiles_SymlinkCycle(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	rootDir := filepath.Join(homeDir, "peekm_test_cycle")
+	os.MkdirAll(rootDir, 0755)
+	defer os.RemoveAll(rootDir)
+
+	os.WriteFile(filepath.Join(rootDir, "file.md"), []byte("# Test"), 0644)
+
+	// Create circular symlink: rootDir/loop -> rootDir
+	os.Symlink(rootDir, filepath.Join(rootDir, "loop"))
+
+	files := collectMarkdownFiles(rootDir)
+
+	// Should find file.md exactly once, not infinite copies
+	if len(files) != 1 {
+		t.Errorf("expected 1 file (cycle should be detected), got %d: %v", len(files), files)
 	}
 }
