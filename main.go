@@ -733,11 +733,19 @@ tool_name=$(echo "$json" | jq -r '.tool_name // empty')
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 
 if [ -n "$session_id" ] && [ -n "$tool_name" ] && [ -n "$file_path" ]; then
-    curl -s -X POST -H 'Content-Type: application/json' \
-        -d "{\"session_id\":\"$session_id\",\"tool_name\":\"$tool_name\",\"file_path\":\"$file_path\"}" \
-        --max-time 0.1 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    # For Claude plan files, forward content for devcontainer support
+    if echo "$file_path" | grep -q '\.claude/plans/.*\.md$'; then
+        payload=$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content}')
+        curl -s -X POST -H 'Content-Type: application/json' \
+            -d "$payload" \
+            --max-time 0.5 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    else
+        curl -s -X POST -H 'Content-Type: application/json' \
+            -d "{\"session_id\":\"$session_id\",\"tool_name\":\"$tool_name\",\"file_path\":\"$file_path\"}" \
+            --max-time 0.1 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    fi
 fi
-`, *hookPort)
+`, *hookPort, *hookPort)
 
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error creating %s: %v\n", claudeDir, err)
@@ -1680,6 +1688,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		SessionID      string `json:"session_id"`
 		ToolName       string `json:"tool_name"`
 		FilePath       string `json:"file_path"`
+		Content        string `json:"content"`
 		PermissionMode string `json:"permission_mode"`
 		ToolUseID      string `json:"tool_use_id"`
 		CWD            string `json:"cwd"`
@@ -1710,6 +1719,41 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	// Register session mapping for file
 	globalSessionStore.register(req.FilePath, metadata)
+
+	// Cache plan content from devcontainer/remote environments
+	if req.Content != "" && strings.HasSuffix(req.FilePath, ".md") &&
+		strings.Contains(req.FilePath, ".claude/plans/") {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+			os.MkdirAll(cacheDir, 0755)
+			localPath := filepath.Join(cacheDir, filepath.Base(req.FilePath))
+			if err := atomicWriteFile(localPath, req.Content); err == nil {
+				req.FilePath = localPath
+			}
+		}
+	}
+
+	// Dynamically whitelist Claude plan files and broadcast SSE event
+	if strings.HasSuffix(req.FilePath, ".md") {
+		homeDir, _ := os.UserHomeDir()
+		sep := string(os.PathSeparator)
+		plansDir := filepath.Join(homeDir, ".claude", "plans")
+		cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+		isPlan := homeDir != "" &&
+			(strings.HasPrefix(req.FilePath, plansDir+sep) ||
+				strings.HasPrefix(req.FilePath, cacheDir+sep))
+		if isPlan {
+			if !isWhitelistedFile(req.FilePath) {
+				fileMutex.Lock()
+				markdownFiles = append(markdownFiles, req.FilePath)
+				fileMutex.Unlock()
+				log.Printf("Whitelisted Claude plan: %s", req.FilePath)
+			}
+			// Broadcast file_modified so the toast fires (no fsnotify outside watched dir)
+			sendFileEvent("file_modified", req.FilePath, req.SessionID)
+		}
+	}
 
 	// Truncate session ID for logging (first 8 chars)
 	shortSession := req.SessionID
