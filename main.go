@@ -733,11 +733,19 @@ tool_name=$(echo "$json" | jq -r '.tool_name // empty')
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 
 if [ -n "$session_id" ] && [ -n "$tool_name" ] && [ -n "$file_path" ]; then
-    curl -s -X POST -H 'Content-Type: application/json' \
-        -d "{\"session_id\":\"$session_id\",\"tool_name\":\"$tool_name\",\"file_path\":\"$file_path\"}" \
-        --max-time 0.1 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    # For Claude plan files, forward content for devcontainer support
+    if echo "$file_path" | grep -q '\.claude/plans/.*\.md$'; then
+        payload=$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content}')
+        curl -s -X POST -H 'Content-Type: application/json' \
+            -d "$payload" \
+            --max-time 0.5 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    else
+        curl -s -X POST -H 'Content-Type: application/json' \
+            -d "{\"session_id\":\"$session_id\",\"tool_name\":\"$tool_name\",\"file_path\":\"$file_path\"}" \
+            --max-time 0.1 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+    fi
 fi
-`, *hookPort)
+`, *hookPort, *hookPort)
 
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error creating %s: %v\n", claudeDir, err)
@@ -1669,6 +1677,47 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, data)
 }
 
+// handlePlanFile caches remote plan content and whitelists/broadcasts plan files.
+// Returns the (possibly rewritten) file path.
+func handlePlanFile(filePath, content, sessionID string) string {
+	if !strings.HasSuffix(filePath, ".md") {
+		return filePath
+	}
+
+	// Cache plan content from devcontainer/remote environments
+	if content != "" && strings.Contains(filePath, ".claude/plans/") {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+			os.MkdirAll(cacheDir, 0755)
+			localPath := filepath.Join(cacheDir, filepath.Base(filePath))
+			if err := atomicWriteFile(localPath, content); err == nil {
+				filePath = localPath
+			}
+		}
+	}
+
+	// Dynamically whitelist and broadcast plan files
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		return filePath
+	}
+	sep := string(os.PathSeparator)
+	plansDir := filepath.Join(homeDir, ".claude", "plans")
+	cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+	if !strings.HasPrefix(filePath, plansDir+sep) && !strings.HasPrefix(filePath, cacheDir+sep) {
+		return filePath
+	}
+	if !isWhitelistedFile(filePath) {
+		fileMutex.Lock()
+		markdownFiles = append(markdownFiles, filePath)
+		fileMutex.Unlock()
+		log.Printf("Whitelisted Claude plan: %s", filePath)
+	}
+	sendFileEvent("file_modified", filePath, sessionID)
+	return filePath
+}
+
 // handleClaudeHook receives file modification events from Claude Code hooks
 func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1680,6 +1729,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		SessionID      string `json:"session_id"`
 		ToolName       string `json:"tool_name"`
 		FilePath       string `json:"file_path"`
+		Content        string `json:"content"`
 		PermissionMode string `json:"permission_mode"`
 		ToolUseID      string `json:"tool_use_id"`
 		CWD            string `json:"cwd"`
@@ -1710,6 +1760,8 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	// Register session mapping for file
 	globalSessionStore.register(req.FilePath, metadata)
+
+	req.FilePath = handlePlanFile(req.FilePath, req.Content, req.SessionID)
 
 	// Truncate session ID for logging (first 8 chars)
 	shortSession := req.SessionID
