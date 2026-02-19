@@ -1,6 +1,6 @@
 # peekm
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/razvandimescu/peekm)](https://goreportcard.com/report/github.com/razvandimescu/peekm)
+[![Go Report Card](https://goreportcard.com/badge/github.com/razvandimescu/peekm?v=2)](https://goreportcard.com/report/github.com/razvandimescu/peekm)
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
