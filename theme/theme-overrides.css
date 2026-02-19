@@ -193,3 +193,67 @@ body {
         min-width: 120px;
     }
 }
+
+/* Shared operation badge styles (used by session panel, smart folders, timeline) */
+.session-operation-badge,
+.session-permission-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-radius: 10px;
+    line-height: 1;
+    background: var(--badge-bg);
+    color: var(--badge-color);
+    border: 1px solid var(--badge-border);
+}
+
+.session-operation-Write,
+.session-permission-default {
+    --badge-bg: rgba(46, 164, 79, 0.15);
+    --badge-color: #2ea44f;
+    --badge-border: rgba(46, 164, 79, 0.3);
+}
+
+.session-operation-Edit,
+.session-permission-plan {
+    --badge-bg: rgba(255, 165, 0, 0.15);
+    --badge-color: #d97706;
+    --badge-border: rgba(255, 165, 0, 0.3);
+}
+
+.session-operation-NotebookEdit {
+    --badge-bg: rgba(139, 92, 246, 0.15);
+    --badge-color: #7c3aed;
+    --badge-border: rgba(139, 92, 246, 0.3);
+}
+
+.session-permission-acceptEdits {
+    --badge-bg: rgba(59, 130, 246, 0.15);
+    --badge-color: #2563eb;
+    --badge-border: rgba(59, 130, 246, 0.3);
+}
+
+[data-theme="dark"] .session-operation-Write,
+[data-theme="dark"] .session-permission-default {
+    --badge-bg: rgba(46, 164, 79, 0.2);
+    --badge-color: #3fb950;
+}
+
+[data-theme="dark"] .session-operation-Edit,
+[data-theme="dark"] .session-permission-plan {
+    --badge-bg: rgba(255, 165, 0, 0.2);
+    --badge-color: #f59e0b;
+}
+
+[data-theme="dark"] .session-operation-NotebookEdit {
+    --badge-bg: rgba(139, 92, 246, 0.2);
+    --badge-color: #a78bfa;
+}
+
+[data-theme="dark"] .session-permission-acceptEdits {
+    --badge-bg: rgba(59, 130, 246, 0.2);
+    --badge-color: #60a5fa;
+}

@@ -259,12 +259,6 @@ function setupCollapse() {
     }
 }
 
-// Setup delete button functionality
-function setupDeleteButton() {
-    // Delete button already set up via onclick in template
-    // No additional setup needed
-}
-
 // Intercept link clicks for SPA navigation
 function interceptLinks(e) {
     // Find the closest <a> element
@@ -282,8 +276,8 @@ function interceptLinks(e) {
         return;
     }
 
-    // Intercept all internal navigation links (root and file views)
-    if (url === '/' || url.startsWith('/view/')) {
+    // Intercept all internal navigation links (root, file views, timeline)
+    if (url === '/' || url.startsWith('/view/') || url === '/timeline') {
         e.preventDefault();
         navigate(url);
     }
@@ -842,6 +836,7 @@ async function refreshTree() {
 
         // 4. Restore expanded state from localStorage
         restoreTreeState();
+        restoreSmartFolderState();
 
         // 5. Restore scroll position
         if (sidebarContent) {
@@ -1027,6 +1022,50 @@ function restoreTreeState() {
         }
     } catch (error) {
         console.error('[TreeState] Failed to restore:', error);
+    }
+}
+
+// ===== Smart Folder State Persistence =====
+
+const SMART_FOLDER_STATE_KEY = 'peekm_smart_folder_state';
+
+function saveSmartFolderState() {
+    try {
+        const folders = document.querySelectorAll('.smart-folder-header');
+        const state = {};
+        folders.forEach(header => {
+            const folder = header.closest('.smart-folder');
+            const id = folder?.dataset.folder;
+            if (id) {
+                state[id] = header.dataset.collapsed === 'true';
+            }
+        });
+        localStorage.setItem(SMART_FOLDER_STATE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.error('[SmartFolders] Failed to save state:', e);
+    }
+}
+
+function restoreSmartFolderState() {
+    try {
+        const stored = localStorage.getItem(SMART_FOLDER_STATE_KEY);
+        if (!stored) return;
+        const state = JSON.parse(stored);
+        const folders = document.querySelectorAll('.smart-folder');
+        folders.forEach(folder => {
+            const id = folder.dataset.folder;
+            if (id && state[id]) {
+                const children = folder.querySelector('.smart-folder-children');
+                const icon = folder.querySelector('.smart-folder-header .expand-icon');
+                if (children && icon) {
+                    children.style.display = 'none';
+                    icon.textContent = '▶';
+                    folder.querySelector('.smart-folder-header').dataset.collapsed = 'true';
+                }
+            }
+        });
+    } catch (e) {
+        console.error('[SmartFolders] Failed to restore state:', e);
     }
 }
 

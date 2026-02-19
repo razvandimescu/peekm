@@ -1318,72 +1318,7 @@
             border-color: #2ea44f;
         }
 
-        /* Session Badges - Consolidated with CSS Custom Properties */
-        /* Badge Base Styles */
-        .session-operation-badge,
-        .session-permission-badge {
-            display: inline-block;
-            padding: 3px 8px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-radius: 10px;
-            line-height: 1;
-            background: var(--badge-bg);
-            color: var(--badge-color);
-            border: 1px solid var(--badge-border);
-        }
-
-        /* Color Variants (Green, Orange, Purple, Blue) */
-        .session-operation-Write,
-        .session-permission-default {
-            --badge-bg: rgba(46, 164, 79, 0.15);
-            --badge-color: #2ea44f;
-            --badge-border: rgba(46, 164, 79, 0.3);
-        }
-
-        .session-operation-Edit,
-        .session-permission-plan {
-            --badge-bg: rgba(255, 165, 0, 0.15);
-            --badge-color: #d97706;
-            --badge-border: rgba(255, 165, 0, 0.3);
-        }
-
-        .session-operation-NotebookEdit {
-            --badge-bg: rgba(139, 92, 246, 0.15);
-            --badge-color: #7c3aed;
-            --badge-border: rgba(139, 92, 246, 0.3);
-        }
-
-        .session-permission-acceptEdits {
-            --badge-bg: rgba(59, 130, 246, 0.15);
-            --badge-color: #2563eb;
-            --badge-border: rgba(59, 130, 246, 0.3);
-        }
-
-        /* Dark Theme */
-        [data-theme="dark"] .session-operation-Write,
-        [data-theme="dark"] .session-permission-default {
-            --badge-bg: rgba(46, 164, 79, 0.2);
-            --badge-color: #3fb950;
-        }
-
-        [data-theme="dark"] .session-operation-Edit,
-        [data-theme="dark"] .session-permission-plan {
-            --badge-bg: rgba(255, 165, 0, 0.2);
-            --badge-color: #f59e0b;
-        }
-
-        [data-theme="dark"] .session-operation-NotebookEdit {
-            --badge-bg: rgba(139, 92, 246, 0.2);
-            --badge-color: #a78bfa;
-        }
-
-        [data-theme="dark"] .session-permission-acceptEdits {
-            --badge-bg: rgba(59, 130, 246, 0.2);
-            --badge-color: #60a5fa;
-        }
+        /* Badge styles now in theme-overrides.css */
 
         /* Technical Details Collapsible */
         .session-technical-details {
@@ -1453,6 +1388,121 @@
                 max-width: 150px;
             }
         }
+
+        /* Smart Folders */
+        .smart-folders {
+            margin-bottom: 4px;
+        }
+
+        .smart-folder {
+            margin-bottom: 2px;
+        }
+
+        .smart-folder-header {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--fgColor-muted);
+            transition: color 0.15s;
+        }
+
+        .smart-folder-header:hover {
+            color: var(--fgColor-default);
+        }
+
+        .smart-folder-header .expand-icon {
+            font-size: 10px;
+            width: 14px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .smart-folder-name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .smart-folder-count {
+            background: var(--bgColor-accent-muted);
+            color: var(--fgColor-accent);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 10px;
+            flex-shrink: 0;
+        }
+
+        .smart-folder-children {
+            margin-left: 10px;
+            border-left: 1px solid var(--borderColor-muted);
+            padding-left: 0;
+        }
+
+        .smart-folder-file {
+            display: flex !important;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .smart-folder-file a {
+            flex-shrink: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .smart-folder-meta {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+
+        .smart-folder-meta .session-operation-badge {
+            font-size: 9px;
+            padding: 1px 4px;
+        }
+
+        .smart-folder-time {
+            font-size: 10px;
+            color: var(--fgColor-muted);
+            white-space: nowrap;
+        }
+
+        .smart-folder-sid {
+            font-size: 9px;
+            font-family: "SFMono-Regular", Consolas, monospace;
+            color: var(--fgColor-muted);
+            opacity: 0.6;
+        }
+
+        .smart-folders-separator {
+            height: 1px;
+            background: var(--borderColor-muted);
+            margin: 8px 8px 12px;
+        }
+
+        /* Timeline button */
+        .timeline-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            text-decoration: none;
+            color: inherit;
+        }
     </style>
 </head>
 <body class="markdown-body">
@@ -1510,6 +1560,9 @@
 
         <div class="top-bar-right">
             <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">⬇️</button>
+            {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="timeline-btn" aria-label="AI Timeline" title="AI Timeline">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
+            </a>{{end}}
             <button onclick="toggleNotificationHistory()" id="notification-btn" class="notification-btn" aria-label="Notification history" title="Notification history">
                 🔔
                 <span class="notification-badge" id="notification-badge" style="display: none;">0</span>
@@ -1852,6 +1905,24 @@
             // Save state to localStorage (function defined in navigation.js)
             if (typeof saveTreeState === 'function') {
                 saveTreeState();
+            }
+        }
+
+        // Smart Folder toggle
+        function toggleSmartFolder(header) {
+            const folder = header.closest('.smart-folder');
+            const children = folder.querySelector('.smart-folder-children');
+            const icon = header.querySelector('.expand-icon');
+            if (!children || !icon) return;
+
+            const isCollapsed = children.style.display === 'none';
+            children.style.display = isCollapsed ? 'block' : 'none';
+            icon.textContent = isCollapsed ? '▼' : '▶';
+            header.dataset.collapsed = isCollapsed ? 'false' : 'true';
+
+            // Persist state
+            if (typeof saveSmartFolderState === 'function') {
+                saveSmartFolderState();
             }
         }
 

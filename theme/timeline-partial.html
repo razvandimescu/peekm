@@ -1,0 +1,35 @@
+<main id="content" data-view="timeline" data-path="{{.BrowsePath}}" class="content-area">
+    <div class="container">
+        <h1>{{.Title}}</h1>
+        <p class="subtitle">{{.Subtitle}}</p>
+
+        {{if .Groups}}
+        {{range .Groups}}
+        <div class="timeline-day">
+            <div class="timeline-day-label">{{.Label}}</div>
+            {{range .Events}}
+            <div class="timeline-entry">
+                <span class="timeline-dot dot-{{.ToolName}}"></span>
+                <div class="timeline-content">
+                    <div class="timeline-file">
+                        {{if .InWhitelist}}<a href="/view/{{.FilePath}}">{{.FileName}}</a>{{else}}{{.FileName}}{{end}}
+                    </div>
+                    <div class="timeline-meta">
+                        <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>
+                        <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
+                        {{if .SessionID}}<span class="timeline-sid">{{.SessionID}}</span>{{end}}
+                    </div>
+                </div>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+        {{else}}
+        <div class="timeline-empty">
+            <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
+            <p>No AI session events yet.</p>
+            <p>Events will appear here when Claude Code modifies files in this directory.</p>
+        </div>
+        {{end}}
+    </div>
+</main>

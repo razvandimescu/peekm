@@ -35,6 +35,11 @@ import (
 //go:embed theme/*
 var themeFS embed.FS
 
+const (
+	eventLogMaxOnDisk   = 5000
+	eventLogMaxInMemory = 10000
+)
+
 var (
 	// Build info (set via ldflags)
 	version = "dev"
@@ -95,12 +100,17 @@ var (
 	navigationJS           string
 	fileBrowserTmpl        *template.Template
 	fileBrowserPartialTmpl *template.Template
+	timelineTmpl           *template.Template
+	timelinePartialTmpl    *template.Template
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
 	globalEventBuffer = newEventBuffer(50)
 
 	// Claude Code session tracking (5s TTL for hook-to-fsnotify correlation)
 	globalSessionStore *sessionStore
+
+	// Persistent event log (JSONL file for session history)
+	globalEventLog *eventLog
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -112,11 +122,12 @@ type watcherManager struct {
 
 // baseTemplateData contains common fields for all templates
 type baseTemplateData struct {
-	GitHubCSS      template.CSS
-	ThemeOverrides template.CSS
-	ThemeManagerJS template.JS
-	EditorJS       template.JS
-	NavigationJS   template.JS
+	GitHubCSS         template.CSS
+	ThemeOverrides    template.CSS
+	ThemeManagerJS    template.JS
+	EditorJS          template.JS
+	NavigationJS      template.JS
+	AITrackingEnabled bool
 }
 
 // browserTemplateData is used for rendering the file browser and file views
@@ -247,14 +258,203 @@ func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
 	return metadata, exists
 }
 
+// SessionEvent is a single AI session event persisted to disk
+type SessionEvent struct {
+	SessionID      string    `json:"sid"`
+	FilePath       string    `json:"path"`
+	ToolName       string    `json:"tool"`
+	PermissionMode string    `json:"perm,omitempty"`
+	ToolUseID      string    `json:"tuid,omitempty"`
+	CWD            string    `json:"cwd,omitempty"`
+	TranscriptPath string    `json:"tp,omitempty"`
+	Timestamp      time.Time `json:"ts"`
+}
+
+func (e *SessionEvent) toMetadata() *SessionMetadata {
+	return &SessionMetadata{
+		SessionID:      e.SessionID,
+		ToolName:       e.ToolName,
+		PermissionMode: e.PermissionMode,
+		ToolUseID:      e.ToolUseID,
+		CWD:            e.CWD,
+		TranscriptPath: e.TranscriptPath,
+		Timestamp:      e.Timestamp,
+	}
+}
+
+func sessionEventFrom(meta *SessionMetadata, filePath string) SessionEvent {
+	return SessionEvent{
+		SessionID:      meta.SessionID,
+		FilePath:       filePath,
+		ToolName:       meta.ToolName,
+		PermissionMode: meta.PermissionMode,
+		ToolUseID:      meta.ToolUseID,
+		CWD:            meta.CWD,
+		TranscriptPath: meta.TranscriptPath,
+		Timestamp:      meta.Timestamp,
+	}
+}
+
+// eventLog persists session events to a JSONL file and keeps them in memory
+type eventLog struct {
+	mu       sync.RWMutex
+	file     *os.File
+	events   []SessionEvent
+	filePath string
+}
+
+func newEventLog() (*eventLog, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	dir := filepath.Join(homeDir, ".peekm")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("cannot create ~/.peekm: %w", err)
+	}
+	fp := filepath.Join(dir, "events.jsonl")
+	f, err := os.OpenFile(fp, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open events file: %w", err)
+	}
+	el := &eventLog{file: f, filePath: fp}
+	if err := el.load(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return el, nil
+}
+
+func (el *eventLog) load() error {
+	el.file.Seek(0, 0)
+	scanner := bufio.NewScanner(el.file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	var events []SessionEvent
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var evt SessionEvent
+		if err := json.Unmarshal(line, &evt); err != nil {
+			log.Printf("Warning: skipping malformed event line: %v", err)
+			continue
+		}
+		events = append(events, evt)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading events file: %w", err)
+	}
+	if len(events) > eventLogMaxOnDisk {
+		events = events[len(events)-eventLogMaxOnDisk:]
+		el.rewrite(events)
+	}
+	el.events = events
+	return nil
+}
+
+// rewrite replaces the events file with the given events (called during load, single-threaded).
+func (el *eventLog) rewrite(events []SessionEvent) {
+	tmpPath := el.filePath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		log.Printf("Warning: cannot rewrite events file: %v", err)
+		return
+	}
+	w := bufio.NewWriter(f)
+	for _, evt := range events {
+		if data, err := json.Marshal(evt); err == nil {
+			w.Write(data)
+			w.WriteByte('\n')
+		}
+	}
+	w.Flush()
+	f.Sync()
+	f.Close()
+
+	el.file.Close()
+	if err := os.Rename(tmpPath, el.filePath); err != nil {
+		log.Printf("Warning: cannot rename events file: %v", err)
+		os.Remove(tmpPath)
+	}
+	// Reopen for append
+	reopened, err := os.OpenFile(el.filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		log.Printf("Warning: cannot reopen events file after rewrite: %v", err)
+		return
+	}
+	el.file = reopened
+}
+
+func (el *eventLog) append(event SessionEvent) error {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	if el.file == nil {
+		return fmt.Errorf("event log file is closed")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if _, err := el.file.Write(data); err != nil {
+		return err
+	}
+	el.events = append(el.events, event)
+	if len(el.events) > eventLogMaxInMemory {
+		el.events = el.events[len(el.events)-eventLogMaxOnDisk:]
+	}
+	return nil
+}
+
+// eventsForDir returns events under dir, newest first.
+func (el *eventLog) eventsForDir(dir string) []SessionEvent {
+	el.mu.RLock()
+	defer el.mu.RUnlock()
+	prefix := dir + string(filepath.Separator)
+	var out []SessionEvent
+	for i := len(el.events) - 1; i >= 0; i-- {
+		evt := el.events[i]
+		if strings.HasPrefix(evt.FilePath, prefix) || evt.FilePath == dir {
+			out = append(out, evt)
+		}
+	}
+	return out
+}
+
+func (el *eventLog) latestPerFile() map[string]*SessionMetadata {
+	el.mu.RLock()
+	defer el.mu.RUnlock()
+	result := make(map[string]*SessionMetadata)
+	// Iterate forward so later entries overwrite earlier ones
+	for i := range el.events {
+		evt := &el.events[i]
+		if evt.ToolName == "View" {
+			continue // Don't hydrate sessionStore with view events
+		}
+		result[evt.FilePath] = evt.toMetadata()
+	}
+	return result
+}
+
+func (el *eventLog) close() error {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	if el.file != nil {
+		return el.file.Close()
+	}
+	return nil
+}
+
 // newBaseTemplateData creates a baseTemplateData with embedded resources
 func newBaseTemplateData() baseTemplateData {
 	return baseTemplateData{
-		GitHubCSS:      template.CSS(githubCSS),
-		ThemeOverrides: template.CSS(themeOverrides),
-		ThemeManagerJS: template.JS(themeManagerJS),
-		EditorJS:       template.JS(editorJS),
-		NavigationJS:   template.JS(navigationJS),
+		GitHubCSS:         template.CSS(githubCSS),
+		ThemeOverrides:    template.CSS(themeOverrides),
+		ThemeManagerJS:    template.JS(themeManagerJS),
+		EditorJS:          template.JS(editorJS),
+		NavigationJS:      template.JS(navigationJS),
+		AITrackingEnabled: !*disableHook,
 	}
 }
 
@@ -480,6 +680,7 @@ func registerRoutes() {
 	http.HandleFunc("/download", withRecovery(withCSRFCheck(handleDownload)))
 	http.HandleFunc("/events", withRecovery(serveSSE))
 	http.HandleFunc("/tree-html", withRecovery(serveTreeHTML))
+	http.HandleFunc("/timeline", withRecovery(serveTimeline))
 
 	// AI session tracking endpoint (always on unless --no-ai-tracking)
 	if !*disableHook {
@@ -523,12 +724,12 @@ func isPartialRequest(r *http.Request) bool {
 	return r.Header.Get("X-Requested-With") == "XMLHttpRequest"
 }
 
-// renderTemplate selects full/partial template, executes to buffer, and writes the response.
+// renderTemplatePair selects full/partial template, executes to buffer, and writes the response.
 // Returns true on success, false if an error was written to w.
-func renderTemplate(w http.ResponseWriter, r *http.Request, data any) bool {
-	tmpl := fileBrowserTmpl
+func renderTemplatePair(w http.ResponseWriter, r *http.Request, full, partial *template.Template, data any) bool {
+	tmpl := full
 	if isPartialRequest(r) {
-		tmpl = fileBrowserPartialTmpl
+		tmpl = partial
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
@@ -539,6 +740,11 @@ func renderTemplate(w http.ResponseWriter, r *http.Request, data any) bool {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	buf.WriteTo(w)
 	return true
+}
+
+// renderTemplate uses the default file-browser template pair.
+func renderTemplate(w http.ResponseWriter, r *http.Request, data any) bool {
+	return renderTemplatePair(w, r, fileBrowserTmpl, fileBrowserPartialTmpl, data)
 }
 
 func validateAndResolvePath(targetPath string) (string, error) {
@@ -679,6 +885,19 @@ func init() {
 	}
 	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserPartialHTML)))
 	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
+
+	// Timeline templates
+	timelineHTML, err := themeFS.ReadFile("theme/timeline.html")
+	if err != nil {
+		log.Fatalf("Failed to load timeline template: %v", err)
+	}
+	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(timelineHTML)))
+
+	timelinePartialHTML, err := themeFS.ReadFile("theme/timeline-partial.html")
+	if err != nil {
+		log.Fatalf("Failed to load timeline-partial template: %v", err)
+	}
+	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(string(timelinePartialHTML)))
 }
 
 // runSetup handles the "peekm setup" subcommand
@@ -1010,6 +1229,43 @@ func resolveTarget() string {
 	return filepath.Base(absPath)
 }
 
+func buildStartupURL(baseURL, targetFile string) string {
+	if targetFile == "" {
+		fmt.Printf("peekm file browser at %s\n", baseURL)
+		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
+		return baseURL
+	}
+	fullURL := baseURL
+	for _, mdFile := range markdownFiles {
+		if filepath.Base(mdFile) == targetFile {
+			if relPath, err := filepath.Rel(browseDir, mdFile); err == nil {
+				fullURL = fmt.Sprintf("%s/view/%s", baseURL, relPath)
+			}
+			break
+		}
+	}
+	fmt.Printf("peekm at %s\n", baseURL)
+	fmt.Printf("Opening %s - found %d markdown file(s)\n", targetFile, len(markdownFiles))
+	return fullURL
+}
+
+func initSessionTracking() {
+	globalSessionStore = newSessionStore()
+	el, err := newEventLog()
+	if err != nil {
+		log.Printf("Warning: session persistence unavailable: %v", err)
+		return
+	}
+	globalEventLog = el
+	for path, meta := range el.latestPerFile() {
+		globalSessionStore.register(path, meta)
+	}
+	el.mu.RLock()
+	n := len(el.events)
+	el.mu.RUnlock()
+	log.Printf("Loaded %d persisted session events", n)
+}
+
 func main() {
 	// Handle subcommands before flag.Parse()
 	if len(os.Args) >= 2 && os.Args[1] == "setup" {
@@ -1029,9 +1285,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Initialize AI session tracking (always on unless --no-ai-tracking)
 	if !*disableHook {
-		globalSessionStore = newSessionStore()
+		initSessionTracking()
 	}
 
 	targetFile := resolveTarget()
@@ -1057,25 +1312,7 @@ func main() {
 	addr := fmt.Sprintf("localhost:%d", *port)
 	url := fmt.Sprintf("http://%s", addr)
 
-	// Build URL with auto-navigation if specific file requested
-	fullURL := url
-	if targetFile != "" {
-		// Get relative path for URL
-		for _, mdFile := range markdownFiles {
-			if filepath.Base(mdFile) == targetFile {
-				relPath, err := filepath.Rel(browseDir, mdFile)
-				if err == nil {
-					fullURL = fmt.Sprintf("%s/view/%s", url, relPath)
-				}
-				break
-			}
-		}
-		fmt.Printf("peekm at %s\n", url)
-		fmt.Printf("Opening %s - found %d markdown file(s)\n", targetFile, len(markdownFiles))
-	} else {
-		fmt.Printf("peekm file browser at %s\n", url)
-		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
-	}
+	fullURL := buildStartupURL(url, targetFile)
 	fmt.Println("Press Ctrl+C to quit")
 
 	if *openBrowser {
@@ -1108,6 +1345,11 @@ func main() {
 		// Close watchers
 		fileWatcher.close()
 		dirWatcher.close()
+
+		// Close event log
+		if globalEventLog != nil {
+			globalEventLog.close()
+		}
 
 		// Shutdown HTTP server
 		if err := server.Shutdown(ctx); err != nil {
@@ -1714,7 +1956,7 @@ func handlePlanFile(filePath, content, sessionID string) string {
 		fileMutex.Unlock()
 		log.Printf("Whitelisted Claude plan: %s", filePath)
 	}
-	sendFileEvent("file_modified", filePath, sessionID)
+	sendFileEvent("file_modified", getRelativePath(filePath), sessionID)
 	return filePath
 }
 
@@ -1758,18 +2000,19 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      time.Now(),
 	}
 
-	// Register session mapping for file
-	globalSessionStore.register(req.FilePath, metadata)
-
 	req.FilePath = handlePlanFile(req.FilePath, req.Content, req.SessionID)
 
-	// Truncate session ID for logging (first 8 chars)
-	shortSession := req.SessionID
-	if len(shortSession) > 8 {
-		shortSession = shortSession[:8]
+	// Register session mapping for file (after path rewrite so plan files use local path)
+	globalSessionStore.register(req.FilePath, metadata)
+
+	// Persist to event log
+	if globalEventLog != nil {
+		if err := globalEventLog.append(sessionEventFrom(metadata, req.FilePath)); err != nil {
+			log.Printf("Warning: failed to persist session event: %v", err)
+		}
 	}
 
-	log.Printf("AI session %s tracked for: %s (mode: %s)", shortSession, req.FilePath, req.PermissionMode)
+	log.Printf("AI session %s tracked for: %s (mode: %s)", truncateSessionID(req.SessionID), req.FilePath, req.PermissionMode)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -2017,7 +2260,118 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Log synthetic View event for "Unreviewed" smart folder tracking
+	if globalEventLog != nil && sessionData != nil {
+		if err := globalEventLog.append(SessionEvent{
+			FilePath:  absFilePath,
+			ToolName:  "View",
+			Timestamp: time.Now(),
+		}); err != nil {
+			log.Printf("Warning: failed to log view event: %v", err)
+		}
+	}
+
 	renderTemplate(w, r, data)
+}
+
+// Timeline template data types
+
+type timelineTemplateData struct {
+	baseTemplateData
+	Title      string
+	Subtitle   string
+	BrowsePath string
+	Groups     []timelineDayGroup
+}
+
+type timelineDayGroup struct {
+	Label  string
+	Events []timelineEntry
+}
+
+type timelineEntry struct {
+	FilePath    string
+	FileName    string
+	ToolName    string
+	TimeAgo     string
+	TimeISO     string
+	SessionID   string
+	InWhitelist bool
+}
+
+func serveTimeline(w http.ResponseWriter, r *http.Request) {
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	var groups []timelineDayGroup
+
+	if globalEventLog != nil {
+		events := globalEventLog.eventsForDir(currentBrowseDir)
+
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		yesterdayStart := todayStart.AddDate(0, 0, -1)
+
+		// Group by date label
+		type dayBucket struct {
+			label  string
+			events []timelineEntry
+		}
+		bucketMap := make(map[string]*dayBucket)
+		var bucketOrder []string
+
+		for _, evt := range events {
+			if evt.ToolName == "View" {
+				continue
+			}
+
+			relPath := evt.FilePath
+			if rel, err := filepath.Rel(currentBrowseDir, evt.FilePath); err == nil {
+				relPath = rel
+			}
+
+			entry := timelineEntry{
+				FilePath:    template.URLQueryEscaper(relPath),
+				FileName:    filepath.Base(evt.FilePath),
+				ToolName:    evt.ToolName,
+				TimeAgo:     formatTimeAgo(evt.Timestamp),
+				TimeISO:     evt.Timestamp.Format(time.RFC3339),
+				SessionID:   truncateSessionID(evt.SessionID),
+				InWhitelist: isWhitelistedFile(evt.FilePath),
+			}
+
+			var label string
+			if evt.Timestamp.After(todayStart) || evt.Timestamp.Equal(todayStart) {
+				label = "Today"
+			} else if evt.Timestamp.After(yesterdayStart) || evt.Timestamp.Equal(yesterdayStart) {
+				label = "Yesterday"
+			} else {
+				label = evt.Timestamp.Format("Jan 2, 2006")
+			}
+
+			if _, exists := bucketMap[label]; !exists {
+				bucketMap[label] = &dayBucket{label: label}
+				bucketOrder = append(bucketOrder, label)
+			}
+			bucketMap[label].events = append(bucketMap[label].events, entry)
+		}
+
+		for _, label := range bucketOrder {
+			b := bucketMap[label]
+			groups = append(groups, timelineDayGroup{Label: b.label, Events: b.events})
+		}
+	}
+
+	data := timelineTemplateData{
+		baseTemplateData: newBaseTemplateData(),
+		Title:            "AI Timeline",
+		Subtitle:         fmt.Sprintf("Session history for %s", currentBrowseDir),
+		BrowsePath:       currentBrowseDir,
+		Groups:           groups,
+	}
+
+	renderTemplatePair(w, r, timelineTmpl, timelinePartialTmpl, data)
 }
 
 // parseIgnoreFile reads and parses .peekmignore file
@@ -2285,6 +2639,181 @@ func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns [
 	})
 }
 
+// Smart folder types for AI-aware sidebar sections
+type smartFolder struct {
+	Name  string
+	ID    string // CSS-safe identifier
+	Files []smartFolderFile
+}
+
+type smartFolderFile struct {
+	RelPath   string
+	Name      string
+	ToolName  string
+	TimeAgo   string
+	SessionID string // truncated to 8 chars
+}
+
+func truncateSessionID(sid string) string {
+	if len(sid) > 8 {
+		return sid[:8]
+	}
+	return sid
+}
+
+func formatTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1m ago"
+		}
+		return fmt.Sprintf("%dm ago", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1h ago"
+		}
+		return fmt.Sprintf("%dh ago", h)
+	case d < 48*time.Hour:
+		return "yesterday"
+	default:
+		return t.Format("Jan 2")
+	}
+}
+
+type smartFolderFileInfo struct {
+	event       SessionEvent
+	latestView  time.Time
+	hasAIEvent  bool
+	latestAIEvt time.Time
+}
+
+// aggregateFileEvents groups events by file path, tracking latest AI event and view per file.
+func aggregateFileEvents(events []SessionEvent) map[string]*smartFolderFileInfo {
+	fileMap := make(map[string]*smartFolderFileInfo)
+	for _, evt := range events {
+		fi, exists := fileMap[evt.FilePath]
+		if !exists {
+			fi = &smartFolderFileInfo{}
+			fileMap[evt.FilePath] = fi
+		}
+		if evt.ToolName == "View" {
+			if evt.Timestamp.After(fi.latestView) {
+				fi.latestView = evt.Timestamp
+			}
+		} else if !fi.hasAIEvent {
+			fi.event = evt
+			fi.hasAIEvent = true
+			fi.latestAIEvt = evt.Timestamp
+		}
+	}
+	return fileMap
+}
+
+func generateSmartFolders() []smartFolder {
+	if globalEventLog == nil {
+		return nil
+	}
+
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	events := globalEventLog.eventsForDir(currentBrowseDir)
+	if len(events) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	fileMap := aggregateFileEvents(events)
+
+	var recentAI, unreviewed []smartFolderFile
+
+	for path, fi := range fileMap {
+		if !fi.hasAIEvent || !isWhitelistedFile(path) {
+			continue
+		}
+
+		relPath := path
+		if rel, err := filepath.Rel(currentBrowseDir, path); err == nil {
+			relPath = rel
+		}
+
+		sf := smartFolderFile{
+			RelPath:   relPath,
+			Name:      filepath.Base(path),
+			ToolName:  fi.event.ToolName,
+			TimeAgo:   formatTimeAgo(fi.event.Timestamp),
+			SessionID: truncateSessionID(fi.event.SessionID),
+		}
+
+		if now.Sub(fi.latestAIEvt) < 24*time.Hour {
+			recentAI = append(recentAI, sf)
+		}
+		if fi.latestView.Before(fi.latestAIEvt) {
+			unreviewed = append(unreviewed, sf)
+		}
+	}
+
+	sortByName := func(files []smartFolderFile) {
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Name < files[j].Name
+		})
+	}
+	sortByName(recentAI)
+	sortByName(unreviewed)
+
+	var folders []smartFolder
+	if len(recentAI) > 0 {
+		folders = append(folders, smartFolder{Name: "Recent AI Edits", ID: "recent-ai", Files: recentAI})
+	}
+	if len(unreviewed) > 0 {
+		folders = append(folders, smartFolder{Name: "Unreviewed", ID: "unreviewed", Files: unreviewed})
+	}
+	return folders
+}
+
+func generateSmartFolderHTML(folders []smartFolder) string {
+	if len(folders) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	buf.WriteString(`<div class="smart-folders">`)
+	for _, folder := range folders {
+		buf.WriteString(fmt.Sprintf(`<div class="smart-folder" data-folder="%s">`, folder.ID))
+		buf.WriteString(fmt.Sprintf(
+			`<div class="tree-node smart-folder-header" onclick="toggleSmartFolder(this)" data-collapsed="false">`+
+				`<span class="expand-icon">▼</span>`+
+				`<span class="smart-folder-name">%s</span>`+
+				`<span class="smart-folder-count">%d</span>`+
+				`</div>`, folder.Name, len(folder.Files)))
+		buf.WriteString(`<div class="tree-children smart-folder-children">`)
+		for _, f := range folder.Files {
+			escapedName := template.HTMLEscapeString(f.Name)
+			escapedTool := template.HTMLEscapeString(f.ToolName)
+			escapedSID := template.HTMLEscapeString(f.SessionID)
+			escapedHref := template.URLQueryEscaper(f.RelPath)
+			buf.WriteString(fmt.Sprintf(
+				`<div class="tree-item"><div class="tree-node"><span class="tree-file smart-folder-file">`+
+					`<a href="/view/%s">%s</a>`+
+					`<span class="smart-folder-meta">`+
+					`<span class="session-operation-badge session-operation-%s">%s</span>`+
+					`<span class="smart-folder-time">%s</span>`+
+					`<span class="smart-folder-sid">%s</span>`+
+					`</span></span></div></div>`,
+				escapedHref, escapedName, escapedTool, escapedTool,
+				template.HTMLEscapeString(f.TimeAgo), escapedSID))
+		}
+		buf.WriteString(`</div></div>`)
+	}
+	buf.WriteString(`</div><div class="smart-folders-separator"></div>`)
+	return buf.String()
+}
+
 func generateTreeHTML() string {
 	// Get state snapshot (thread-safe)
 	fileMutex.RLock()
@@ -2373,6 +2902,13 @@ func generateTreeHTML() string {
 
 	// Generate HTML
 	var buf bytes.Buffer
+
+	// Prepend smart folders (if AI tracking is active)
+	if globalEventLog != nil {
+		folders := generateSmartFolders()
+		buf.WriteString(generateSmartFolderHTML(folders))
+	}
+
 	generateTreeHTMLRecursive(root, "", true, true, 0, false, &buf)
 	return buf.String()
 }
