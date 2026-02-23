@@ -2012,6 +2012,41 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Cache plan content from devcontainer/remote environments
+	if req.Content != "" && strings.HasSuffix(req.FilePath, ".md") &&
+		strings.Contains(req.FilePath, ".claude/plans/") {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+			os.MkdirAll(cacheDir, 0755)
+			localPath := filepath.Join(cacheDir, filepath.Base(req.FilePath))
+			if err := atomicWriteFile(localPath, req.Content); err == nil {
+				req.FilePath = localPath
+			}
+		}
+	}
+
+	// Dynamically whitelist Claude plan files and broadcast SSE event
+	if strings.HasSuffix(req.FilePath, ".md") {
+		homeDir, _ := os.UserHomeDir()
+		sep := string(os.PathSeparator)
+		plansDir := filepath.Join(homeDir, ".claude", "plans")
+		cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+		isPlan := homeDir != "" &&
+			(strings.HasPrefix(req.FilePath, plansDir+sep) ||
+				strings.HasPrefix(req.FilePath, cacheDir+sep))
+		if isPlan {
+			if !isWhitelistedFile(req.FilePath) {
+				fileMutex.Lock()
+				markdownFiles = append(markdownFiles, req.FilePath)
+				fileMutex.Unlock()
+				log.Printf("Whitelisted Claude plan: %s", req.FilePath)
+			}
+			// Broadcast file_modified so the toast fires (no fsnotify outside watched dir)
+			sendFileEvent("file_modified", req.FilePath, req.SessionID)
+		}
+	}
+
 	log.Printf("AI session %s tracked for: %s (mode: %s)", truncateSessionID(req.SessionID), req.FilePath, req.PermissionMode)
 
 	w.WriteHeader(http.StatusOK)
