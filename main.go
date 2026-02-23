@@ -392,6 +392,18 @@ func (el *eventLog) append(event SessionEvent) error {
 	if el.file == nil {
 		return fmt.Errorf("event log file is closed")
 	}
+
+	// Deduplicate: hook writes JSONL then POSTs; skip if already persisted
+	for i := len(el.events) - 1; i >= 0 && i >= len(el.events)-10; i-- {
+		e := &el.events[i]
+		if e.SessionID == event.SessionID &&
+			e.FilePath == event.FilePath &&
+			e.ToolName == event.ToolName &&
+			e.Timestamp.Sub(event.Timestamp).Abs() < 5*time.Second {
+			return nil
+		}
+	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -946,25 +958,43 @@ func setupClaudeCode(args []string) {
 	fmt.Printf("\n  Step 1: Hook script\n")
 
 	hookScript := fmt.Sprintf(`#!/bin/bash
+# peekm hook: Persist session events to JSONL, then notify running instance
 json=$(cat)
 session_id=$(echo "$json" | jq -r '.session_id // empty')
 tool_name=$(echo "$json" | jq -r '.tool_name // empty')
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 
-if [ -n "$session_id" ] && [ -n "$tool_name" ] && [ -n "$file_path" ]; then
-    # For Claude plan files, forward content for devcontainer support
-    if echo "$file_path" | grep -q '\.claude/plans/.*\.md$'; then
-        payload=$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content}')
-        curl -s -X POST -H 'Content-Type: application/json' \
+[ -z "$session_id" ] || [ -z "$tool_name" ] || [ -z "$file_path" ] && exit 0
+
+perm_mode=$(echo "$json" | jq -r '.permission_mode // empty')
+tool_use_id=$(echo "$json" | jq -r '.tool_use_id // empty')
+cwd=$(echo "$json" | jq -r '.cwd // empty')
+content=$(echo "$json" | jq -r '.tool_input.content // empty')
+ts=$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")
+
+event=$(jq -n --arg sid "$session_id" --arg path "$file_path" \
+    --arg tool "$tool_name" --arg perm "$perm_mode" \
+    --arg tuid "$tool_use_id" --arg cwd "$cwd" --arg ts "$ts" \
+    '{sid:$sid,path:$path,tool:$tool,perm:$perm,tuid:$tuid,cwd:$cwd,ts:$ts}|with_entries(select(.value!=""))')
+
+# 1. Persist to event log (atomic append, works even if peekm not running)
+mkdir -p ~/.peekm
+echo "$event" >> ~/.peekm/events.jsonl 2>/dev/null
+
+# 2. Best-effort notification to running peekm (scan common ports)
+for port in %d 6419 8080 3000; do
+    if echo "$file_path" | grep -q '\.claude/plans/.*\.md$' && [ -n "$content" ]; then
+        payload=$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content, ts: "'"$ts"'"}')
+        curl -sf -X POST -H 'Content-Type: application/json' \
             -d "$payload" \
-            --max-time 0.5 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+            --max-time 0.05 "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && break
     else
-        curl -s -X POST -H 'Content-Type: application/json' \
-            -d "{\"session_id\":\"$session_id\",\"tool_name\":\"$tool_name\",\"file_path\":\"$file_path\"}" \
-            --max-time 0.1 http://localhost:%d/hook/file-modified >/dev/null 2>&1
+        curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "$event" \
+            --max-time 0.05 "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && break
     fi
-fi
-`, *hookPort, *hookPort)
+done
+`, *hookPort)
 
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error creating %s: %v\n", claudeDir, err)
@@ -1968,6 +1998,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		// Long-form field names (legacy hook / plan file payloads)
 		SessionID      string `json:"session_id"`
 		ToolName       string `json:"tool_name"`
 		FilePath       string `json:"file_path"`
@@ -1976,6 +2007,13 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		ToolUseID      string `json:"tool_use_id"`
 		CWD            string `json:"cwd"`
 		TranscriptPath string `json:"transcript_path"`
+		// Short-form field names (new hook writes SessionEvent JSON)
+		SID  string `json:"sid"`
+		Path string `json:"path"`
+		Tool string `json:"tool"`
+		Perm string `json:"perm"`
+		TUID string `json:"tuid"`
+		TS   string `json:"ts"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1983,9 +2021,16 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Merge short-form fields into long-form (short takes precedence if both present)
+	coalesce(&req.SessionID, req.SID)
+	coalesce(&req.FilePath, req.Path)
+	coalesce(&req.ToolName, req.Tool)
+	coalesce(&req.PermissionMode, req.Perm)
+	coalesce(&req.ToolUseID, req.TUID)
+
 	// Validate required fields
 	if req.SessionID == "" || req.FilePath == "" {
-		http.Error(w, "Missing required fields: session_id and file_path", http.StatusBadRequest)
+		http.Error(w, "Missing required fields: session_id/sid and file_path/path", http.StatusBadRequest)
 		return
 	}
 
@@ -1997,7 +2042,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		ToolUseID:      req.ToolUseID,
 		CWD:            req.CWD,
 		TranscriptPath: req.TranscriptPath,
-		Timestamp:      time.Now(),
+		Timestamp:      parseTimestampOrNow(req.TS),
 	}
 
 	req.FilePath = handlePlanFile(req.FilePath, req.Content, req.SessionID)
@@ -2009,41 +2054,6 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	if globalEventLog != nil {
 		if err := globalEventLog.append(sessionEventFrom(metadata, req.FilePath)); err != nil {
 			log.Printf("Warning: failed to persist session event: %v", err)
-		}
-	}
-
-	// Cache plan content from devcontainer/remote environments
-	if req.Content != "" && strings.HasSuffix(req.FilePath, ".md") &&
-		strings.Contains(req.FilePath, ".claude/plans/") {
-		homeDir, _ := os.UserHomeDir()
-		if homeDir != "" {
-			cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
-			os.MkdirAll(cacheDir, 0755)
-			localPath := filepath.Join(cacheDir, filepath.Base(req.FilePath))
-			if err := atomicWriteFile(localPath, req.Content); err == nil {
-				req.FilePath = localPath
-			}
-		}
-	}
-
-	// Dynamically whitelist Claude plan files and broadcast SSE event
-	if strings.HasSuffix(req.FilePath, ".md") {
-		homeDir, _ := os.UserHomeDir()
-		sep := string(os.PathSeparator)
-		plansDir := filepath.Join(homeDir, ".claude", "plans")
-		cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
-		isPlan := homeDir != "" &&
-			(strings.HasPrefix(req.FilePath, plansDir+sep) ||
-				strings.HasPrefix(req.FilePath, cacheDir+sep))
-		if isPlan {
-			if !isWhitelistedFile(req.FilePath) {
-				fileMutex.Lock()
-				markdownFiles = append(markdownFiles, req.FilePath)
-				fileMutex.Unlock()
-				log.Printf("Whitelisted Claude plan: %s", req.FilePath)
-			}
-			// Broadcast file_modified so the toast fires (no fsnotify outside watched dir)
-			sendFileEvent("file_modified", req.FilePath, req.SessionID)
 		}
 	}
 
@@ -2685,6 +2695,22 @@ type smartFolderFile struct {
 	ToolName  string
 	TimeAgo   string
 	SessionID string // truncated to 8 chars
+}
+
+// coalesce sets dst to alt if alt is non-empty and dst is empty.
+func coalesce(dst *string, alt string) {
+	if alt != "" {
+		*dst = alt
+	}
+}
+
+func parseTimestampOrNow(ts string) time.Time {
+	if ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			return parsed
+		}
+	}
+	return time.Now()
 }
 
 func truncateSessionID(sid string) string {

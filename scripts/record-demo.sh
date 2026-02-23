@@ -17,7 +17,7 @@ set -euo pipefail
 # --------------- Configuration ---------------
 OUTPUT="${1:-assets/hero-demo.gif}"
 PORT=16419
-RECORD_SECONDS=12
+RECORD_SECONDS=15
 VIEWPORT_W=1200
 VIEWPORT_H=750
 FPS=8
@@ -215,17 +215,20 @@ FFMPEG_PID=$!
 
 sleep 1  # Let recording stabilize
 
+# Bring Chrome to front (terminal took focus when ffmpeg started)
+osascript -e 'tell application "Google Chrome" to activate'
+sleep 0.5
+
 # --------------- Step 5: Orchestrate demo actions ---------------
 
 # Scene 1: Brief glimpse of README with sidebar
-log "Scene 1: Showing README..."
+log "Scene 1: Showing README with sidebar..."
 sleep 1
 
-# Scene 2: Simulate Claude Code creating a new file (triggers toast + tree update)
+# Scene 2: Simulate Claude Code creating a new file (triggers toast + smart folders)
 log "Scene 2: Simulating Claude Code creating docs/changelog.md..."
 NEW_FILE="$DEMO_DIR/docs/changelog.md"
 
-# POST hook metadata first (simulates the PostToolUse hook firing before fsnotify)
 curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
     -H "Content-Type: application/json" \
     -H "Origin: http://localhost:$PORT" \
@@ -236,7 +239,6 @@ curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
         "permission_mode": "allowedTools"
     }' > /dev/null
 
-# Create the file to trigger fsnotify CREATE event
 cat > "$NEW_FILE" << 'MD'
 # Changelog
 
@@ -252,17 +254,32 @@ cat > "$NEW_FILE" << 'MD'
 - OAuth token refresh race condition
 MD
 
-log "Toast notification should appear..."
-sleep 3
+log "Toast + smart folders..."
+sleep 2
 
-# Scene 3: Click the toast / navigate to the new file to show session info panel
-log "Scene 3: Navigating to new file to show session info..."
+# Scene 3: Second AI edit to build up timeline
+log "Scene 3: Simulating Claude Code editing README.md..."
+curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
+    -H "Content-Type: application/json" \
+    -H "Origin: http://localhost:$PORT" \
+    -d '{
+        "file_path": "'"$DEMO_DIR/README.md"'",
+        "session_id": "session-a7f3b2",
+        "tool_name": "Edit",
+        "permission_mode": "allowedTools"
+    }' > /dev/null
+
+echo "" >> "$DEMO_DIR/README.md"
+sleep 1.5
+
+# Scene 4: Navigate to new file — shows session badge
+log "Scene 4: Navigating to file with session info..."
 osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/view/docs/changelog.md"'
+sleep 2.5
 
-sleep 3
-
-# Scene 4: Hold on the session info panel
-log "Scene 4: Session info panel visible..."
+# Scene 5: Open AI timeline
+log "Scene 5: Opening AI timeline..."
+osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/timeline"'
 sleep 3
 
 # --------------- Step 6: Stop recording and convert ---------------
