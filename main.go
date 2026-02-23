@@ -402,7 +402,7 @@ func (el *eventLog) append(event SessionEvent) error {
 	}
 	el.events = append(el.events, event)
 	if len(el.events) > eventLogMaxInMemory {
-		el.events = el.events[len(el.events)-eventLogMaxOnDisk:]
+		el.events = el.events[len(el.events)-eventLogMaxInMemory:]
 	}
 	return nil
 }
