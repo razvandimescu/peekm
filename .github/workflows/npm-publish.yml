@@ -1,6 +1,8 @@
 name: Publish to npm
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -11,7 +13,6 @@ on:
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
-    needs: []
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,22 +27,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Download the release assets
           mkdir -p dist
-          VERSION="${{ github.event.inputs.version }}"
+          # Support both release event (tag name) and manual dispatch (input)
+          VERSION="${{ github.event.inputs.version || github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
           gh release download "v${VERSION}" -D dist -p "*.tar.gz" -p "*.zip"
 
-          # Extract binaries
+          # Extract each archive into a subdirectory matching publish-npm.sh expectations
+          # e.g. peekm_0.1.5_darwin_arm64.tar.gz → dist/peekm_darwin_arm64/peekm
           cd dist
           for file in *.tar.gz; do
-            tar xzf "$file"
+            dir=$(echo "$file" | sed "s/peekm_${VERSION}_/peekm_/" | sed 's/\.tar\.gz//')
+            mkdir -p "$dir"
+            tar xzf "$file" -C "$dir"
           done
           for file in *.zip; do
-            unzip -q "$file"
+            dir=$(echo "$file" | sed "s/peekm_${VERSION}_/peekm_/" | sed 's/\.zip//')
+            mkdir -p "$dir"
+            unzip -q "$file" -d "$dir"
           done
 
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          ./scripts/publish-npm.sh ${{ github.event.inputs.version }}
+          VERSION="${{ github.event.inputs.version || github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          ./scripts/publish-npm.sh "$VERSION"
