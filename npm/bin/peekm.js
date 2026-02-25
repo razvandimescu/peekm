@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { spawnSync } = require('child_process');
-const { join } = require('path');
+const { join, dirname } = require('path');
 const { existsSync } = require('fs');
 
 // Platform mapping
@@ -31,9 +31,18 @@ if (!platformMap[platform] || !platformMap[platform][arch]) {
 
 const packageName = platformMap[platform][arch];
 const binaryName = platform === 'win32' ? 'peekm.exe' : 'peekm';
-const binaryPath = join(__dirname, '..', 'node_modules', `@peekm/${packageName}`, 'bin', binaryName);
 
-// Check if binary exists
+// Use require.resolve to find the platform package regardless of hoisting layout
+let binaryPath;
+try {
+  const platformPkgDir = dirname(require.resolve(`@peekm/${packageName}/package.json`));
+  binaryPath = join(platformPkgDir, 'bin', binaryName);
+} catch (e) {
+  console.error(`peekm: platform package @peekm/${packageName} not found`);
+  console.error(`\nTry reinstalling: npm install --force`);
+  process.exit(1);
+}
+
 if (!existsSync(binaryPath)) {
   console.error(`peekm binary not found for ${platform}-${arch}`);
   console.error(`Expected at: ${binaryPath}`);
