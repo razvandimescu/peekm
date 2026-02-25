@@ -26,6 +26,7 @@ MAX_GIF_SIZE_MB=5
 
 # --------------- State ---------------
 DEMO_DIR=""
+TRANSCRIPT_DIR=""
 PEEKM_PID=""
 FFMPEG_PID=""
 MOV_FILE=""
@@ -45,6 +46,7 @@ cleanup() {
     [ -n "$PEEKM_PID" ]  && kill "$PEEKM_PID"  2>/dev/null || true
     [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
     [ -n "$DEMO_DIR" ]   && rm -rf "$DEMO_DIR"
+    [ -n "$TRANSCRIPT_DIR" ] && rm -rf "$TRANSCRIPT_DIR"
     [ -n "$MOV_FILE" ] && [ -f "$MOV_FILE" ] && rm -f "$MOV_FILE"
     if $CHROME_OPENED; then
         osascript -e 'tell application "Google Chrome"
@@ -149,6 +151,20 @@ curl -H "Authorization: Bearer sk-..." https://api.acme.dev/widgets
 ```
 MD
 
+# Create fake transcript for the demo session
+# resolveTranscriptPath expects: ~/.claude/projects/<dir-encoded>/session-a7f3b2.jsonl
+TRANSCRIPT_DIR="$HOME/.claude/projects/$(echo "$DEMO_DIR" | tr '/' '-')"
+mkdir -p "$TRANSCRIPT_DIR"
+cat > "$TRANSCRIPT_DIR/session-a7f3b2.jsonl" << 'JSONL'
+{"type":"user","message":{"role":"user","content":"Add a changelog file for the Acme API documenting v1.2.0 changes"},"timestamp":"2026-02-25T10:00:00Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create a changelog documenting the v1.2.0 release with the new endpoints, rate limiting, and bug fixes."}]},"timestamp":"2026-02-25T10:00:02Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"tool_use","id":"tu_01","name":"Write","input":{"file_path":"docs/changelog.md","content":"# Changelog\n\n## v1.2.0\n\n### Added\n- DELETE /widgets/:id endpoint\n- Rate limiting (100 req/min)\n- Webhook retry with exponential backoff\n\n### Fixed\n- Cursor pagination duplicates\n- OAuth token refresh race condition"}}]},"timestamp":"2026-02-25T10:00:05Z"}
+{"type":"user","message":{"role":"user","content":"Now update the README to mention rate limiting in the features section"},"timestamp":"2026-02-25T10:00:10Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll add rate limiting to the features list in the README."}]},"timestamp":"2026-02-25T10:00:11Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"tool_use","id":"tu_02","name":"Edit","input":{"file_path":"README.md","old_string":"- **Webhooks**","new_string":"- **Rate limited** — 100 requests/minute per API key\n- **Webhooks**"}}]},"timestamp":"2026-02-25T10:00:13Z"}
+JSONL
+log "Fake transcript at $TRANSCRIPT_DIR"
+
 # --------------- Step 2: Start peekm ---------------
 log "Starting peekm on port $PORT..."
 "$PEEKM_BIN" -port "$PORT" -browser=false "$DEMO_DIR" &
@@ -221,12 +237,8 @@ sleep 0.5
 
 # --------------- Step 5: Orchestrate demo actions ---------------
 
-# Scene 1: Brief glimpse of README with sidebar
-log "Scene 1: Showing README with sidebar..."
-sleep 1
-
-# Scene 2: Simulate Claude Code creating a new file (triggers toast + smart folders)
-log "Scene 2: Simulating Claude Code creating docs/changelog.md..."
+# Scene 1: Simulate Claude Code creating a new file (triggers toast + smart folders)
+log "Scene 1: Simulating Claude Code creating docs/changelog.md..."
 NEW_FILE="$DEMO_DIR/docs/changelog.md"
 
 curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
@@ -257,8 +269,8 @@ MD
 log "Toast + smart folders..."
 sleep 2
 
-# Scene 3: Second AI edit to build up timeline
-log "Scene 3: Simulating Claude Code editing README.md..."
+# Scene 2: Second AI edit to build up timeline
+log "Scene 2: Simulating Claude Code editing README.md..."
 curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
     -H "Content-Type: application/json" \
     -H "Origin: http://localhost:$PORT" \
@@ -272,15 +284,20 @@ curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
 echo "" >> "$DEMO_DIR/README.md"
 sleep 1.5
 
-# Scene 4: Navigate to new file — shows session badge
-log "Scene 4: Navigating to file with session info..."
+# Scene 3: Navigate to new file — shows session badge
+log "Scene 3: Navigating to file with session info..."
 osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/view/docs/changelog.md"'
 sleep 2.5
 
-# Scene 5: Open AI timeline
-log "Scene 5: Opening AI timeline..."
+# Scene 4: Open AI timeline
+log "Scene 4: Opening AI timeline..."
 osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/timeline"'
-sleep 3
+sleep 2.5
+
+# Scene 5: Open transcript viewer
+log "Scene 5: Opening transcript viewer..."
+osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/transcript?session=session-a7f3b2"'
+sleep 2.5
 
 # --------------- Step 6: Stop recording and convert ---------------
 log "Stopping recording..."
