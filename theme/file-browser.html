@@ -594,6 +594,44 @@
             border-left-color: var(--fgColor-success);
         }
 
+        /* Error toast (shares position/animation with .toast, overrides styling) */
+        .error-toast {
+            position: fixed;
+            top: 76px;
+            right: 20px;
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-emphasis);
+            border-left: 4px solid #d73a49;
+            border-radius: 6px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10001;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+            max-width: 400px;
+            font-size: 14px;
+            color: var(--fgColor-default);
+        }
+
+        .error-toast.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        /* Delete modal danger button */
+        .modal-footer button.danger {
+            background: #d73a49;
+            color: white;
+            border-color: #cb2431;
+        }
+
+        .modal-footer button.danger:hover {
+            background: #cb2431;
+        }
+
         .toast-close {
             margin-left: 0;
             background: none;
@@ -801,6 +839,30 @@
             overflow-y: auto;
             overflow-x: hidden;
             background: var(--bgColor-default);
+            position: relative;
+            transition: opacity 0.15s ease;
+        }
+
+        .content-area.loading {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .content-area.loading::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 2px;
+            background: var(--fgColor-accent);
+            animation: loading-bar 1.2s ease-in-out infinite;
+            z-index: 10;
+        }
+
+        @keyframes loading-bar {
+            0% { width: 0; }
+            50% { width: 60%; }
+            100% { width: 100%; opacity: 0; }
         }
 
         .content-area .container {
@@ -932,6 +994,16 @@
         .connection-count {
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
             font-weight: 600;
+            display: none;
+        }
+
+        .connection-label {
+            font-size: 12px;
+            display: none;
+        }
+
+        .connection-status.disconnected .connection-label {
+            display: inline;
         }
 
         /* Edit button (now in header-actions) */
@@ -1025,140 +1097,6 @@
             background: var(--bgColor-default);
             color: var(--fgColor-default);
             outline: none;
-        }
-
-        /* Notification button and badge */
-        .notification-btn {
-            position: relative;
-        }
-
-        .notification-badge {
-            position: absolute;
-            top: 2px;
-            right: 6px;
-            background: #d73a49;
-            color: white;
-            font-size: 10px;
-            font-weight: 600;
-            padding: 2px 5px;
-            border-radius: 10px;
-            min-width: 16px;
-            text-align: center;
-        }
-
-        /* Notification dropdown */
-        .notification-dropdown {
-            position: fixed;
-            top: 66px;
-            right: 20px;
-            background: var(--bgColor-default);
-            border: 1px solid var(--borderColor-default);
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 999;
-            width: 320px;
-            max-height: 400px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .notification-dropdown-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--borderColor-default);
-            background: var(--bgColor-muted);
-            font-weight: 600;
-            font-size: 14px;
-            color: var(--fgColor-default);
-        }
-
-        .notification-dropdown-header .clear-btn {
-            background: none;
-            border: none;
-            color: var(--fgColor-muted);
-            cursor: pointer;
-            font-size: 18px;
-            padding: 0;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 4px;
-            transition: all 0.2s;
-        }
-
-        .notification-dropdown-header .clear-btn:hover {
-            background: var(--bgColor-neutral-muted);
-            color: var(--fgColor-default);
-        }
-
-        .notification-dropdown-body {
-            overflow-y: auto;
-            max-height: 350px;
-        }
-
-        .notification-empty {
-            padding: 40px 20px;
-            text-align: center;
-            color: var(--fgColor-muted);
-            font-size: 14px;
-        }
-
-        .notification-item {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--borderColor-muted);
-            cursor: pointer;
-            transition: background 0.2s;
-            text-decoration: none;
-            display: block;
-            color: inherit;
-        }
-
-        .notification-item:hover {
-            background: var(--bgColor-muted);
-        }
-
-        .notification-item:last-child {
-            border-bottom: none;
-        }
-
-        .notification-item-message {
-            font-size: 13px;
-            color: var(--fgColor-default);
-            margin-bottom: 4px;
-            line-height: 1.4;
-        }
-
-        .notification-item-meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .notification-item-time {
-            font-size: 11px;
-            color: var(--fgColor-muted);
-            flex-shrink: 0;
-        }
-
-        .session-badge {
-            display: inline-block;
-            padding: 2px 6px;
-            font-size: 11px;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-            background: var(--bgColor-accent-muted);
-            color: var(--fgColor-accent);
-            border-radius: 3px;
-            border: 1px solid var(--borderColor-accent-muted);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            max-width: 100%;
         }
 
         /* Session Info Button */
@@ -1529,14 +1467,34 @@
         </div>
     </a>
 
+    <!-- Error toast (inline replacement for alert()) -->
+    <div class="error-toast" id="error-toast" role="alert"></div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="delete-confirm-modal" onclick="closeDeleteModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span>Delete File</span>
+            </div>
+            <div class="modal-body">
+                <p id="delete-confirm-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeDeleteModal()">Cancel</button>
+                <button class="danger" onclick="executeDelete()">Move to Trash</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Unified Top Bar -->
     <header class="top-bar" role="banner">
         <div class="top-bar-left">
             <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;">☰</button>
             <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory">λ</button>
-            <div class="connection-status" role="status" aria-live="polite">
+            <div class="connection-status" id="connection-status" role="status" aria-live="polite" title="Live reload active">
                 <span class="connection-dot" id="connection-dot"></span>
                 <span class="connection-count" id="connection-count">0</span>
+                <span class="connection-label" id="connection-label">Reconnecting...</span>
             </div>
         </div>
 
@@ -1573,10 +1531,6 @@
             {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="timeline-btn" aria-label="AI Timeline" title="AI Timeline">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
             </a>{{end}}
-            <button onclick="toggleNotificationHistory()" id="notification-btn" class="notification-btn" aria-label="Notification history" title="Notification history">
-                🔔
-                <span class="notification-badge" id="notification-badge" style="display: none;">0</span>
-            </button>
             <div class="theme-dropdown-container">
                 <button
                     onclick="toggleThemeDropdown(event)"
@@ -1612,17 +1566,6 @@
         </div>
     </header>
 
-    <!-- Notification History Dropdown -->
-    <div class="notification-dropdown" id="notification-dropdown" style="display: none;">
-        <div class="notification-dropdown-header">
-            <span>Recent Notifications</span>
-            <button onclick="clearNotificationHistory()" class="clear-btn" title="Clear history">✕</button>
-        </div>
-        <div class="notification-dropdown-body" id="notification-list">
-            <div class="notification-empty">No recent notifications</div>
-        </div>
-    </div>
-
     <!-- Navigation Modal -->
     <div class="modal-overlay" id="nav-modal" onclick="closeNavModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
@@ -1648,7 +1591,7 @@
             <h2>Edit Markdown</h2>
             <div class="editor-actions">
                 <button onclick="cancelEdit()">Cancel</button>
-                <button class="save-button" onclick="saveMarkdown()">Save (Ctrl+S)</button>
+                <button class="save-button" onclick="saveMarkdown()">Save (⌘/Ctrl+S)</button>
             </div>
         </div>
         <textarea id="markdown-editor" placeholder="Edit your markdown here..."></textarea>
@@ -1784,6 +1727,17 @@
             });
         })();
 
+        // Error toast (inline replacement for alert())
+        let errorToastTimeout;
+        function showErrorToast(message) {
+            const toast = document.getElementById('error-toast');
+            if (!toast) return;
+            toast.textContent = message;
+            toast.classList.add('show');
+            if (errorToastTimeout) clearTimeout(errorToastTimeout);
+            errorToastTimeout = setTimeout(() => toast.classList.remove('show'), 5000);
+        }
+
         // Navigation modal functionality
         function openNavModal() {
             const modal = document.getElementById('nav-modal');
@@ -1803,7 +1757,7 @@
             const path = input.value.trim();
 
             if (!path) {
-                alert('Please enter a directory path');
+                showErrorToast('Please enter a directory path');
                 return;
             }
 
@@ -1834,7 +1788,7 @@
                 }
             })
             .catch(error => {
-                alert('Navigation error: ' + error.message);
+                showErrorToast('Navigation error: ' + error.message);
             });
         }
 
@@ -1842,13 +1796,32 @@
         function confirmDelete() {
             const filePath = document.querySelector('.subtitle').textContent;
             const fileName = document.querySelector('h1').textContent;
+            const modal = document.getElementById('delete-confirm-modal');
+            const msg = document.getElementById('delete-confirm-message');
+            if (!modal || !msg) return;
 
-            if (confirm(`Are you sure you want to delete "${fileName}"?\n\nThis action cannot be undone.\n\nPress OK to delete or Cancel to abort (Esc to cancel)`)) {
-                deleteFile(filePath);
+            msg.textContent = `Are you sure you want to delete "${fileName}"? The file will be moved to your system trash.`;
+            modal.dataset.path = filePath;
+            modal.classList.add('active');
+        }
+
+        function closeDeleteModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('delete-confirm-modal');
+            if (modal) {
+                modal.classList.remove('active');
+                delete modal.dataset.path;
             }
         }
 
+        function executeDelete() {
+            const modal = document.getElementById('delete-confirm-modal');
+            if (modal && modal.dataset.path) deleteFile(modal.dataset.path);
+        }
+
         function deleteFile(filePath) {
+            closeDeleteModal();
+
             fetch('/delete', {
                 method: 'POST',
                 headers: {
@@ -1858,7 +1831,8 @@
             })
             .then(response => {
                 if (response.ok) {
-                    // Successfully deleted, navigate to browser using SPA
+                    const fileName = filePath.split('/').pop();
+                    showToast('Moved to trash: ' + fileName, null, null);
                     if (typeof navigate === 'function') {
                         navigate('/');
                     } else {
@@ -1872,7 +1846,7 @@
             })
             .catch(error => {
                 console.error('[Delete] Error:', error);
-                alert('Delete error: ' + error.message);
+                showErrorToast('Delete error: ' + error.message);
             });
         }
 

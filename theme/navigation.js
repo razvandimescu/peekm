@@ -105,10 +105,16 @@ function connectSSE() {
         console.log('[SSE] Connection error, reconnecting...');
         eventSource.close();
 
-        // Show disconnected state
+        // Show reconnecting state
         const dot = document.getElementById('connection-dot');
         if (dot) {
             dot.classList.remove('connected');
+            dot.classList.add('reconnecting');
+        }
+        const statusEl = document.getElementById('connection-status');
+        if (statusEl) {
+            statusEl.title = 'Reconnecting...';
+            statusEl.classList.add('disconnected');
         }
 
         // Exponential backoff for reconnection
@@ -124,6 +130,10 @@ async function navigate(url, addToHistory = true) {
     try {
         // Save tree state before navigation (for browser mode)
         saveTreeState();
+
+        // Show loading state
+        const loadingContent = document.getElementById('content');
+        if (loadingContent) loadingContent.classList.add('loading');
 
         // Fetch partial content
         const response = await fetch(url, {
@@ -186,6 +196,8 @@ async function navigate(url, addToHistory = true) {
         console.log('[Navigate] Navigated to:', url);
     } catch (error) {
         console.error('[Navigate] Error:', error);
+        const errorContent = document.getElementById('content');
+        if (errorContent) errorContent.classList.remove('loading');
         // Fallback to full page load
         window.location.href = url;
     }
@@ -277,7 +289,7 @@ function interceptLinks(e) {
     }
 
     // Intercept all internal navigation links (root, file views, timeline)
-    if (url === '/' || url.startsWith('/view/') || url === '/timeline') {
+    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript')) {
         e.preventDefault();
         navigate(url);
     }
@@ -311,9 +323,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Add initial history state
     history.replaceState({ url: window.location.pathname }, '', window.location.pathname);
-
-    // Initialize notification badge
-    updateNotificationBadge();
 
     console.log('[SPA] Initialization complete');
 });
@@ -368,16 +377,6 @@ const TOAST_CONFIG = {
 };
 
 function showToast(message, filePath, session) {
-    // Save to notification history immediately
-    saveNotification(message, filePath, session);
-
-    // Check if notification dropdown is visible - if so, don't show toast
-    const dropdown = document.getElementById('notification-dropdown');
-    if (dropdown && dropdown.style.display !== 'none') {
-        console.log('[Toast] Skipping toast - notification dropdown is visible');
-        return;
-    }
-
     // Create file info object
     const fileInfo = {
         name: filePath ? filePath.split('/').pop() : null,
@@ -436,7 +435,7 @@ function formatBatchMessage(files) {
     const clickAction = function(e) {
         if (e.target.classList.contains('toast-close')) return;
         e.preventDefault();
-        toggleNotificationHistory();
+        navigate('/timeline');
         hideToast();
     };
 
@@ -558,6 +557,7 @@ function hideToast() {
 function updateConnectionStatus(count) {
     const dot = document.getElementById('connection-dot');
     const countEl = document.getElementById('connection-count');
+    const statusEl = document.getElementById('connection-status');
 
     if (countEl) {
         countEl.textContent = count;
@@ -566,9 +566,15 @@ function updateConnectionStatus(count) {
     if (dot) {
         if (count > 0) {
             dot.classList.add('connected');
+            dot.classList.remove('reconnecting');
         } else {
             dot.classList.remove('connected');
         }
+    }
+
+    if (statusEl) {
+        statusEl.title = count > 0 ? 'Live reload active' : 'Disconnected — will retry';
+        statusEl.classList.toggle('disconnected', count === 0);
     }
 }
 
@@ -872,7 +878,7 @@ function downloadHTML() {
     const match = window.location.pathname.match(/\/view\/(.+)/);
     const filePath = match ? '/' + decodeURIComponent(match[1]) : '';
     if (!filePath) {
-        alert('No file currently open');
+        showErrorToast('No file currently open');
         return;
     }
 
@@ -908,7 +914,7 @@ function downloadHTML() {
     })
     .catch(error => {
         console.error('Download error:', error);
-        alert('Failed to download HTML file');
+        showErrorToast('Failed to download HTML file');
     });
 }
 
@@ -1069,74 +1075,6 @@ function restoreSmartFolderState() {
     }
 }
 
-// ===== Notification History Functions =====
-
-const NOTIFICATION_STORAGE_KEY = 'peekm_notification_history';
-const MAX_NOTIFICATIONS = 10;
-const RECENT_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
-
-// Save notification to sessionStorage
-function saveNotification(message, filePath, session) {
-    try {
-        const notifications = getNotificationHistory();
-
-        // Check if the most recent notification is for the same file
-        // If so, update its timestamp instead of creating a duplicate
-        if (notifications.length > 0 && notifications[0].filePath === filePath) {
-            notifications[0].timestamp = Date.now();
-            notifications[0].id = Date.now();
-            notifications[0].session = session || notifications[0].session; // Update session if provided
-            console.log(`[Notification] Updated timestamp for existing notification: ${filePath}`);
-        } else {
-            // Different file or first notification - add new entry
-            const notification = {
-                id: Date.now(),
-                message: message,
-                filePath: filePath,
-                session: session || null,
-                timestamp: Date.now()
-            };
-
-            notifications.unshift(notification);
-            if (notifications.length > MAX_NOTIFICATIONS) {
-                notifications.pop();
-            }
-            console.log(`[Notification] Added new notification: ${filePath}`);
-        }
-
-        sessionStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(notifications));
-        updateNotificationBadge();
-    } catch (error) {
-        console.error('[Notification] Failed to save:', error);
-    }
-}
-
-// Get notification history from sessionStorage
-function getNotificationHistory() {
-    try {
-        const stored = sessionStorage.getItem(NOTIFICATION_STORAGE_KEY);
-        return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-        console.error('[Notification] Failed to load history:', error);
-        return [];
-    }
-}
-
-// Close notification dropdown
-function closeNotificationDropdown() {
-    const dropdown = document.getElementById('notification-dropdown');
-    if (dropdown) dropdown.style.display = 'none';
-    document.removeEventListener('click', closeNotificationDropdown);
-}
-
-// Clear notification history
-function clearNotificationHistory() {
-    sessionStorage.removeItem(NOTIFICATION_STORAGE_KEY);
-    updateNotificationBadge();
-    renderNotificationList();
-    closeNotificationDropdown();
-}
-
 // =============================================================================
 // Session Metadata Persistence (localStorage with 7-day TTL)
 // =============================================================================
@@ -1247,156 +1185,6 @@ function clearSessionMetadata() {
         console.error('[Session] Failed to clear metadata:', error);
     }
 }
-
-// Toggle notification history dropdown
-function toggleNotificationHistory() {
-    const dropdown = document.getElementById('notification-dropdown');
-    if (!dropdown) return;
-
-    const isVisible = dropdown.style.display !== 'none';
-
-    if (isVisible) {
-        closeNotificationDropdown();
-    } else {
-        // Close theme dropdown if open (mutual exclusivity)
-        const themeDropdown = document.getElementById('theme-dropdown');
-        if (themeDropdown && themeDropdown.style.display !== 'none') {
-            if (typeof closeThemeDropdown === 'function') {
-                closeThemeDropdown();
-            }
-        }
-
-        renderNotificationList();
-        dropdown.style.display = 'flex';
-
-        // Add click-outside listener (prevents immediate close from current click bubbling)
-        setTimeout(() => {
-            document.addEventListener('click', closeNotificationDropdown);
-        }, 0);
-    }
-}
-
-// Render notification list in dropdown
-function renderNotificationList() {
-    const listEl = document.getElementById('notification-list');
-    if (!listEl) return;
-
-    const notifications = getNotificationHistory();
-
-    if (notifications.length === 0) {
-        listEl.innerHTML = '<div class="notification-empty">No recent notifications</div>';
-        return;
-    }
-
-    listEl.innerHTML = '';
-    notifications.forEach(notif => {
-        const timeAgo = getTimeAgo(notif.timestamp);
-        const href = notif.filePath ? `/view/${encodeURIComponent(notif.filePath)}` : '#';
-
-        const a = document.createElement('a');
-        a.href = href;
-        a.className = 'notification-item';
-        a.addEventListener('click', function(event) { handleNotificationClick(event, href); });
-
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'notification-item-message';
-        msgDiv.textContent = notif.message;
-        a.appendChild(msgDiv);
-
-        const metaDiv = document.createElement('div');
-        metaDiv.className = 'notification-item-meta';
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'notification-item-time';
-        timeSpan.textContent = timeAgo;
-        metaDiv.appendChild(timeSpan);
-
-        if (notif.session) {
-            const badge = document.createElement('span');
-            badge.className = 'session-badge';
-            badge.textContent = notif.session;
-            metaDiv.appendChild(badge);
-        }
-
-        a.appendChild(metaDiv);
-        listEl.appendChild(a);
-    });
-}
-
-// Handle notification item click (close dropdown + navigate)
-function handleNotificationClick(event, href) {
-    // Close dropdown
-    const dropdown = document.getElementById('notification-dropdown');
-    if (dropdown) {
-        dropdown.style.display = 'none';
-    }
-
-    // Let browser handle Cmd/Ctrl+Click naturally (opens new tab)
-    if (event.metaKey || event.ctrlKey) {
-        return; // Don't prevent default - let <a> tag handle it
-    }
-
-    // For normal clicks, use SPA navigation if available
-    if (href && href !== '#' && typeof navigate === 'function') {
-        event.preventDefault();
-        navigate(href);
-    }
-}
-
-// Update notification badge count (shows count of notifications < 5 min old)
-function updateNotificationBadge() {
-    const badge = document.getElementById('notification-badge');
-    if (!badge) return;
-
-    const notifications = getNotificationHistory();
-    const now = Date.now();
-
-    // Count notifications less than 5 minutes old
-    const recentCount = notifications.filter(n => {
-        return (now - n.timestamp) < RECENT_THRESHOLD_MS;
-    }).length;
-
-    if (recentCount > 0) {
-        badge.textContent = recentCount;
-        badge.style.display = 'inline-block';
-    } else {
-        badge.style.display = 'none';
-    }
-}
-
-// Convert timestamp to relative time string
-function getTimeAgo(timestamp) {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-
-    if (seconds < 60) {
-        return 'just now';
-    }
-
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) {
-        return `${minutes} min ago`;
-    }
-
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) {
-        return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    }
-
-    const days = Math.floor(hours / 24);
-    return `${days} day${days > 1 ? 's' : ''} ago`;
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', function(e) {
-    const dropdown = document.getElementById('notification-dropdown');
-    const btn = document.getElementById('notification-btn');
-
-    if (!dropdown || !btn) return;
-
-    // If click is outside both dropdown and button, close dropdown
-    if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
-        dropdown.style.display = 'none';
-    }
-});
 
 // ===== Focus Mode: Toggleable Sidebar Functions =====
 

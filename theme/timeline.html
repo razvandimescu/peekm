@@ -7,56 +7,140 @@
     <style>
         {{.GitHubCSS}}
         {{.ThemeOverrides}}
+        {{.StandaloneCSS}}
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6;
+        .repo-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8em;
+            color: var(--fgColor-muted);
+            margin-bottom: 20px;
+        }
+        .repo-info-name {
+            font-weight: 600;
             color: var(--fgColor-default);
-            background-color: var(--bgColor-muted);
-            min-height: 100vh;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
+        }
+        .repo-info-branch {
+            background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+            color: var(--fgColor-accent, #388bfd);
+            padding: 1px 8px;
+            border-radius: 12px;
+            font-size: 0.9em;
+        }
+        .repo-info-remote {
+            color: var(--fgColor-muted);
+            font-size: 0.9em;
+        }
+        .repo-info-remote::before {
+            content: "·";
+            margin-right: 8px;
         }
 
-        .top-bar {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            height: 56px;
-            background: var(--bgColor-default);
-            border-bottom: 1px solid var(--borderColor-default);
+        .session-filter-banner {
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 24px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 20px;
-            z-index: 1000;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            gap: 12px;
+            flex-wrap: wrap;
         }
-
-        .top-bar-left { display: flex; gap: 12px; align-items: center; }
-
-        .layout-container {
+        .session-filter-stats {
             display: flex;
-            position: fixed;
-            top: 56px; left: 0; right: 0; bottom: 0;
-            overflow: hidden;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 0.85em;
         }
-
-        .content-area {
-            flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
+        .session-filter-stats code {
+            font-size: 0.85em;
             background: var(--bgColor-default);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .session-filter-stat {
+            color: var(--fgColor-muted);
+        }
+        .session-filter-stat::before {
+            content: "·";
+            margin-right: 12px;
+            color: var(--borderColor-default);
+        }
+        .session-filter-clear,
+        a.session-filter-transcript {
+            font-size: 0.85em;
+            color: var(--fgColor-accent);
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .session-filter-clear:hover { text-decoration: underline; }
+        a.session-filter-transcript {
+            background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-weight: 500;
+        }
+        a.session-filter-transcript:hover {
+            background: var(--bgColor-accent-emphasis, #388bfd);
+            color: #fff;
         }
 
-        .content-area .container {
-            max-width: min(900px, calc(100% - 120px));
-            padding: 40px 60px;
-            margin: 0 auto;
+        .timeline-file-path {
+            color: var(--fgColor-default);
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+            font-size: 0.9em;
+        }
+        .timeline-copy-btn {
+            background: none;
+            border: 1px solid var(--borderColor-default);
+            border-radius: 4px;
+            padding: 2px 5px;
+            margin-left: 6px;
+            cursor: pointer;
+            color: var(--fgColor-muted);
+            vertical-align: middle;
+            line-height: 1;
+        }
+        .timeline-copy-btn:hover {
+            color: var(--fgColor-accent);
+            border-color: var(--fgColor-accent);
+        }
+        .timeline-copy-btn.copied {
+            color: var(--fgColor-success, #2da44e);
+            border-color: var(--fgColor-success, #2da44e);
+        }
+        .timeline-copy-btn:focus-visible {
+            outline: 2px solid var(--fgColor-accent);
+            outline-offset: 2px;
         }
 
-        h1 { font-size: 1.8em; margin-bottom: 0.3em; color: var(--fgColor-default); }
-        .subtitle { color: var(--fgColor-muted); margin-bottom: 2em; font-size: 0.9em; }
+        a.timeline-sid {
+            text-decoration: none;
+            color: inherit;
+        }
+        a.timeline-sid:hover {
+            text-decoration: underline;
+            color: var(--fgColor-accent);
+        }
+        a.timeline-transcript-link {
+            text-decoration: none;
+            color: var(--fgColor-muted);
+            font-size: 0.85em;
+            opacity: 0.8;
+            padding: 1px 6px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            transition: all 0.15s;
+        }
+        a.timeline-transcript-link:hover {
+            opacity: 1;
+            color: var(--fgColor-accent);
+            border-color: var(--borderColor-default);
+        }
     </style>
 </head>
 <body class="markdown-body">
@@ -67,41 +151,7 @@
     </header>
 
     <div class="layout-container">
-        <main id="content" data-view="timeline" data-path="{{.BrowsePath}}" class="content-area">
-            <div class="container">
-                <h1>{{.Title}}</h1>
-                <p class="subtitle">{{.Subtitle}}</p>
-
-                {{if .Groups}}
-                {{range .Groups}}
-                <div class="timeline-day">
-                    <div class="timeline-day-label">{{.Label}}</div>
-                    {{range .Events}}
-                    <div class="timeline-entry">
-                        <span class="timeline-dot dot-{{.ToolName}}"></span>
-                        <div class="timeline-content">
-                            <div class="timeline-file">
-                                <a href="/view/{{.FilePath}}">{{.FileName}}</a>
-                            </div>
-                            <div class="timeline-meta">
-                                <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>
-                                <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
-                                {{if .SessionID}}<span class="timeline-sid">{{.SessionID}}</span>{{end}}
-                            </div>
-                        </div>
-                    </div>
-                    {{end}}
-                </div>
-                {{end}}
-                {{else}}
-                <div class="timeline-empty">
-                    <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
-                    <p>No AI session events yet.</p>
-                    <p>Events will appear here when Claude Code modifies files in this directory.</p>
-                </div>
-                {{end}}
-            </div>
-        </main>
+        {{template "content" .}}
     </div>
 
     <script>
