@@ -20,6 +20,9 @@ find npm -name "*.bak" -delete
 
 # Copy binaries from dist/ to npm platform directories
 echo "Copying binaries..."
+for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+  mkdir -p "npm/platforms/$platform/bin"
+done
 cp dist/peekm_darwin_arm64/peekm npm/platforms/darwin-arm64/bin/
 cp dist/peekm_darwin_amd64/peekm npm/platforms/darwin-x64/bin/
 cp dist/peekm_linux_arm64/peekm npm/platforms/linux-arm64/bin/
