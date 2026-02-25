@@ -29,11 +29,17 @@ cp dist/peekm_linux_arm64/peekm npm/platforms/linux-arm64/bin/
 cp dist/peekm_linux_amd64/peekm npm/platforms/linux-x64/bin/
 cp dist/peekm_windows_amd64/peekm.exe npm/platforms/win32-x64/bin/
 
-# Publish platform packages first
+# Publish platform packages first (skip already-published versions)
 echo "Publishing platform packages..."
 for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
   echo "Publishing @peekm/$platform..."
-  (cd npm/platforms/$platform && npm publish --access public)
+  (cd npm/platforms/$platform && npm publish --access public) || {
+    if npm view "@peekm/$platform@$VERSION" version &>/dev/null; then
+      echo "@peekm/$platform@$VERSION already published, skipping."
+    else
+      exit 1
+    fi
+  }
 done
 
 # Wait a bit for npm to propagate
