@@ -16,6 +16,8 @@ echo "Publishing peekm version $VERSION to npm..."
 
 # Update version in all package.json files
 find npm -name "package.json" -type f -exec sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" {} \;
+# Update optionalDependencies versions in main package.json
+sed -i.bak "s/\"@peekm\/\([^\"]*\)\": \"[^\"]*\"/\"@peekm\/\1\": \"$VERSION\"/g" npm/package.json
 find npm -name "*.bak" -delete
 
 # Copy binaries from dist/ to npm platform directories
