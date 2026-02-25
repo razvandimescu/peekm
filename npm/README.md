@@ -16,13 +16,13 @@ A lightweight, fast markdown viewer that displays your markdown files with a cle
 ## Installation
 
 ```bash
-npm install -g peekm
+npm install -g @peekm/peekm
 ```
 
 Or use with `npx` (no installation required):
 
 ```bash
-npx peekm README.md
+npx @peekm/peekm README.md
 ```
 
 ## Usage

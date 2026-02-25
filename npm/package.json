@@ -1,5 +1,5 @@
 {
-  "name": "peekm",
+  "name": "@peekm/peekm",
   "version": "0.1.0",
   "description": "Zen-like markdown viewer with live reload",
   "keywords": [
