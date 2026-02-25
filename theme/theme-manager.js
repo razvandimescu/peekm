@@ -48,14 +48,6 @@ function toggleThemeDropdown(event) {
     if (isOpen) {
         closeThemeDropdown();
     } else {
-        // Close notification dropdown if open (mutual exclusivity)
-        const notifDropdown = document.getElementById('notification-dropdown');
-        if (notifDropdown && notifDropdown.style.display !== 'none') {
-            if (typeof closeNotificationDropdown === 'function') {
-                closeNotificationDropdown();
-            }
-        }
-
         dropdown.style.display = 'block';
         button.setAttribute('aria-expanded', 'true');
 

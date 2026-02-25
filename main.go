@@ -9,8 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -46,17 +48,7 @@ var (
 	commit  = "none"
 	date    = "unknown"
 
-	// Hardcoded directory exclusions (common build artifacts and dependencies)
-	hardcodedExclusions = []string{
-		"node_modules", // Node.js dependencies
-		"vendor",       // Go dependencies
-		"dist",         // Build output
-		"venv",         // Python virtual environment
-		"env",          // Python virtual environment (alternative name)
-		"virtualenv",   // Python virtual environment (alternative name)
-	}
-
-	// Map version for O(1) lookup performance
+	// Hardcoded directory exclusions (O(1) lookup)
 	hardcodedExclusionsMap = map[string]bool{
 		"node_modules": true,
 		"vendor":       true,
@@ -102,6 +94,8 @@ var (
 	fileBrowserPartialTmpl *template.Template
 	timelineTmpl           *template.Template
 	timelinePartialTmpl    *template.Template
+	transcriptTmpl         *template.Template
+	transcriptPartialTmpl  *template.Template
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
 	globalEventBuffer = newEventBuffer(50)
@@ -327,24 +321,7 @@ func newEventLog() (*eventLog, error) {
 
 func (el *eventLog) load() error {
 	el.file.Seek(0, 0)
-	scanner := bufio.NewScanner(el.file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
-	var events []SessionEvent
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var evt SessionEvent
-		if err := json.Unmarshal(line, &evt); err != nil {
-			log.Printf("Warning: skipping malformed event line: %v", err)
-			continue
-		}
-		events = append(events, evt)
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading events file: %w", err)
-	}
+	events := decodeSessionEvents(el.file)
 	if len(events) > eventLogMaxOnDisk {
 		events = events[len(events)-eventLogMaxOnDisk:]
 		el.rewrite(events)
@@ -441,9 +418,6 @@ func (el *eventLog) latestPerFile() map[string]*SessionMetadata {
 	// Iterate forward so later entries overwrite earlier ones
 	for i := range el.events {
 		evt := &el.events[i]
-		if evt.ToolName == "View" {
-			continue // Don't hydrate sessionStore with view events
-		}
 		result[evt.FilePath] = evt.toMetadata()
 	}
 	return result
@@ -693,6 +667,7 @@ func registerRoutes() {
 	http.HandleFunc("/events", withRecovery(serveSSE))
 	http.HandleFunc("/tree-html", withRecovery(serveTreeHTML))
 	http.HandleFunc("/timeline", withRecovery(serveTimeline))
+	http.HandleFunc("/transcript", withRecovery(serveTranscript))
 
 	// AI session tracking endpoint (always on unless --no-ai-tracking)
 	if !*disableHook {
@@ -876,6 +851,15 @@ func init() {
 		"formatISO": func(t time.Time) string {
 			return t.Format(time.RFC3339)
 		},
+		"formatTimeAgo": formatTimeAgo,
+		"pathEscape": func(s string) string {
+			// Escape each segment individually, preserving /
+			parts := strings.Split(s, "/")
+			for i, p := range parts {
+				parts[i] = url.PathEscape(p)
+			}
+			return strings.Join(parts, "/")
+		},
 	}
 
 	// Load shared session info panel template
@@ -888,28 +872,40 @@ func init() {
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
 	}
-	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
-
-	fileBrowserPartialHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
+	// File-browser shell defines {{template "content" .}} — register the default content block
+	fileBrowserContentHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser-partial template: %v", err)
 	}
-	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserPartialHTML)))
+
+	// Full page: file-browser shell + file-browser content as "content" block + session panel
+	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	template.Must(fileBrowserTmpl.New("content").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
+	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
+
+	// SPA partial: standalone file-browser-partial + session panel
+	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
 	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
 
-	// Timeline templates
-	timelineHTML, err := themeFS.ReadFile("theme/timeline.html")
-	if err != nil {
-		log.Fatalf("Failed to load timeline template: %v", err)
-	}
-	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(timelineHTML)))
-
+	// Timeline templates: full uses file-browser shell with timeline partial as "content"
 	timelinePartialHTML, err := themeFS.ReadFile("theme/timeline-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load timeline-partial template: %v", err)
 	}
 	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(string(timelinePartialHTML)))
+
+	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	template.Must(timelineTmpl.New("content").Funcs(funcMap).Parse(string(timelinePartialHTML)))
+
+	// Transcript templates: full uses file-browser shell with transcript partial as "content"
+	transcriptPartialHTML, err := themeFS.ReadFile("theme/transcript-partial.html")
+	if err != nil {
+		log.Fatalf("Failed to load transcript-partial template: %v", err)
+	}
+	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
+
+	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
 }
 
 // runSetup handles the "peekm setup" subcommand
@@ -972,7 +968,7 @@ cwd=$(echo "$json" | jq -r '.cwd // empty')
 content=$(echo "$json" | jq -r '.tool_input.content // empty')
 ts=$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")
 
-event=$(jq -n --arg sid "$session_id" --arg path "$file_path" \
+event=$(jq -nc --arg sid "$session_id" --arg path "$file_path" \
     --arg tool "$tool_name" --arg perm "$perm_mode" \
     --arg tuid "$tool_use_id" --arg cwd "$cwd" --arg ts "$ts" \
     '{sid:$sid,path:$path,tool:$tool,perm:$perm,tuid:$tuid,cwd:$cwd,ts:$ts}|with_entries(select(.value!=""))')
@@ -1203,10 +1199,42 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	fmt.Print("\n  Done.\n\n")
 }
 
+func findGitRoot(startDir string) (string, error) {
+	dir := startDir
+	for {
+		if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not a git repository (or any parent up to /)")
+		}
+		dir = parent
+	}
+}
+
+func decodeSessionEvents(r io.Reader) []SessionEvent {
+	var events []SessionEvent
+	dec := json.NewDecoder(r)
+	for dec.More() {
+		var evt SessionEvent
+		if err := dec.Decode(&evt); err != nil {
+			continue // skip malformed lines, keep reading
+		}
+		events = append(events, evt)
+	}
+	return events
+}
+
 func runShowIgnored() {
 	fmt.Println("Hardcoded exclusions:")
 	fmt.Println("  .* (hidden directories, except .claude)")
-	for _, dir := range hardcodedExclusions {
+	var excludedDirs []string
+	for dir := range hardcodedExclusionsMap {
+		excludedDirs = append(excludedDirs, dir)
+	}
+	sort.Strings(excludedDirs)
+	for _, dir := range excludedDirs {
 		fmt.Printf("  %s\n", dir)
 	}
 
@@ -1298,9 +1326,12 @@ func initSessionTracking() {
 
 func main() {
 	// Handle subcommands before flag.Parse()
-	if len(os.Args) >= 2 && os.Args[1] == "setup" {
-		runSetup(os.Args[2:])
-		return
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "setup":
+			runSetup(os.Args[2:])
+			return
+		}
 	}
 
 	flag.Parse()
@@ -2305,17 +2336,6 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Log synthetic View event for "Unreviewed" smart folder tracking
-	if globalEventLog != nil && sessionData != nil {
-		if err := globalEventLog.append(SessionEvent{
-			FilePath:  absFilePath,
-			ToolName:  "View",
-			Timestamp: time.Now(),
-		}); err != nil {
-			log.Printf("Warning: failed to log view event: %v", err)
-		}
-	}
-
 	renderTemplate(w, r, data)
 }
 
@@ -2323,10 +2343,29 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 
 type timelineTemplateData struct {
 	baseTemplateData
-	Title      string
-	Subtitle   string
-	BrowsePath string
-	Groups     []timelineDayGroup
+	TreeHTML      template.HTML
+	Title         string
+	Subtitle      string
+	BrowsePath    string
+	Groups        []timelineDayGroup
+	FilterSession string // non-empty when filtered by session ID
+	SessionStats  *sessionFilterStats
+	RepoInfo      *repoInfo
+}
+
+type repoInfo struct {
+	Name   string // e.g. "peekm"
+	Branch string // e.g. "main"
+	Remote string // e.g. "github.com/razvandimescu/peekm"
+}
+
+type sessionFilterStats struct {
+	FullID        string
+	FileCount     int
+	EditCount     int
+	Duration      string
+	Tools         string // e.g. "Edit: 14, Write: 3"
+	HasTranscript bool
 }
 
 type timelineDayGroup struct {
@@ -2335,12 +2374,75 @@ type timelineDayGroup struct {
 }
 
 type timelineEntry struct {
-	FilePath  string
-	FileName  string
-	ToolName  string
-	TimeAgo   string
-	TimeISO   string
-	SessionID string
+	FilePath      string // relative to browseDir (for display + view links)
+	AbsPath       string // absolute path (for copy button)
+	ToolName      string
+	TimeAgo       string
+	TimeISO       string
+	SessionID     string // truncated for display
+	FullSessionID string // full ID for linking
+	IsViewable    bool   // true if file is in the markdown whitelist
+	HasTranscript bool
+}
+
+func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGroup {
+	// Cache transcript availability per unique session
+	transcriptCache := make(map[string]bool)
+	for _, evt := range events {
+		if evt.SessionID == "" {
+			continue
+		}
+		if _, checked := transcriptCache[evt.SessionID]; !checked {
+			transcriptCache[evt.SessionID] = resolveTranscriptPath(evt.SessionID) != ""
+		}
+	}
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+
+	bucketMap := make(map[string]*timelineDayGroup)
+	var bucketOrder []string
+
+	for _, evt := range events {
+		relPath := evt.FilePath
+		if rel, err := filepath.Rel(baseDir, evt.FilePath); err == nil {
+			relPath = rel
+		}
+
+		entry := timelineEntry{
+			FilePath:      relPath,
+			AbsPath:       evt.FilePath,
+			ToolName:      evt.ToolName,
+			TimeAgo:       formatTimeAgo(evt.Timestamp),
+			TimeISO:       evt.Timestamp.Format(time.RFC3339),
+			SessionID:     truncateSessionID(evt.SessionID),
+			FullSessionID: evt.SessionID,
+			IsViewable:    isWhitelistedFile(evt.FilePath),
+			HasTranscript: transcriptCache[evt.SessionID],
+		}
+
+		var label string
+		if evt.Timestamp.After(todayStart) || evt.Timestamp.Equal(todayStart) {
+			label = "Today"
+		} else if evt.Timestamp.After(yesterdayStart) || evt.Timestamp.Equal(yesterdayStart) {
+			label = "Yesterday"
+		} else {
+			label = evt.Timestamp.Format("Jan 2, 2006")
+		}
+
+		if _, exists := bucketMap[label]; !exists {
+			bucketMap[label] = &timelineDayGroup{Label: label}
+			bucketOrder = append(bucketOrder, label)
+		}
+		bucketMap[label].Events = append(bucketMap[label].Events, entry)
+	}
+
+	groups := make([]timelineDayGroup, 0, len(bucketOrder))
+	for _, label := range bucketOrder {
+		groups = append(groups, *bucketMap[label])
+	}
+	return groups
 }
 
 func serveTimeline(w http.ResponseWriter, r *http.Request) {
@@ -2348,73 +2450,147 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
 
+	filterSession := r.URL.Query().Get("session")
+
 	var groups []timelineDayGroup
+	var stats *sessionFilterStats
 
 	if globalEventLog != nil {
 		events := globalEventLog.eventsForDir(currentBrowseDir)
 
-		now := time.Now()
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		yesterdayStart := todayStart.AddDate(0, 0, -1)
-
-		// Group by date label
-		type dayBucket struct {
-			label  string
-			events []timelineEntry
-		}
-		bucketMap := make(map[string]*dayBucket)
-		var bucketOrder []string
-
-		for _, evt := range events {
-			if evt.ToolName == "View" {
-				continue
+		// Filter by session if requested
+		if filterSession != "" {
+			var filtered []SessionEvent
+			for _, evt := range events {
+				if evt.SessionID == filterSession {
+					filtered = append(filtered, evt)
+				}
 			}
-
-			relPath := evt.FilePath
-			if rel, err := filepath.Rel(currentBrowseDir, evt.FilePath); err == nil {
-				relPath = rel
-			}
-
-			entry := timelineEntry{
-				FilePath:  relPath,
-				FileName:  filepath.Base(evt.FilePath),
-				ToolName:  evt.ToolName,
-				TimeAgo:   formatTimeAgo(evt.Timestamp),
-				TimeISO:   evt.Timestamp.Format(time.RFC3339),
-				SessionID: truncateSessionID(evt.SessionID),
-			}
-
-			var label string
-			if evt.Timestamp.After(todayStart) || evt.Timestamp.Equal(todayStart) {
-				label = "Today"
-			} else if evt.Timestamp.After(yesterdayStart) || evt.Timestamp.Equal(yesterdayStart) {
-				label = "Yesterday"
-			} else {
-				label = evt.Timestamp.Format("Jan 2, 2006")
-			}
-
-			if _, exists := bucketMap[label]; !exists {
-				bucketMap[label] = &dayBucket{label: label}
-				bucketOrder = append(bucketOrder, label)
-			}
-			bucketMap[label].events = append(bucketMap[label].events, entry)
+			events = filtered
+			stats = computeSessionStats(events, filterSession)
 		}
 
-		for _, label := range bucketOrder {
-			b := bucketMap[label]
-			groups = append(groups, timelineDayGroup{Label: b.label, Events: b.events})
-		}
+		groups = buildTimelineGroups(events, currentBrowseDir)
+	}
+
+	title := "AI Timeline"
+	subtitle := fmt.Sprintf("Session history for %s", currentBrowseDir)
+	if filterSession != "" {
+		title = fmt.Sprintf("Session %s", truncateSessionID(filterSession))
+		subtitle = ""
 	}
 
 	data := timelineTemplateData{
 		baseTemplateData: newBaseTemplateData(),
-		Title:            "AI Timeline",
-		Subtitle:         fmt.Sprintf("Session history for %s", currentBrowseDir),
+		TreeHTML:         template.HTML(generateTreeHTML()),
+		Title:            title,
+		Subtitle:         subtitle,
 		BrowsePath:       currentBrowseDir,
 		Groups:           groups,
+		FilterSession:    filterSession,
+		SessionStats:     stats,
+		RepoInfo:         detectRepoInfo(currentBrowseDir),
 	}
 
 	renderTemplatePair(w, r, timelineTmpl, timelinePartialTmpl, data)
+}
+
+func computeSessionStats(events []SessionEvent, sessionID string) *sessionFilterStats {
+	if len(events) == 0 {
+		return &sessionFilterStats{FullID: sessionID}
+	}
+	files := make(map[string]bool)
+	tools := make(map[string]int)
+	var earliest, latest time.Time
+	for _, evt := range events {
+		files[evt.FilePath] = true
+		tools[evt.ToolName]++
+		if earliest.IsZero() || evt.Timestamp.Before(earliest) {
+			earliest = evt.Timestamp
+		}
+		if evt.Timestamp.After(latest) {
+			latest = evt.Timestamp
+		}
+	}
+
+	dur := latest.Sub(earliest).Truncate(time.Second)
+	durStr := dur.String()
+	if dur == 0 {
+		durStr = "< 1s"
+	}
+
+	// Format tool breakdown: "Edit: 14, Write: 3"
+	var toolNames []string
+	for t := range tools {
+		toolNames = append(toolNames, t)
+	}
+	sort.Strings(toolNames)
+	var toolParts []string
+	for _, t := range toolNames {
+		toolParts = append(toolParts, fmt.Sprintf("%s: %d", t, tools[t]))
+	}
+
+	return &sessionFilterStats{
+		FullID:        sessionID,
+		FileCount:     len(files),
+		EditCount:     len(events),
+		Duration:      durStr,
+		Tools:         strings.Join(toolParts, ", "),
+		HasTranscript: resolveTranscriptPath(sessionID) != "",
+	}
+}
+
+func detectRepoInfo(dir string) *repoInfo {
+	d, err := findGitRoot(dir)
+	if err != nil {
+		return nil
+	}
+
+	ri := &repoInfo{Name: filepath.Base(d)}
+
+	// Read current branch from .git/HEAD
+	if head, err := os.ReadFile(filepath.Join(d, ".git", "HEAD")); err == nil {
+		s := strings.TrimSpace(string(head))
+		if strings.HasPrefix(s, "ref: refs/heads/") {
+			ri.Branch = strings.TrimPrefix(s, "ref: refs/heads/")
+		}
+	}
+
+	// Read remote URL from git config
+	ri.Remote = parseGitOriginURL(filepath.Join(d, ".git", "config"))
+
+	return ri
+}
+
+func parseGitOriginURL(configPath string) string {
+	cfg, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(cfg), "\n")
+	inOrigin := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == `[remote "origin"]` {
+			inOrigin = true
+			continue
+		}
+		if inOrigin && strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		if inOrigin && strings.HasPrefix(trimmed, "url = ") {
+			remote := strings.TrimPrefix(trimmed, "url = ")
+			remote = strings.TrimSuffix(remote, ".git")
+			if strings.HasPrefix(remote, "git@") {
+				remote = strings.TrimPrefix(remote, "git@")
+				remote = strings.Replace(remote, ":", "/", 1)
+			} else if strings.HasPrefix(remote, "https://") {
+				remote = strings.TrimPrefix(remote, "https://")
+			}
+			return remote
+		}
+	}
+	return ""
 }
 
 // parseIgnoreFile reads and parses .peekmignore file
@@ -2745,13 +2921,11 @@ func formatTimeAgo(t time.Time) string {
 }
 
 type smartFolderFileInfo struct {
-	event       SessionEvent
-	latestView  time.Time
-	hasAIEvent  bool
-	latestAIEvt time.Time
+	event      SessionEvent
+	hasAIEvent bool
 }
 
-// aggregateFileEvents groups events by file path, tracking latest AI event and view per file.
+// aggregateFileEvents groups events by file path, keeping the latest AI event per file.
 func aggregateFileEvents(events []SessionEvent) map[string]*smartFolderFileInfo {
 	fileMap := make(map[string]*smartFolderFileInfo)
 	for _, evt := range events {
@@ -2760,14 +2934,9 @@ func aggregateFileEvents(events []SessionEvent) map[string]*smartFolderFileInfo 
 			fi = &smartFolderFileInfo{}
 			fileMap[evt.FilePath] = fi
 		}
-		if evt.ToolName == "View" {
-			if evt.Timestamp.After(fi.latestView) {
-				fi.latestView = evt.Timestamp
-			}
-		} else if !fi.hasAIEvent {
+		if !fi.hasAIEvent {
 			fi.event = evt
 			fi.hasAIEvent = true
-			fi.latestAIEvt = evt.Timestamp
 		}
 	}
 	return fileMap
@@ -2790,10 +2959,14 @@ func generateSmartFolders() []smartFolder {
 	now := time.Now()
 	fileMap := aggregateFileEvents(events)
 
-	var recentAI, unreviewed []smartFolderFile
+	var recentAI []smartFolderFile
 
 	for path, fi := range fileMap {
 		if !fi.hasAIEvent || !isWhitelistedFile(path) {
+			continue
+		}
+
+		if now.Sub(fi.event.Timestamp) >= 24*time.Hour {
 			continue
 		}
 
@@ -2802,38 +2975,23 @@ func generateSmartFolders() []smartFolder {
 			relPath = rel
 		}
 
-		sf := smartFolderFile{
+		recentAI = append(recentAI, smartFolderFile{
 			RelPath:   relPath,
 			Name:      filepath.Base(path),
 			ToolName:  fi.event.ToolName,
 			TimeAgo:   formatTimeAgo(fi.event.Timestamp),
 			SessionID: truncateSessionID(fi.event.SessionID),
-		}
-
-		if now.Sub(fi.latestAIEvt) < 24*time.Hour {
-			recentAI = append(recentAI, sf)
-		}
-		if fi.latestView.Before(fi.latestAIEvt) {
-			unreviewed = append(unreviewed, sf)
-		}
-	}
-
-	sortByName := func(files []smartFolderFile) {
-		sort.Slice(files, func(i, j int) bool {
-			return files[i].Name < files[j].Name
 		})
 	}
-	sortByName(recentAI)
-	sortByName(unreviewed)
 
-	var folders []smartFolder
+	sort.Slice(recentAI, func(i, j int) bool {
+		return recentAI[i].Name < recentAI[j].Name
+	})
+
 	if len(recentAI) > 0 {
-		folders = append(folders, smartFolder{Name: "Recent AI Edits", ID: "recent-ai", Files: recentAI})
+		return []smartFolder{{Name: "Recent AI Edits", ID: "recent-ai", Files: recentAI}}
 	}
-	if len(unreviewed) > 0 {
-		folders = append(folders, smartFolder{Name: "Unreviewed", ID: "unreviewed", Files: unreviewed})
-	}
-	return folders
+	return nil
 }
 
 func generateSmartFolderHTML(folders []smartFolder) string {
@@ -3095,4 +3253,297 @@ func sortTree(node *fileNode) {
 	for _, child := range node.children {
 		sortTree(child)
 	}
+}
+
+// ============================================================================
+// Transcript Viewer
+// ============================================================================
+
+// transcriptTemplateData is used for rendering the transcript viewer
+type transcriptTemplateData struct {
+	baseTemplateData
+	TreeHTML   template.HTML
+	Title      string
+	Subtitle   string
+	BrowsePath string
+	SessionID  string
+	Turns      []transcriptTurn
+	NotFound   bool
+}
+
+// transcriptTurn represents a single user or assistant turn in the conversation
+type transcriptTurn struct {
+	Role      string // "user" or "assistant"
+	Blocks    []contentBlock
+	Model     string
+	Timestamp string
+}
+
+// contentBlock represents a piece of content within a turn
+type contentBlock struct {
+	Type      string        // "text", "tool_use", "tool_result", "thinking", "context_summary"
+	HTML      template.HTML // rendered markdown (for text blocks)
+	Text      string        // raw text (for thinking, tool input)
+	ToolName  string        // for tool_use blocks
+	ToolInput string        // pretty-printed, truncated
+	ItemCount int           // for context_summary
+}
+
+// resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
+// Tries the current browseDir first, then falls back to scanning all project dirs.
+func resolveTranscriptPath(sessionID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	fileName := sessionID + ".jsonl"
+
+	// Try current browseDir first (fast path)
+	fileMutex.RLock()
+	dir := browseDir
+	fileMutex.RUnlock()
+	candidate := filepath.Join(projectsDir, strings.ReplaceAll(dir, "/", "-"), fileName)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+
+	// Scan all project directories
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate = filepath.Join(projectsDir, entry.Name(), fileName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// parseTranscript reads a Claude Code transcript JSONL file and returns conversation turns
+func parseTranscript(path string) ([]transcriptTurn, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	md := newMarkdownRenderer()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+
+	var turns []transcriptTurn
+	isFirstUser := true
+
+	for scanner.Scan() {
+		collapseCtx := isFirstUser
+		turn, skip := parseTranscriptLine(scanner.Bytes(), md, collapseCtx)
+		if skip {
+			continue
+		}
+		if collapseCtx {
+			isFirstUser = false
+		}
+		turns = append(turns, turn)
+	}
+	return turns, scanner.Err()
+}
+
+// transcriptLineEnvelope is the minimal structure for a transcript JSONL line
+type transcriptLineEnvelope struct {
+	Type      string          `json:"type"`
+	IsMeta    bool            `json:"isMeta"`
+	Timestamp string          `json:"timestamp"`
+	Message   json.RawMessage `json:"message"`
+}
+
+// transcriptMsg is the message body within a transcript line
+type transcriptMsg struct {
+	Role    string          `json:"role"`
+	Model   string          `json:"model"`
+	Content json.RawMessage `json:"content"`
+}
+
+// parseTranscriptLine parses a single JSONL line into a transcriptTurn.
+// Returns (turn, skip). If skip is true, the line should be ignored.
+func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults bool) (transcriptTurn, bool) {
+	var env transcriptLineEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return transcriptTurn{}, true
+	}
+
+	// Only keep user/assistant, skip meta
+	if env.IsMeta || (env.Type != "user" && env.Type != "assistant") {
+		return transcriptTurn{}, true
+	}
+	if len(env.Message) == 0 {
+		return transcriptTurn{}, true
+	}
+
+	var msg transcriptMsg
+	if err := json.Unmarshal(env.Message, &msg); err != nil {
+		return transcriptTurn{}, true
+	}
+
+	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user")
+	if len(blocks) == 0 {
+		return transcriptTurn{}, true
+	}
+
+	return transcriptTurn{
+		Role:      msg.Role,
+		Blocks:    blocks,
+		Model:     msg.Model,
+		Timestamp: env.Timestamp,
+	}, false
+}
+
+// parseContentBlocks extracts content blocks from a message's content field
+func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults bool) []contentBlock {
+	// Content can be a string (user prompt) or array of blocks
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		if str == "" {
+			return nil
+		}
+		return []contentBlock{{Type: "text", HTML: renderMarkdownToHTML(md, str)}}
+	}
+
+	var rawBlocks []json.RawMessage
+	if err := json.Unmarshal(raw, &rawBlocks); err != nil {
+		return nil
+	}
+
+	// Count tool_results for context collapse
+	if collapseToolResults {
+		if n := countToolResults(rawBlocks); n > 10 {
+			return []contentBlock{{Type: "context_summary", ItemCount: n}}
+		}
+	}
+
+	return convertRawBlocks(rawBlocks, md)
+}
+
+// countToolResults counts tool_result blocks in a raw block list
+func countToolResults(rawBlocks []json.RawMessage) int {
+	count := 0
+	for _, rb := range rawBlocks {
+		var peek struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(rb, &peek) == nil && peek.Type == "tool_result" {
+			count++
+		}
+	}
+	return count
+}
+
+// rawContentBlock matches the JSON structure of a Claude message content block
+type rawContentBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+}
+
+// convertRawBlocks parses raw JSON blocks into contentBlock values
+func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []contentBlock {
+	var blocks []contentBlock
+	for _, rb := range rawBlocks {
+		var peek rawContentBlock
+		if json.Unmarshal(rb, &peek) != nil {
+			continue
+		}
+		switch peek.Type {
+		case "text":
+			if peek.Text != "" {
+				blocks = append(blocks, contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)})
+			}
+		case "thinking":
+			if peek.Thinking != "" {
+				blocks = append(blocks, contentBlock{Type: "thinking", Text: truncateString(peek.Thinking, 4000)})
+			}
+		case "tool_use":
+			blocks = append(blocks, contentBlock{
+				Type:      "tool_use",
+				ToolName:  peek.Name,
+				ToolInput: formatToolInput(peek.Input),
+			})
+		}
+	}
+	return blocks
+}
+
+// renderMarkdownToHTML converts markdown text to HTML using goldmark
+func renderMarkdownToHTML(md goldmark.Markdown, text string) template.HTML {
+	var buf bytes.Buffer
+	if err := md.Convert([]byte(text), &buf); err != nil {
+		return template.HTML(template.HTMLEscapeString(text))
+	}
+	return template.HTML(buf.String())
+}
+
+// formatToolInput pretty-prints tool input JSON, truncated to a reasonable size
+func formatToolInput(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var v interface{}
+	if err := json.Unmarshal(input, &v); err != nil {
+		return truncateString(string(input), 2000)
+	}
+	pretty, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return truncateString(string(input), 2000)
+	}
+	return truncateString(string(pretty), 2000)
+}
+
+// truncateString truncates a string to maxLen characters, adding "..." if truncated
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// serveTranscript handles GET /transcript?session=<id>
+func serveTranscript(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session")
+	if sessionID == "" {
+		http.Error(w, "Missing session parameter", http.StatusBadRequest)
+		return
+	}
+
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	path := resolveTranscriptPath(sessionID)
+
+	data := transcriptTemplateData{
+		baseTemplateData: newBaseTemplateData(),
+		TreeHTML:         template.HTML(generateTreeHTML()),
+		Title:            "Transcript",
+		Subtitle:         "Session " + truncateSessionID(sessionID),
+		BrowsePath:       currentBrowseDir,
+		SessionID:        sessionID,
+	}
+
+	if path == "" {
+		data.NotFound = true
+	} else if turns, err := parseTranscript(path); err != nil {
+		data.NotFound = true
+	} else {
+		data.Turns = turns
+		data.Subtitle = fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
+	}
+
+	renderTemplatePair(w, r, transcriptTmpl, transcriptPartialTmpl, data)
 }

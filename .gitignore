@@ -41,4 +41,5 @@ npm/platforms/*/bin/peekm.exe
 *.log
 .npmrc
 .claude
+.peekm/
 docs

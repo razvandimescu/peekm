@@ -1,7 +1,28 @@
 <main id="content" data-view="timeline" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container">
         <h1>{{.Title}}</h1>
-        <p class="subtitle">{{.Subtitle}}</p>
+        {{if .Subtitle}}<p class="subtitle">{{.Subtitle}}</p>{{end}}
+        {{if .RepoInfo}}
+        <div class="repo-info">
+            <span class="repo-info-name">{{.RepoInfo.Name}}</span>
+            {{if .RepoInfo.Branch}}<span class="repo-info-branch">{{.RepoInfo.Branch}}</span>{{end}}
+            {{if .RepoInfo.Remote}}<span class="repo-info-remote">{{.RepoInfo.Remote}}</span>{{end}}
+        </div>
+        {{end}}
+
+        {{if .SessionStats}}
+        <div class="session-filter-banner">
+            <div class="session-filter-stats">
+                <code>{{.SessionStats.FullID}}</code>
+                <span class="session-filter-stat">{{.SessionStats.FileCount}} file{{if ne .SessionStats.FileCount 1}}s{{end}}</span>
+                <span class="session-filter-stat">{{.SessionStats.EditCount}} edit{{if ne .SessionStats.EditCount 1}}s{{end}}</span>
+                <span class="session-filter-stat">{{.SessionStats.Duration}}</span>
+                {{if .SessionStats.Tools}}<span class="session-filter-stat">{{.SessionStats.Tools}}</span>{{end}}
+            </div>
+            {{if .SessionStats.HasTranscript}}<a href="/transcript?session={{.SessionStats.FullID}}" class="session-filter-transcript">View transcript</a>{{end}}
+            <a href="/timeline" class="session-filter-clear">Show all sessions</a>
+        </div>
+        {{end}}
 
         {{if .Groups}}
         {{range .Groups}}
@@ -12,12 +33,14 @@
                 <span class="timeline-dot dot-{{.ToolName}}"></span>
                 <div class="timeline-content">
                     <div class="timeline-file">
-                        <a href="/view/{{.FilePath}}">{{.FileName}}</a>
+                        {{if .IsViewable}}<a href="/view/{{pathEscape .FilePath}}" title="{{.FilePath}}">{{.FilePath}}</a>{{else}}<span class="timeline-file-path" title="{{.AbsPath}}">{{.AbsPath}}</span><button class="timeline-copy-btn" aria-label="Copy file path" onclick="navigator.clipboard.writeText('{{.AbsPath}}').then(function(){var b=event.target.closest('.timeline-copy-btn');b.classList.add('copied');setTimeout(function(){b.classList.remove('copied')},1200)})" title="Copy path">
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                        </button>{{end}}
                     </div>
                     <div class="timeline-meta">
                         <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>
                         <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
-                        {{if .SessionID}}<span class="timeline-sid">{{.SessionID}}</span>{{end}}
+                        {{if .SessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-sid">{{.SessionID}}</a> {{if .HasTranscript}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-transcript-link">transcript</a>{{end}}{{end}}
                     </div>
                 </div>
             </div>
@@ -26,9 +49,14 @@
         {{end}}
         {{else}}
         <div class="timeline-empty">
-            <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
+            <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
+            {{if .FilterSession}}
+            <p>No events found for this session.</p>
+            <p><a href="/timeline">Show all sessions</a></p>
+            {{else}}
             <p>No AI session events yet.</p>
             <p>Events will appear here when Claude Code modifies files in this directory.</p>
+            {{end}}
         </div>
         {{end}}
     </div>

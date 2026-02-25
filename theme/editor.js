@@ -32,7 +32,7 @@ async function toggleEditMode() {
             originalMarkdown = await response.text();
             editor.value = originalMarkdown;
         } catch (err) {
-            alert('Failed to load file for editing: ' + err.message);
+            showErrorToast('Failed to load file for editing: ' + err.message);
             return;
         }
     }
@@ -135,13 +135,13 @@ async function saveMarkdown() {
         // SSE will automatically trigger preview update - no reload needed
         console.log('[Editor] File saved, waiting for SSE update...');
     } catch (err) {
-        alert('Failed to save: ' + err.message);
+        showErrorToast('Failed to save: ' + err.message);
     }
 }
 
 // Ctrl+S to save
 document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 's') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         const editorContainer = document.getElementById('editor-container');
         if (editorContainer && editorContainer.classList.contains('active')) {

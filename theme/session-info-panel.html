@@ -39,7 +39,14 @@
             <div class="session-info-field">
                 <span class="session-info-label">Timestamp:</span>
                 <span class="session-info-value">
-                    <time class="session-timestamp" datetime="{{formatISO .SessionData.Timestamp}}">{{formatISO .SessionData.Timestamp}}</time>
+                    <time class="session-timestamp" datetime="{{formatISO .SessionData.Timestamp}}">{{formatTimeAgo .SessionData.Timestamp}}</time>
+                </span>
+            </div>
+
+            <div class="session-info-field">
+                <span class="session-info-label">Transcript:</span>
+                <span class="session-info-value">
+                    <a href="/transcript?session={{.SessionData.SessionID}}" style="color: var(--fgColor-accent); text-decoration: none;">View conversation</a>
                 </span>
             </div>
         </div>
@@ -65,12 +72,6 @@
                 </div>
                 {{end}}
 
-                {{if .SessionData.TranscriptPath}}
-                <div class="session-info-field">
-                    <span class="session-info-label">Transcript Path:</span>
-                    <code class="session-info-value">{{.SessionData.TranscriptPath}}</code>
-                </div>
-                {{end}}
             </div>
         </details>
     </div>
