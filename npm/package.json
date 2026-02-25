@@ -22,9 +22,7 @@
   "bin": {
     "peekm": "bin/peekm.js"
   },
-  "scripts": {
-    "postinstall": "node install.js"
-  },
+  "scripts": {},
   "optionalDependencies": {
     "@peekm/darwin-arm64": "0.1.0",
     "@peekm/darwin-x64": "0.1.0",
@@ -34,7 +32,6 @@
   },
   "files": [
     "bin/",
-    "install.js",
     "README.md"
   ],
   "engines": {
