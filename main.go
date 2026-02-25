@@ -87,7 +87,6 @@ var (
 	// Templates, CSS, and JavaScript (loaded once at startup)
 	githubCSS              string
 	themeOverrides         string
-	standalonePageCSS      string
 	themeManagerJS         string
 	editorJS               string
 	navigationJS           string
@@ -119,7 +118,6 @@ type watcherManager struct {
 type baseTemplateData struct {
 	GitHubCSS         template.CSS
 	ThemeOverrides    template.CSS
-	StandaloneCSS     template.CSS
 	ThemeManagerJS    template.JS
 	EditorJS          template.JS
 	NavigationJS      template.JS
@@ -439,7 +437,6 @@ func newBaseTemplateData() baseTemplateData {
 	return baseTemplateData{
 		GitHubCSS:         template.CSS(githubCSS),
 		ThemeOverrides:    template.CSS(themeOverrides),
-		StandaloneCSS:     template.CSS(standalonePageCSS),
 		ThemeManagerJS:    template.JS(themeManagerJS),
 		EditorJS:          template.JS(editorJS),
 		NavigationJS:      template.JS(navigationJS),
@@ -830,12 +827,6 @@ func init() {
 	}
 	themeOverrides = string(overridesData)
 
-	standaloneData, err := themeFS.ReadFile("theme/standalone-page.css")
-	if err != nil {
-		log.Fatalf("Failed to load standalone page CSS: %v", err)
-	}
-	standalonePageCSS = string(standaloneData)
-
 	// Load JavaScript files
 	themeManagerData, err := themeFS.ReadFile("theme/theme-manager.js")
 	if err != nil {
@@ -881,42 +872,39 @@ func init() {
 	if err != nil {
 		log.Fatalf("Failed to load file-browser template: %v", err)
 	}
-	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
-
-	fileBrowserPartialHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
+	// File-browser shell defines {{template "content" .}} — register the default content block
+	fileBrowserContentHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load file-browser-partial template: %v", err)
 	}
-	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserPartialHTML)))
+
+	// Full page: file-browser shell + file-browser content as "content" block + session panel
+	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	template.Must(fileBrowserTmpl.New("content").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
+	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
+
+	// SPA partial: standalone file-browser-partial + session panel
+	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
 	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
 
-	// Timeline templates (full includes partial as named "content" block)
+	// Timeline templates: full uses file-browser shell with timeline partial as "content"
 	timelinePartialHTML, err := themeFS.ReadFile("theme/timeline-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load timeline-partial template: %v", err)
 	}
 	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(string(timelinePartialHTML)))
 
-	timelineHTML, err := themeFS.ReadFile("theme/timeline.html")
-	if err != nil {
-		log.Fatalf("Failed to load timeline template: %v", err)
-	}
-	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(timelineHTML)))
+	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(fileBrowserHTML)))
 	template.Must(timelineTmpl.New("content").Funcs(funcMap).Parse(string(timelinePartialHTML)))
 
-	// Transcript templates (full includes partial as named "content" block)
+	// Transcript templates: full uses file-browser shell with transcript partial as "content"
 	transcriptPartialHTML, err := themeFS.ReadFile("theme/transcript-partial.html")
 	if err != nil {
 		log.Fatalf("Failed to load transcript-partial template: %v", err)
 	}
 	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
 
-	transcriptHTML, err := themeFS.ReadFile("theme/transcript.html")
-	if err != nil {
-		log.Fatalf("Failed to load transcript template: %v", err)
-	}
-	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(string(transcriptHTML)))
+	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(string(fileBrowserHTML)))
 	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
 }
 
@@ -2355,6 +2343,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 
 type timelineTemplateData struct {
 	baseTemplateData
+	TreeHTML      template.HTML
 	Title         string
 	Subtitle      string
 	BrowsePath    string
@@ -2493,6 +2482,7 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 
 	data := timelineTemplateData{
 		baseTemplateData: newBaseTemplateData(),
+		TreeHTML:         template.HTML(generateTreeHTML()),
 		Title:            title,
 		Subtitle:         subtitle,
 		BrowsePath:       currentBrowseDir,
@@ -3272,6 +3262,7 @@ func sortTree(node *fileNode) {
 // transcriptTemplateData is used for rendering the transcript viewer
 type transcriptTemplateData struct {
 	baseTemplateData
+	TreeHTML   template.HTML
 	Title      string
 	Subtitle   string
 	BrowsePath string
@@ -3538,6 +3529,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 
 	data := transcriptTemplateData{
 		baseTemplateData: newBaseTemplateData(),
+		TreeHTML:         template.HTML(generateTreeHTML()),
 		Title:            "Transcript",
 		Subtitle:         "Session " + truncateSessionID(sessionID),
 		BrowsePath:       currentBrowseDir,
