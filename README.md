@@ -8,27 +8,16 @@ A markdown viewer that tracks what AI coding agents change in your project.
 
 ![peekm demo](assets/hero-demo.gif)
 
-```bash
-npx @peekm/peekm .
-```
+peekm watches your project and shows you exactly which files AI coding agents changed, when they changed them, and what the agent was thinking. It's also a fast markdown viewer with live reload, GitHub styling, and dark/light themes — but the AI tracking is why it exists.
 
-peekm is a local markdown viewer with built-in AI session tracking. When Claude Code (or other AI agents) edits files, peekm shows you which files changed, which you haven't reviewed, and can commit session summaries to git for PR reviewers. Works without AI too — it's a solid markdown previewer with live reload, GitHub styling, and dark/light themes.
-
-## Quick Start
+**All data stays local. Nothing leaves your machine.**
 
 ```bash
-npx @peekm/peekm .
+npx @peekm/peekm .                  # start viewing
+peekm setup claude-code              # connect Claude Code (one time)
 ```
 
 Or `brew install razvandimescu/tap/peekm` for a permanent install.
-
-To connect Claude Code (one time):
-
-```bash
-peekm setup claude-code
-```
-
-This installs PostToolUse hooks. Smart folders, timeline, and toast notifications start working immediately.
 
 ## AI Tracking
 
@@ -38,36 +27,39 @@ When connected, peekm tracks every file modification made by AI agents:
 - **Timeline** (`/timeline`) — chronological view of all AI file modifications, grouped by day, color-coded by operation type
 - **Toast notifications** — appear the instant AI modifies a file, click to navigate
 - **Session info panel** — per-file dropdown showing session ID, tool, permission mode, timestamp
-
-Events persist to `~/.peekm/events.jsonl` and survive restarts.
-
-### Not Mem0 / Zep / Letta
-
-Those tools help AI agents *remember* context. peekm helps *humans* see what AI did. Different problem. HANDOFF.md and `.context/` conventions are closer in spirit, but require manual authoring — peekm captures events automatically.
+- **Transcript viewer** — read the full AI conversation for any session
+- **Persistent history** — events survive restarts (`~/.peekm/events.jsonl`)
 
 ## Comparison
 
-| | Glow | grip | VS Code Preview | peekm |
-|---|------|------|-----------------|-------|
-| **Live reload** | — | Manual | Yes | SSE with event replay |
-| **Directory browser** | TUI list | — | File explorer | Web tree + smart folders |
-| **AI tracking** | — | — | — | Smart folders, timeline, toasts |
-| **Session summaries** | — | — | — | Committed to git |
-| **Startup** | Fast | ~2s | Editor launch | < 100ms |
-| **Dependencies** | Single binary | Python | VS Code | Single binary |
-| **Offline** | Yes | No (GitHub API) | Yes | Yes |
+| | Glow | grip | VS Code Preview | Ohai | peekm |
+|---|------|------|-----------------|------|-------|
+| **AI tracking** | — | — | — | — | Smart folders, timeline, toasts |
+| **Session history** | — | — | — | — | Persistent timeline + transcripts |
+| **Live reload** | — | Manual | Yes | Yes | SSE with event replay |
+| **Directory browser** | TUI list | — | File explorer | — | Web tree + smart folders |
+| **Cross-platform** | Yes | Yes | Yes | macOS only | Yes |
+| **Price** | Free | Free | Free (with VS Code) | $3.99 | Free |
+| **Startup** | Fast | ~2s | Editor launch | Fast | < 100ms |
+| **Dependencies** | Single binary | Python | VS Code | Mac App Store | Single binary |
 
-## Features
+## What It Does
 
-- **VS Code-style sidebar** — tree view, collapsible folders, Cmd/Ctrl+B to toggle
-- **Smart defaults** — auto-opens README.md or most recent file
-- **Fuzzy search** — Cmd/Ctrl+P
-- **Auto-reload on save** — Server-Sent Events with event replay
-- **Theme switching** — Light/Dark/Auto, persisted
-- **In-browser editing** — edit markdown directly, Ctrl+S to save
-- **HTML export** — download self-contained HTML
-- Single binary, cross-platform (macOS, Linux, Windows)
-- Whitelist-based file access, CSRF protection, path traversal prevention
+**AI session tracking** (with Claude Code):
+- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24h
+- **Timeline** — chronological view of all AI modifications, color-coded by operation
+- **Toast notifications** — instant alerts when AI modifies a file, click to navigate
+- **Session panel** — per-file dropdown with session ID, tool, permission mode, timestamp
+- **Transcript viewer** — read the full AI conversation for any session
+- **Persistent history** — events survive restarts (`~/.peekm/events.jsonl`)
+
+**Markdown viewer**:
+- VS Code-style sidebar with tree view and fuzzy search (Cmd/Ctrl+P)
+- Live reload via Server-Sent Events with event replay
+- Light/Dark/Auto themes, persisted
+- In-browser editing with auto-save
+- HTML export
+- Single binary, cross-platform, < 100ms startup
 
 ## Installation
 
@@ -112,19 +104,10 @@ peekm -browser=false .  # don't open browser
 | Subcommand | Description |
 |------------|-------------|
 | `peekm setup claude-code` | Install Claude Code hooks |
+| `peekm setup claude-code --port 8080` | Custom port |
 | `peekm setup claude-code --remove` | Remove hooks |
 
-## AI Session Tracking Setup
-
-```bash
-peekm setup claude-code              # install
-peekm setup claude-code --port 8080  # custom port
-peekm setup claude-code --remove     # uninstall
-```
-
-Idempotent, non-destructive. Creates `~/.claude/peekm-hook.sh` and adds PostToolUse hooks to `~/.claude/settings.json`.
-
-All data stays local. Nothing is sent anywhere.
+Setup is idempotent and non-destructive. Creates `~/.claude/peekm-hook.sh` and adds PostToolUse hooks to `~/.claude/settings.json`.
 
 ## Ignoring Directories
 
@@ -138,7 +121,8 @@ _site
 
 `peekm --show-ignored` to see all active exclusions.
 
-## How It Works
+<details>
+<summary><strong>How It Works</strong></summary>
 
 1. **Parse** — markdown to HTML via [goldmark](https://github.com/yuin/goldmark)
 2. **Serve** — local HTTP server with graceful shutdown
@@ -146,9 +130,11 @@ _site
 4. **Reload** — SSE with event replay
 5. **Track** — correlates AI session metadata with file changes
 
+</details>
+
 ## Development
 
-Go 1.21+. `go build -o peekm && go test -race ./...`
+Go 1.23+. `go build -o peekm && go test -race ./...`
 
 ## Contributing
 
@@ -169,3 +155,4 @@ MIT — see [LICENSE](LICENSE).
 - [glow](https://github.com/charmbracelet/glow) — Terminal markdown renderer
 - [grip](https://github.com/joeyespo/grip) — GitHub-flavored markdown preview
 - [VS Code Markdown Preview](https://code.visualstudio.com/docs/languages/markdown) — Built-in editor preview
+- [Ohai](https://ohai.dev) — macOS markdown viewer for AI workflows
