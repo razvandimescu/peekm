@@ -3013,7 +3013,7 @@ func generateSmartFolderHTML(folders []smartFolder) string {
 			escapedName := template.HTMLEscapeString(f.Name)
 			escapedTool := template.HTMLEscapeString(f.ToolName)
 			escapedSID := template.HTMLEscapeString(f.SessionID)
-			escapedHref := template.URLQueryEscaper(f.RelPath)
+			escapedHref := pathEscapeSegments(f.RelPath)
 			buf.WriteString(fmt.Sprintf(
 				`<div class="tree-item"><div class="tree-node"><span class="tree-file smart-folder-file">`+
 					`<a href="/view/%s">%s</a>`+
@@ -3029,6 +3029,15 @@ func generateSmartFolderHTML(folders []smartFolder) string {
 	}
 	buf.WriteString(`</div><div class="smart-folders-separator"></div>`)
 	return buf.String()
+}
+
+// pathEscapeSegments escapes each path segment individually, preserving /
+func pathEscapeSegments(s string) string {
+	parts := strings.Split(s, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
 }
 
 func generateTreeHTML() string {
@@ -3170,7 +3179,7 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 		} else {
 			// File node (leaf)
 			buf.WriteString(`<div class="tree-node"><span class="tree-file">`)
-			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, template.URLQueryEscaper(node.path), template.HTMLEscapeString(node.name)))
+			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
 			buf.WriteString(`</span></div>`)
 		}
 
