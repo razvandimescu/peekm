@@ -72,3 +72,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  publish-npm:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release download "v${VERSION}" -D dist -p "*.tar.gz" -p "*.zip"
+
+          cd dist
+          for file in *.tar.gz; do
+            dir=$(echo "$file" | sed "s/peekm_${VERSION}_/peekm_/" | sed 's/\.tar\.gz//')
+            mkdir -p "$dir"
+            tar xzf "$file" -C "$dir"
+          done
+          for file in *.zip; do
+            dir=$(echo "$file" | sed "s/peekm_${VERSION}_/peekm_/" | sed 's/\.zip//')
+            mkdir -p "$dir"
+            unzip -q "$file" -d "$dir"
+          done
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/publish-npm.sh "$VERSION"
