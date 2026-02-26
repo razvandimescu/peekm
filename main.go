@@ -396,15 +396,30 @@ func (el *eventLog) append(event SessionEvent) error {
 	return nil
 }
 
-// eventsForDir returns events under dir, newest first.
+// claudePlansDir returns the ~/.claude/plans/ directory path, or "" if $HOME is unavailable.
+func claudePlansDir() string {
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, ".claude", "plans")
+}
+
+// eventsForDir returns events under dir (plus plan files), newest first.
 func (el *eventLog) eventsForDir(dir string) []SessionEvent {
+	prefix := dir + string(filepath.Separator)
+	var plansPrefix string
+	if plansDir := claudePlansDir(); plansDir != "" {
+		plansPrefix = plansDir + string(filepath.Separator)
+	}
+
 	el.mu.RLock()
 	defer el.mu.RUnlock()
-	prefix := dir + string(filepath.Separator)
 	var out []SessionEvent
 	for i := len(el.events) - 1; i >= 0; i-- {
 		evt := el.events[i]
-		if strings.HasPrefix(evt.FilePath, prefix) || evt.FilePath == dir {
+		if strings.HasPrefix(evt.FilePath, prefix) || evt.FilePath == dir ||
+			(plansPrefix != "" && strings.HasPrefix(evt.FilePath, plansPrefix)) {
 			out = append(out, evt)
 		}
 	}
@@ -784,6 +799,14 @@ func validateAndResolvePath(targetPath string) (string, error) {
 // resolveFilePath converts a relative file path to absolute using browseDir
 // Thread-safe helper to eliminate duplication across handlers
 func resolveFilePath(relativePath string) string {
+	// Handle ~/... paths (files outside browseDir, e.g. plan files)
+	if strings.HasPrefix(relativePath, "~/") {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			return filepath.Clean(filepath.Join(homeDir, relativePath[2:]))
+		}
+	}
+
 	// Get current browse directory (thread-safe)
 	fileMutex.RLock()
 	currentBrowseDir := browseDir
@@ -1315,9 +1338,24 @@ func initSessionTracking() {
 		return
 	}
 	globalEventLog = el
+
+	plansDirPrefix := ""
+	if plansDir := claudePlansDir(); plansDir != "" {
+		plansDirPrefix = plansDir + string(os.PathSeparator)
+	}
+
 	for path, meta := range el.latestPerFile() {
 		globalSessionStore.register(path, meta)
+		// Whitelist plan files that still exist on disk
+		if plansDirPrefix != "" && strings.HasPrefix(path, plansDirPrefix) && strings.HasSuffix(path, ".md") {
+			if _, statErr := os.Stat(path); statErr == nil && !isWhitelistedFile(path) {
+				fileMutex.Lock()
+				markdownFiles = append(markdownFiles, path)
+				fileMutex.Unlock()
+			}
+		}
 	}
+
 	el.mu.RLock()
 	n := len(el.events)
 	el.mu.RUnlock()
@@ -1423,18 +1461,28 @@ func main() {
 	}
 }
 
+// tildeRelPath returns a path relative to baseDir, or ~/... if outside baseDir.
+func tildeRelPath(absPath, baseDir string) string {
+	if rel, err := filepath.Rel(baseDir, absPath); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		if rel, err := filepath.Rel(homeDir, absPath); err == nil {
+			return "~/" + rel
+		}
+	}
+	return absPath
+}
+
 // getRelativePath converts absolute file path to relative path (thread-safe)
 func getRelativePath(absPath string) string {
 	fileMutex.RLock()
 	defer fileMutex.RUnlock()
-
-	relPath := absPath
-	if browseDir != "" {
-		if rel, err := filepath.Rel(browseDir, absPath); err == nil {
-			relPath = rel
-		}
+	if browseDir == "" {
+		return absPath
 	}
-	return relPath
+	return tildeRelPath(absPath, browseDir)
 }
 
 // removeFromWhitelist removes a file from the markdown files list (thread-safe)
@@ -1987,26 +2035,24 @@ func handlePlanFile(filePath, content, sessionID string) string {
 		return filePath
 	}
 
-	// Cache plan content from devcontainer/remote environments
-	if content != "" && strings.Contains(filePath, ".claude/plans/") {
-		homeDir, _ := os.UserHomeDir()
-		if homeDir != "" {
-			cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
-			os.MkdirAll(cacheDir, 0755)
-			localPath := filepath.Join(cacheDir, filepath.Base(filePath))
-			if err := atomicWriteFile(localPath, content); err == nil {
-				filePath = localPath
-			}
-		}
-	}
-
-	// Dynamically whitelist and broadcast plan files
 	homeDir, _ := os.UserHomeDir()
 	if homeDir == "" {
 		return filePath
 	}
+
+	// Cache plan content from devcontainer/remote environments
+	if content != "" && strings.Contains(filePath, ".claude/plans/") {
+		cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+		os.MkdirAll(cacheDir, 0755)
+		localPath := filepath.Join(cacheDir, filepath.Base(filePath))
+		if err := atomicWriteFile(localPath, content); err == nil {
+			filePath = localPath
+		}
+	}
+
+	// Dynamically whitelist and broadcast plan files
 	sep := string(os.PathSeparator)
-	plansDir := filepath.Join(homeDir, ".claude", "plans")
+	plansDir := claudePlansDir()
 	cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
 	if !strings.HasPrefix(filePath, plansDir+sep) && !strings.HasPrefix(filePath, cacheDir+sep) {
 		return filePath
@@ -2405,10 +2451,7 @@ func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGro
 	var bucketOrder []string
 
 	for _, evt := range events {
-		relPath := evt.FilePath
-		if rel, err := filepath.Rel(baseDir, evt.FilePath); err == nil {
-			relPath = rel
-		}
+		relPath := tildeRelPath(evt.FilePath, baseDir)
 
 		entry := timelineEntry{
 			FilePath:      relPath,
@@ -2970,10 +3013,7 @@ func generateSmartFolders() []smartFolder {
 			continue
 		}
 
-		relPath := path
-		if rel, err := filepath.Rel(currentBrowseDir, path); err == nil {
-			relPath = rel
-		}
+		relPath := tildeRelPath(path, currentBrowseDir)
 
 		recentAI = append(recentAI, smartFolderFile{
 			RelPath:   relPath,
@@ -3070,11 +3110,8 @@ func generateTreeHTML() string {
 			absPath, _ = filepath.Abs(path)
 		}
 
-		// Make path relative to browse directory
-		relPath, err := filepath.Rel(absDir, absPath)
-		if err != nil {
-			relPath = filepath.Base(path)
-		}
+		// Make path relative to browse directory (~/... for out-of-browseDir files)
+		relPath := tildeRelPath(absPath, absDir)
 
 		parts := strings.Split(filepath.Dir(relPath), string(filepath.Separator))
 
