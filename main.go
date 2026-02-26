@@ -40,7 +40,13 @@ var themeFS embed.FS
 const (
 	eventLogMaxOnDisk   = 5000
 	eventLogMaxInMemory = 10000
+	versionCheckTTL     = 24 * time.Hour
 )
+
+type versionCache struct {
+	Latest    string `json:"latest"`
+	CheckedAt int64  `json:"checked_at"`
+}
 
 var (
 	// Build info (set via ldflags)
@@ -1413,6 +1419,10 @@ func main() {
 
 	fullURL := buildStartupURL(url, targetFile)
 	fmt.Println("Press Ctrl+C to quit")
+
+	if version != "dev" {
+		go checkLatestVersion()
+	}
 
 	if *openBrowser {
 		go func() {
@@ -3226,6 +3236,65 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 		for _, child := range node.children {
 			generateTreeHTMLRecursive(child, "", false, false, depth, false, buf)
 		}
+	}
+}
+
+func readCachedVersion(cachePath string) string {
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return ""
+	}
+	var cached versionCache
+	if json.Unmarshal(data, &cached) != nil || cached.Latest == "" {
+		return ""
+	}
+	if time.Now().Unix()-cached.CheckedAt >= int64(versionCheckTTL.Seconds()) {
+		return ""
+	}
+	return cached.Latest
+}
+
+func fetchLatestVersion(cacheDir, cachePath string) string {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("https://registry.npmjs.org/@peekm/peekm/latest")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil || pkg.Version == "" {
+		return ""
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err == nil {
+		if data, err := json.Marshal(versionCache{Latest: pkg.Version, CheckedAt: time.Now().Unix()}); err == nil {
+			os.WriteFile(cachePath, data, 0644) //nolint:errcheck
+		}
+	}
+	return pkg.Version
+}
+
+func checkLatestVersion() {
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	cacheDir := filepath.Join(homeDir, ".peekm")
+	cachePath := filepath.Join(cacheDir, "version-check.json")
+
+	latest := readCachedVersion(cachePath)
+	if latest == "" {
+		latest = fetchLatestVersion(cacheDir, cachePath)
+	}
+	if latest != "" && latest != version {
+		fmt.Printf("\nUpdate available: %s → %s — run: npm i -g @peekm/peekm\n", version, latest)
 	}
 }
 
