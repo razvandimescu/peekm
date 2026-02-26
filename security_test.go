@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestValidateAndResolvePath tests the path validation and security checks
@@ -406,6 +407,123 @@ func TestCollectMarkdownFiles_SymlinkDirectory(t *testing.T) {
 		if strings.Contains(f, "linked.md") && !strings.Contains(f, "docs/linked.md") {
 			t.Errorf("symlinked file should use symlink path, got: %s", f)
 		}
+	}
+}
+
+// TestTildeRelPath_OutOfBaseDirNeverProducesDotDot ensures files outside baseDir
+// get ~/... paths, never ../.. (which breaks /view/ URLs via browser normalization).
+func TestTildeRelPath_OutOfBaseDirNeverProducesDotDot(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		absPath string
+		baseDir string
+		want    string
+	}{
+		{
+			name:    "file inside baseDir",
+			absPath: filepath.Join(homeDir, "projects", "peekm", "README.md"),
+			baseDir: filepath.Join(homeDir, "projects", "peekm"),
+			want:    "README.md",
+		},
+		{
+			name:    "file in subdirectory of baseDir",
+			absPath: filepath.Join(homeDir, "projects", "peekm", "docs", "guide.md"),
+			baseDir: filepath.Join(homeDir, "projects", "peekm"),
+			want:    filepath.Join("docs", "guide.md"),
+		},
+		{
+			name:    "plan file outside baseDir gets tilde path",
+			absPath: filepath.Join(homeDir, ".claude", "plans", "feature.md"),
+			baseDir: filepath.Join(homeDir, "projects", "peekm"),
+			want:    filepath.Join("~", ".claude", "plans", "feature.md"),
+		},
+		{
+			name:    "sibling project outside baseDir gets tilde path",
+			absPath: filepath.Join(homeDir, "projects", "other", "file.md"),
+			baseDir: filepath.Join(homeDir, "projects", "peekm"),
+			want:    filepath.Join("~", "projects", "other", "file.md"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tildeRelPath(tt.absPath, tt.baseDir)
+			if got != tt.want {
+				t.Errorf("tildeRelPath(%q, %q) = %q, want %q", tt.absPath, tt.baseDir, got, tt.want)
+			}
+			if strings.HasPrefix(got, "..") {
+				t.Errorf("tildeRelPath must never return ../.. paths (breaks /view/ URLs), got %q", got)
+			}
+		})
+	}
+}
+
+// TestResolveFilePath_TildeRoundTrip ensures ~/... paths resolve back to the correct absolute path.
+func TestResolveFilePath_TildeRoundTrip(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	// Set browseDir explicitly so resolveFilePath exercises both branches
+	fileMutex.Lock()
+	oldBrowseDir := browseDir
+	browseDir = filepath.Join(homeDir, "projects", "peekm")
+	fileMutex.Unlock()
+	defer func() {
+		fileMutex.Lock()
+		browseDir = oldBrowseDir
+		fileMutex.Unlock()
+	}()
+
+	absPath := filepath.Join(homeDir, ".claude", "plans", "feature.md")
+
+	// Generate tilde path then resolve back — must round-trip
+	rel := tildeRelPath(absPath, browseDir)
+	got := resolveFilePath(rel)
+	if got != absPath {
+		t.Errorf("round-trip failed: tildeRelPath gave %q, resolveFilePath gave %q, want %q", rel, got, absPath)
+	}
+}
+
+// TestEventsForDir_IncludesPlanFiles ensures plan file events appear even when
+// the browseDir is a different directory (regression: plan files were filtered out).
+func TestEventsForDir_IncludesPlanFiles(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	projectDir := filepath.Join(homeDir, "projects", "peekm")
+	planFile := filepath.Join(homeDir, ".claude", "plans", "feature.md")
+	projectFile := filepath.Join(projectDir, "main.go")
+
+	el := &eventLog{
+		events: []SessionEvent{
+			{FilePath: projectFile, ToolName: "Edit", SessionID: "abc", Timestamp: time.Now()},
+			{FilePath: planFile, ToolName: "Write", SessionID: "abc", Timestamp: time.Now()},
+		},
+	}
+
+	events := el.eventsForDir(projectDir)
+
+	if len(events) != 2 {
+		t.Errorf("expected 2 events (project file + plan file), got %d", len(events))
+	}
+
+	hasPlan := false
+	for _, evt := range events {
+		if evt.FilePath == planFile {
+			hasPlan = true
+		}
+	}
+	if !hasPlan {
+		t.Error("plan file event should be included in eventsForDir results")
 	}
 }
 
