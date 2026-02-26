@@ -13,11 +13,12 @@ peekm watches your project and shows you exactly which files AI coding agents ch
 **All data stays local. Nothing leaves your machine.**
 
 ```bash
-npx @peekm/peekm .                  # start viewing
+npm i -g @peekm/peekm               # install
+peekm .                              # start viewing
 peekm setup claude-code              # connect Claude Code (one time)
 ```
 
-Or `brew install razvandimescu/tap/peekm` for a permanent install.
+Or try without installing: `npx @peekm/peekm .`
 
 ## AI Tracking
 
@@ -63,10 +64,12 @@ When connected, peekm tracks every file modification made by AI agents:
 
 ## Installation
 
-**npm** (zero install)
+**npm** (recommended)
 ```bash
-npx @peekm/peekm .
+npm i -g @peekm/peekm
 ```
+
+Try without installing: `npx @peekm/peekm .`
 
 **Homebrew**
 ```bash
