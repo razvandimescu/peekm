@@ -411,6 +411,34 @@ func claudePlansDir() string {
 	return filepath.Join(homeDir, ".claude", "plans")
 }
 
+// plansCacheDir returns the ~/.cache/peekm/plans/ directory path, or "" if $HOME is unavailable.
+func plansCacheDir() string {
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, ".cache", "peekm", "plans")
+}
+
+// readPlanFile reads a plan file, falling back to the cache if the original is missing.
+func readPlanFile(planPath string) ([]byte, error) {
+	content, err := os.ReadFile(planPath)
+	if err == nil {
+		return content, nil
+	}
+	cacheDir := plansCacheDir()
+	if cacheDir == "" {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(cacheDir, filepath.Base(planPath)))
+}
+
+// isPlanFile checks whether a path is under ~/.claude/plans/.
+func isPlanFile(path string) bool {
+	plansDir := claudePlansDir()
+	return plansDir != "" && strings.HasPrefix(path, plansDir+string(os.PathSeparator))
+}
+
 // eventsForDir returns events under dir (plus plan files), newest first.
 func (el *eventLog) eventsForDir(dir string) []SessionEvent {
 	prefix := dir + string(filepath.Separator)
@@ -1350,11 +1378,17 @@ func initSessionTracking() {
 		plansDirPrefix = plansDir + string(os.PathSeparator)
 	}
 
+	cacheDir := plansCacheDir()
+
 	for path, meta := range el.latestPerFile() {
 		globalSessionStore.register(path, meta)
-		// Whitelist plan files that still exist on disk
-		if plansDirPrefix != "" && strings.HasPrefix(path, plansDirPrefix) && strings.HasSuffix(path, ".md") {
-			if _, statErr := os.Stat(path); statErr == nil && !isWhitelistedFile(path) {
+		// Whitelist plan files if original or cached copy exists
+		if plansDirPrefix != "" && strings.HasPrefix(path, plansDirPrefix) && strings.HasSuffix(path, ".md") && !isWhitelistedFile(path) {
+			_, origErr := os.Stat(path)
+			if origErr != nil && cacheDir != "" {
+				_, origErr = os.Stat(filepath.Join(cacheDir, filepath.Base(path)))
+			}
+			if origErr == nil {
 				fileMutex.Lock()
 				markdownFiles = append(markdownFiles, path)
 				fileMutex.Unlock()
@@ -1679,8 +1713,14 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := os.ReadFile(validated)
-	if err != nil {
+	var content []byte
+	var readErr error
+	if isPlanFile(validated) {
+		content, readErr = readPlanFile(validated)
+	} else {
+		content, readErr = os.ReadFile(validated)
+	}
+	if readErr != nil {
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
 		return
 	}
@@ -1790,7 +1830,12 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read and render markdown
-	content, err := os.ReadFile(filePath)
+	var content []byte
+	if isPlanFile(filePath) {
+		content, err = readPlanFile(filePath)
+	} else {
+		content, err = os.ReadFile(filePath)
+	}
 	if err != nil {
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
 		return
@@ -2038,35 +2083,27 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	renderTemplate(w, r, data)
 }
 
-// handlePlanFile caches remote plan content and whitelists/broadcasts plan files.
-// Returns the (possibly rewritten) file path.
+// handlePlanFile caches plan content for durability and whitelists/broadcasts plan files.
+// Always returns the canonical ~/.claude/plans/ path (never rewrites to cache path).
 func handlePlanFile(filePath, content, sessionID string) string {
 	if !strings.HasSuffix(filePath, ".md") {
 		return filePath
 	}
-
-	homeDir, _ := os.UserHomeDir()
-	if homeDir == "" {
+	plansDir := claudePlansDir()
+	if plansDir == "" || !strings.HasPrefix(filePath, plansDir+string(os.PathSeparator)) {
 		return filePath
 	}
 
-	// Cache plan content from devcontainer/remote environments
-	if content != "" && strings.Contains(filePath, ".claude/plans/") {
-		cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
+	// Cache plan content for durability (survives cleanup, handles remote)
+	if content != "" {
+		cacheDir := plansCacheDir()
 		os.MkdirAll(cacheDir, 0755)
 		localPath := filepath.Join(cacheDir, filepath.Base(filePath))
-		if err := atomicWriteFile(localPath, content); err == nil {
-			filePath = localPath
+		if err := atomicWriteFile(localPath, content); err != nil {
+			log.Printf("Warning: failed to cache plan file: %v", err)
 		}
 	}
 
-	// Dynamically whitelist and broadcast plan files
-	sep := string(os.PathSeparator)
-	plansDir := claudePlansDir()
-	cacheDir := filepath.Join(homeDir, ".cache", "peekm", "plans")
-	if !strings.HasPrefix(filePath, plansDir+sep) && !strings.HasPrefix(filePath, cacheDir+sep) {
-		return filePath
-	}
 	if !isWhitelistedFile(filePath) {
 		fileMutex.Lock()
 		markdownFiles = append(markdownFiles, filePath)
@@ -2339,8 +2376,14 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
 
-	// Render the markdown file
-	content, err := os.ReadFile(absFilePath)
+	// Render the markdown file (with cache fallback for plan files)
+	var content []byte
+	var err error
+	if isPlanFile(absFilePath) {
+		content, err = readPlanFile(absFilePath)
+	} else {
+		content, err = os.ReadFile(absFilePath)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -2439,6 +2482,9 @@ type timelineEntry struct {
 	FullSessionID string // full ID for linking
 	IsViewable    bool   // true if file is in the markdown whitelist
 	HasTranscript bool
+	EditCount     int       // 1 = single event, >1 = aggregated
+	oldestTime    time.Time // unexported, used for time range computation
+	newestTime    time.Time // unexported, used for time range computation
 }
 
 func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGroup {
@@ -2461,20 +2507,6 @@ func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGro
 	var bucketOrder []string
 
 	for _, evt := range events {
-		relPath := tildeRelPath(evt.FilePath, baseDir)
-
-		entry := timelineEntry{
-			FilePath:      relPath,
-			AbsPath:       evt.FilePath,
-			ToolName:      evt.ToolName,
-			TimeAgo:       formatTimeAgo(evt.Timestamp),
-			TimeISO:       evt.Timestamp.Format(time.RFC3339),
-			SessionID:     truncateSessionID(evt.SessionID),
-			FullSessionID: evt.SessionID,
-			IsViewable:    isWhitelistedFile(evt.FilePath),
-			HasTranscript: transcriptCache[evt.SessionID],
-		}
-
 		var label string
 		if evt.Timestamp.After(todayStart) || evt.Timestamp.Equal(todayStart) {
 			label = "Today"
@@ -2488,7 +2520,37 @@ func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGro
 			bucketMap[label] = &timelineDayGroup{Label: label}
 			bucketOrder = append(bucketOrder, label)
 		}
-		bucketMap[label].Events = append(bucketMap[label].Events, entry)
+		bucket := bucketMap[label]
+
+		// Aggregate consecutive events with same (file, session, tool)
+		if n := len(bucket.Events); n > 0 {
+			prev := &bucket.Events[n-1]
+			if prev.AbsPath == evt.FilePath &&
+				prev.FullSessionID == evt.SessionID &&
+				prev.ToolName == evt.ToolName {
+				prev.EditCount++
+				// Events arrive newest-first, so each merge extends the oldest bound
+				prev.oldestTime = evt.Timestamp
+				prev.TimeAgo = formatTimeRange(prev.newestTime, evt.Timestamp)
+				continue
+			}
+		}
+
+		relPath := tildeRelPath(evt.FilePath, baseDir)
+		bucket.Events = append(bucket.Events, timelineEntry{
+			FilePath:      relPath,
+			AbsPath:       evt.FilePath,
+			ToolName:      evt.ToolName,
+			TimeAgo:       formatTimeAgo(evt.Timestamp),
+			TimeISO:       evt.Timestamp.Format(time.RFC3339),
+			SessionID:     truncateSessionID(evt.SessionID),
+			FullSessionID: evt.SessionID,
+			IsViewable:    isWhitelistedFile(evt.FilePath),
+			HasTranscript: transcriptCache[evt.SessionID],
+			EditCount:     1,
+			newestTime:    evt.Timestamp,
+			oldestTime:    evt.Timestamp,
+		})
 	}
 
 	groups := make([]timelineDayGroup, 0, len(bucketOrder))
@@ -2971,6 +3033,16 @@ func formatTimeAgo(t time.Time) string {
 	default:
 		return t.Format("Jan 2")
 	}
+}
+
+// formatTimeRange returns a compact range like "29m - 31m ago" or a single value if both ends match.
+func formatTimeRange(newest, oldest time.Time) string {
+	n := formatTimeAgo(newest)
+	o := formatTimeAgo(oldest)
+	if n == o {
+		return n
+	}
+	return strings.TrimSuffix(n, " ago") + " - " + o
 }
 
 type smartFolderFileInfo struct {
