@@ -3565,6 +3565,7 @@ type rawContentBlock struct {
 	Thinking string          `json:"thinking"`
 	Name     string          `json:"name"`
 	Input    json.RawMessage `json:"input"`
+	Content  json.RawMessage `json:"content"`
 }
 
 // convertRawBlocks parses raw JSON blocks into contentBlock values
@@ -3590,6 +3591,12 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 				ToolName:  peek.Name,
 				ToolInput: formatToolInput(peek.Input),
 			})
+		case "tool_result":
+			text := extractToolResultText(peek.Content)
+			if text != "" {
+				text = truncateString(text, 8000)
+				blocks = append(blocks, contentBlock{Type: "tool_result", HTML: renderMarkdownToHTML(md, text)})
+			}
 		}
 	}
 	return blocks
@@ -3618,6 +3625,29 @@ func formatToolInput(input json.RawMessage) string {
 		return truncateString(string(input), 2000)
 	}
 	return truncateString(string(pretty), 2000)
+}
+
+// extractToolResultText extracts text from a tool_result content field.
+// Content can be a plain string or an array of {type:"text", text:"..."} objects.
+func extractToolResultText(content json.RawMessage) string {
+	if len(content) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &parts) == nil {
+		var buf strings.Builder
+		for _, p := range parts {
+			buf.WriteString(p.Text)
+		}
+		return buf.String()
+	}
+	return ""
 }
 
 // truncateString truncates a string to maxLen characters, adding "..." if truncated

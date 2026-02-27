@@ -636,6 +636,28 @@ a.timeline-transcript-link:hover {
     background: var(--bgColor-muted);
 }
 
+.transcript-tool-result {
+    margin: 8px 0;
+    border: 1px solid var(--borderColor-default);
+    border-left: 3px solid var(--color-success-fg, #1a7f37);
+    border-radius: 6px;
+    font-size: 0.85em;
+}
+.transcript-tool-result summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-success-fg, #1a7f37);
+    font-weight: 600;
+}
+.transcript-tool-result summary:hover { background: var(--bgColor-muted); border-radius: 6px 6px 0 0; }
+.transcript-tool-result > .transcript-text {
+    padding: 12px;
+    border-top: 1px solid var(--borderColor-default);
+    max-height: 600px;
+    overflow-y: auto;
+}
+
 .transcript-context-summary {
     padding: 8px 12px;
     background: var(--bgColor-muted);

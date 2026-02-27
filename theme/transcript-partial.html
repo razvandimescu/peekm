@@ -40,6 +40,11 @@
                         <summary><span class="transcript-tool-name">{{.ToolName}}</span></summary>
                         {{if .ToolInput}}<pre class="transcript-tool-input">{{.ToolInput}}</pre>{{end}}
                     </details>
+                    {{else if eq .Type "tool_result"}}
+                    <details class="transcript-tool-result">
+                        <summary>Result</summary>
+                        <div class="transcript-text markdown-body">{{.HTML}}</div>
+                    </details>
                     {{else if eq .Type "context_summary"}}
                     <div class="transcript-context-summary">Context loaded ({{.ItemCount}} items)</div>
                     {{end}}
