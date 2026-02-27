@@ -38,7 +38,7 @@
                         </button>{{end}}
                     </div>
                     <div class="timeline-meta">
-                        <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>
+                        <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>{{if gt .EditCount 1}}<span class="timeline-edit-count">&times;{{.EditCount}}</span>{{end}}
                         <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
                         {{if .SessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-sid">{{.SessionID}}</a> {{if .HasTranscript}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-transcript-link">transcript</a>{{end}}{{end}}
                     </div>
