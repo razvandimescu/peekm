@@ -24,6 +24,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/fsnotify/fsnotify"
@@ -916,6 +917,15 @@ func init() {
 				parts[i] = url.PathEscape(p)
 			}
 			return strings.Join(parts, "/")
+		},
+		"toolIcon": toolIcon,
+		"formatTime": func(ts string) string {
+			for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+				if t, err := time.Parse(layout, ts); err == nil {
+					return t.Local().Format("15:04")
+				}
+			}
+			return ""
 		},
 	}
 
@@ -3466,14 +3476,26 @@ type transcriptTurn struct {
 	Timestamp string
 }
 
+// imageData represents a base64-encoded image from a tool result
+type imageData struct {
+	MediaType string // e.g. "image/png"
+	Data      string // base64-encoded
+}
+
 // contentBlock represents a piece of content within a turn
 type contentBlock struct {
-	Type      string        // "text", "tool_use", "tool_result", "thinking", "context_summary"
-	HTML      template.HTML // rendered markdown (for text blocks)
-	Text      string        // raw text (for thinking, tool input)
-	ToolName  string        // for tool_use blocks
-	ToolInput string        // pretty-printed, truncated
-	ItemCount int           // for context_summary
+	Type            string        // "text", "tool_use", "tool_result", "thinking", "context_summary"
+	HTML            template.HTML // rendered markdown (for text blocks)
+	Text            string        // raw text (for thinking, tool input)
+	ToolName        string        // for tool_use blocks
+	ToolInput       string        // pretty-printed, truncated
+	ToolID          string        // for pairing tool_use ↔ tool_result
+	Result          *contentBlock // paired tool_result (nil if unpaired)
+	ToolDisplayName string        // humanized name
+	ToolServer      string        // MCP server prefix
+	ToolInputHTML   template.HTML // structured rendering
+	ItemCount       int           // for context_summary
+	Images          []imageData   // for tool_result blocks containing images
 }
 
 // resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
@@ -3512,6 +3534,65 @@ func resolveTranscriptPath(sessionID string) string {
 	return ""
 }
 
+// pairToolResults attaches tool_result blocks to their matching tool_use blocks.
+// Paired results are set on the tool_use's Result field and removed from the block list.
+func pairToolResults(turns []transcriptTurn) []transcriptTurn {
+	// Pass 1: index tool_use blocks by ToolID
+	useIndex := make(map[string]*contentBlock)
+	for i := range turns {
+		for j := range turns[i].Blocks {
+			if turns[i].Blocks[j].Type == "tool_use" && turns[i].Blocks[j].ToolID != "" {
+				useIndex[turns[i].Blocks[j].ToolID] = &turns[i].Blocks[j]
+			}
+		}
+	}
+
+	// Pass 2: pair tool_results and remove from block lists
+	for i := range turns {
+		filtered := turns[i].Blocks[:0]
+		for j := range turns[i].Blocks {
+			b := &turns[i].Blocks[j]
+			if b.Type == "tool_result" && b.ToolID != "" {
+				if use, ok := useIndex[b.ToolID]; ok {
+					use.Result = b
+					continue // remove from block list
+				}
+			}
+			filtered = append(filtered, *b)
+		}
+		turns[i].Blocks = filtered
+	}
+	return turns
+}
+
+// mergeConsecutiveTurns combines adjacent turns with the same role into one turn.
+func mergeConsecutiveTurns(turns []transcriptTurn) []transcriptTurn {
+	if len(turns) == 0 {
+		return turns
+	}
+	merged := []transcriptTurn{turns[0]}
+	for i := 1; i < len(turns); i++ {
+		last := &merged[len(merged)-1]
+		if turns[i].Role == last.Role {
+			last.Blocks = append(last.Blocks, turns[i].Blocks...)
+		} else {
+			merged = append(merged, turns[i])
+		}
+	}
+	return merged
+}
+
+// removeEmptyTurns filters out turns with no content blocks.
+func removeEmptyTurns(turns []transcriptTurn) []transcriptTurn {
+	filtered := turns[:0]
+	for _, t := range turns {
+		if len(t.Blocks) > 0 {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
 // parseTranscript reads a Claude Code transcript JSONL file and returns conversation turns
 func parseTranscript(path string) ([]transcriptTurn, error) {
 	f, err := os.Open(path)
@@ -3538,7 +3619,14 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 		}
 		turns = append(turns, turn)
 	}
-	return turns, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	turns = pairToolResults(turns)
+	turns = mergeConsecutiveTurns(turns)
+	turns = removeEmptyTurns(turns)
+	return turns, nil
 }
 
 // transcriptLineEnvelope is the minimal structure for a transcript JSONL line
@@ -3632,12 +3720,14 @@ func countToolResults(rawBlocks []json.RawMessage) int {
 
 // rawContentBlock matches the JSON structure of a Claude message content block
 type rawContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	Thinking string          `json:"thinking"`
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input"`
-	Content  json.RawMessage `json:"content"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	Name      string          `json:"name"`
+	ID        string          `json:"id"`
+	ToolUseID string          `json:"tool_use_id"`
+	Input     json.RawMessage `json:"input"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // convertRawBlocks parses raw JSON blocks into contentBlock values
@@ -3658,16 +3748,27 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 				blocks = append(blocks, contentBlock{Type: "thinking", Text: truncateString(peek.Thinking, 4000)})
 			}
 		case "tool_use":
+			displayName, server := humanizeToolName(peek.Name)
 			blocks = append(blocks, contentBlock{
-				Type:      "tool_use",
-				ToolName:  peek.Name,
-				ToolInput: formatToolInput(peek.Input),
+				Type:            "tool_use",
+				ToolName:        peek.Name,
+				ToolInput:       formatToolInput(peek.Input),
+				ToolID:          peek.ID,
+				ToolDisplayName: displayName,
+				ToolServer:      server,
+				ToolInputHTML:   formatStructuredToolInput(peek.Name, peek.Input),
 			})
 		case "tool_result":
-			text := extractToolResultText(peek.Content)
-			if text != "" {
-				text = truncateString(text, 8000)
-				blocks = append(blocks, contentBlock{Type: "tool_result", HTML: renderMarkdownToHTML(md, text)})
+			text, images := extractToolResultContent(peek.Content)
+			if text != "" || len(images) > 0 {
+				if text != "" {
+					text = truncateString(text, 8000)
+				}
+				block := contentBlock{Type: "tool_result", ToolID: peek.ToolUseID, Images: images}
+				if text != "" {
+					block.HTML = renderMarkdownToHTML(md, text)
+				}
+				blocks = append(blocks, block)
 			}
 		}
 	}
@@ -3699,35 +3800,220 @@ func formatToolInput(input json.RawMessage) string {
 	return truncateString(string(pretty), 2000)
 }
 
-// extractToolResultText extracts text from a tool_result content field.
-// Content can be a plain string or an array of {type:"text", text:"..."} objects.
-func extractToolResultText(content json.RawMessage) string {
-	if len(content) == 0 {
-		return ""
-	}
-	var s string
-	if json.Unmarshal(content, &s) == nil {
-		return s
-	}
-	var parts []struct {
-		Text string `json:"text"`
-	}
-	if json.Unmarshal(content, &parts) == nil {
-		var buf strings.Builder
-		for _, p := range parts {
-			buf.WriteString(p.Text)
+// humanizeToolName splits MCP tool names (mcp__server__action) into display name and server.
+func humanizeToolName(name string) (string, string) {
+	if strings.HasPrefix(name, "mcp__") {
+		parts := strings.SplitN(name[5:], "__", 2)
+		if len(parts) == 2 {
+			return parts[1], parts[0]
 		}
-		return buf.String()
+	}
+	return name, ""
+}
+
+// toolIcon returns a Unicode icon for common tool names.
+func toolIcon(name string) string {
+	switch name {
+	case "Bash":
+		return "\u25B6" // ▶
+	case "Read":
+		return "\u2630" // ☰
+	case "Edit":
+		return "\u270E" // ✎
+	case "Write":
+		return "\u2714" // ✔
+	case "Glob":
+		return "\u2026" // …
+	case "Grep":
+		return "\u2315" // ⌕
+	case "WebFetch", "WebSearch":
+		return "\u2197" // ↗
+	default:
+		return "\u2699" // ⚙
+	}
+}
+
+// toolInputStr extracts a string value from a parsed tool input map.
+func toolInputStr(m map[string]interface{}, key string) string {
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
 	}
 	return ""
 }
 
-// truncateString truncates a string to maxLen characters, adding "..." if truncated
+// esc is a package-level alias for template.HTMLEscapeString, reducing repetition
+// and the risk of forgetting to escape in HTML-building helpers.
+var esc = template.HTMLEscapeString
+
+// formatStructuredToolInput returns a structured HTML rendering for known tools.
+// Returns empty HTML for unknown tools (template falls back to raw JSON).
+func formatStructuredToolInput(toolName string, input json.RawMessage) template.HTML {
+	if len(input) == 0 {
+		return ""
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(input, &m) != nil {
+		return ""
+	}
+	switch toolName {
+	case "Bash":
+		if cmd := toolInputStr(m, "command"); cmd != "" {
+			return template.HTML(`<pre class="transcript-structured-input transcript-bash-input"><code>$ ` + esc(cmd) + `</code></pre>`)
+		}
+	case "Glob":
+		if pat := toolInputStr(m, "pattern"); pat != "" {
+			return template.HTML(`<code class="transcript-structured-input">` + esc(pat) + `</code>`)
+		}
+	case "Read":
+		return formatReadInput(m)
+	case "Edit":
+		return formatEditInput(m)
+	case "Write":
+		return formatWriteInput(m)
+	case "Grep":
+		return formatGrepInput(m)
+	}
+	return ""
+}
+
+func formatReadInput(m map[string]interface{}) template.HTML {
+	fp := toolInputStr(m, "file_path")
+	if fp == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<span class="transcript-structured-input" title="`)
+	b.WriteString(esc(fp))
+	b.WriteString(`">`)
+	b.WriteString(esc(filepath.Base(fp)))
+	if offset := toolInputStr(m, "offset"); offset != "" {
+		b.WriteString(`<span class="transcript-structured-range">:`)
+		b.WriteString(esc(offset))
+		if limit := toolInputStr(m, "limit"); limit != "" {
+			b.WriteByte('-')
+			b.WriteString(esc(limit))
+		}
+		b.WriteString(`</span>`)
+	}
+	b.WriteString(`</span>`)
+	return template.HTML(b.String())
+}
+
+func formatEditInput(m map[string]interface{}) template.HTML {
+	fp := toolInputStr(m, "file_path")
+	if fp == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="transcript-structured-input" title="`)
+	b.WriteString(esc(fp))
+	b.WriteString(`"><span>`)
+	b.WriteString(esc(filepath.Base(fp)))
+	b.WriteString(`</span>`)
+	old := toolInputStr(m, "old_string")
+	new := toolInputStr(m, "new_string")
+	if old != "" || new != "" {
+		b.WriteString(`<pre class="transcript-mini-diff">`)
+		if old != "" {
+			b.WriteString(`<span class="diff-remove">- `)
+			b.WriteString(esc(truncateString(old, 200)))
+			b.WriteString("</span>\n")
+		}
+		if new != "" {
+			b.WriteString(`<span class="diff-add">+ `)
+			b.WriteString(esc(truncateString(new, 200)))
+			b.WriteString(`</span>`)
+		}
+		b.WriteString(`</pre>`)
+	}
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func formatWriteInput(m map[string]interface{}) template.HTML {
+	fp := toolInputStr(m, "file_path")
+	if fp == "" {
+		return ""
+	}
+	content := toolInputStr(m, "content")
+	lines := strings.Count(content, "\n") + 1
+	label := fmt.Sprintf("%d line", lines)
+	if lines != 1 {
+		label += "s"
+	}
+	return template.HTML(`<span class="transcript-structured-input" title="` + esc(fp) + `">` + esc(filepath.Base(fp)) + ` <span class="transcript-structured-range">(` + label + `)</span></span>`)
+}
+
+func formatGrepInput(m map[string]interface{}) template.HTML {
+	pat := toolInputStr(m, "pattern")
+	if pat == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<span class="transcript-structured-input"><code>/`)
+	b.WriteString(esc(pat))
+	b.WriteString(`/</code>`)
+	if p := toolInputStr(m, "path"); p != "" {
+		b.WriteString(` in <span title="`)
+		b.WriteString(esc(p))
+		b.WriteString(`">`)
+		b.WriteString(esc(filepath.Base(p)))
+		b.WriteString(`</span>`)
+	}
+	b.WriteString(`</span>`)
+	return template.HTML(b.String())
+}
+
+// extractToolResultContent extracts text and images from a tool_result content field.
+// Content can be a plain string or an array of typed content blocks.
+func extractToolResultContent(content json.RawMessage) (string, []imageData) {
+	if len(content) == 0 {
+		return "", nil
+	}
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s, nil
+	}
+	var parts []struct {
+		Type   string `json:"type"`
+		Text   string `json:"text"`
+		Source struct {
+			Type      string `json:"type"`
+			MediaType string `json:"media_type"`
+			Data      string `json:"data"`
+		} `json:"source"`
+	}
+	if json.Unmarshal(content, &parts) == nil {
+		var buf strings.Builder
+		var images []imageData
+		for _, p := range parts {
+			switch p.Type {
+			case "text":
+				buf.WriteString(p.Text)
+			case "image":
+				if p.Source.Type == "base64" && p.Source.MediaType != "" && p.Source.Data != "" {
+					images = append(images, imageData{MediaType: p.Source.MediaType, Data: p.Source.Data})
+				}
+			}
+		}
+		return buf.String(), images
+	}
+	return "", nil
+}
+
+// truncateString truncates a string to maxLen runes, adding "..." if truncated.
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	i := 0
+	for n := 0; n < maxLen; n++ {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+	}
+	return s[:i] + "..."
 }
 
 // serveTranscript handles GET /transcript?session=<id>

@@ -25,6 +25,7 @@
                 <div class="transcript-turn-header">
                     <span class="transcript-role-badge transcript-role-{{.Role}}">{{if eq .Role "user"}}You{{else}}Claude{{end}}</span>
                     {{if .Model}}<span class="transcript-model">{{.Model}}</span>{{end}}
+                    {{if .Timestamp}}<span class="transcript-timestamp">{{formatTime .Timestamp}}</span>{{end}}
                 </div>
                 <div class="transcript-turn-body">
                     {{range .Blocks}}
@@ -37,16 +38,38 @@
                     </details>
                     {{else if eq .Type "tool_use"}}
                     <details class="transcript-tool">
-                        <summary><span class="transcript-tool-name">{{.ToolName}}</span></summary>
-                        {{if .ToolInput}}<pre class="transcript-tool-input">{{.ToolInput}}</pre>{{end}}
+                        <summary>
+                            <span class="transcript-tool-icon">{{toolIcon .ToolName}}</span>
+                            {{if .ToolServer}}<span class="transcript-tool-server">{{.ToolServer}}/</span>{{end}}
+                            <span class="transcript-tool-name">{{.ToolDisplayName}}</span>
+                        </summary>
+                        {{if .ToolInputHTML}}
+                        <div class="transcript-tool-structured">{{.ToolInputHTML}}</div>
+                        {{end}}
+                        {{if .ToolInput}}
+                        <details class="transcript-tool-raw">
+                            <summary>Raw</summary>
+                            <pre class="transcript-tool-input">{{.ToolInput}}</pre>
+                        </details>
+                        {{end}}
+                        {{if .Result}}
+                        <div class="transcript-tool-result-inline">
+                            {{if .Result.HTML}}<div class="transcript-text markdown-body">{{.Result.HTML}}</div>{{end}}
+                            {{range .Result.Images}}<div class="transcript-image"><img src="data:{{.MediaType}};base64,{{.Data}}" loading="lazy" alt="Tool result image"></div>{{end}}
+                        </div>
+                        {{end}}
                     </details>
                     {{else if eq .Type "tool_result"}}
                     <details class="transcript-tool-result">
-                        <summary>Result</summary>
-                        <div class="transcript-text markdown-body">{{.HTML}}</div>
+                        <summary>Result{{if .Images}} ({{len .Images}} image{{if gt (len .Images) 1}}s{{end}}){{end}}</summary>
+                        {{if .HTML}}<div class="transcript-text markdown-body">{{.HTML}}</div>{{end}}
+                        {{range .Images}}<div class="transcript-image"><img src="data:{{.MediaType}};base64,{{.Data}}" loading="lazy" alt="Tool result image"></div>{{end}}
                     </details>
                     {{else if eq .Type "context_summary"}}
-                    <div class="transcript-context-summary">Context loaded ({{.ItemCount}} items)</div>
+                    <div class="transcript-context-summary">
+                        <span class="transcript-context-label">Session started</span>
+                        <span>{{.ItemCount}} context items loaded</span>
+                    </div>
                     {{end}}
                     {{end}}
                 </div>
@@ -54,6 +77,21 @@
             {{end}}
         </div>
         <div id="transcript-bottom"></div>
+        <div id="transcript-lightbox" class="transcript-lightbox" hidden><img src="" alt=""></div>
+        <script>
+        (function() {
+            var lb = document.getElementById('transcript-lightbox');
+            if (!lb) return;
+            document.addEventListener('click', function(e) {
+                var img = e.target.closest('.transcript-image img');
+                if (img) { lb.querySelector('img').src = img.src; lb.hidden = false; }
+            });
+            lb.addEventListener('click', function() { lb.hidden = true; });
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && !lb.hidden) lb.hidden = true;
+            });
+        })();
+        </script>
         {{else}}
         <div class="transcript-empty">
             <p>This transcript is empty.</p>
