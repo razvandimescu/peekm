@@ -1,4 +1,4 @@
-.PHONY: all build test fmt vet cyclo ineffassign misspell lint check
+.PHONY: all build test fmt vet cyclo ineffassign misspell staticcheck lint check
 
 all: check
 
@@ -24,6 +24,9 @@ ineffassign:
 misspell:
 	misspell -error .
 
-lint: fmt vet cyclo ineffassign misspell
+staticcheck:
+	staticcheck ./...
+
+lint: fmt vet cyclo ineffassign misspell staticcheck
 
 check: build test lint
