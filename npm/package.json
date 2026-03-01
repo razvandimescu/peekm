@@ -1,13 +1,16 @@
 {
   "name": "@peekm/peekm",
   "version": "0.1.0",
-  "description": "Zen-like markdown viewer with live reload",
+  "description": "See what AI coding agents change across all your projects",
   "keywords": [
+    "ai",
+    "coding-agent",
+    "session-tracking",
+    "claude-code",
+    "audit-trail",
     "markdown",
     "viewer",
-    "live-reload",
-    "preview",
-    "documentation"
+    "live-reload"
   ],
   "homepage": "https://github.com/razvandimescu/peekm",
   "repository": {

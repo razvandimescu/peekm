@@ -4,11 +4,11 @@
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A markdown viewer that tracks what AI coding agents change in your project.
+See what AI coding agents change across all your projects.
 
 ![peekm demo](assets/hero-demo.gif)
 
-peekm watches your project and shows you exactly which files AI coding agents changed, when they changed them, and what the agent was thinking. It's also a fast markdown viewer with live reload, GitHub styling, and dark/light themes — but the AI tracking is why it exists.
+AI coding agents modify dozens of files per session — but you only see the final diff. peekm watches all your projects in real time and shows you exactly which files changed, when, and what the agent was doing. It runs as a local web UI backed by a single binary, with a markdown viewer built in for reading docs along the way.
 
 **All data stays local. Nothing leaves your machine.**
 
@@ -20,41 +20,17 @@ peekm setup claude-code              # connect Claude Code (one time)
 
 Or try without installing: `npx @peekm/peekm .`
 
-## AI Tracking
+## What It Does
 
-When connected, peekm tracks every file modification made by AI agents:
-
-- **Smart folders** in the sidebar — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
-- **Timeline** (`/timeline`) — chronological view of all AI file modifications, grouped by day, color-coded by operation type
+**AI session tracking** (works with Claude Code today):
+- **Timeline** — chronological view of every AI file modification, grouped by day, color-coded by operation (Edit, Write, NotebookEdit)
+- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
 - **Toast notifications** — appear the instant AI modifies a file, click to navigate
 - **Session info panel** — per-file dropdown showing session ID, tool, permission mode, timestamp
 - **Transcript viewer** — read the full AI conversation for any session
 - **Persistent history** — events survive restarts (`~/.peekm/events.jsonl`)
 
-## Comparison
-
-| | Glow | grip | VS Code Preview | Ohai | peekm |
-|---|------|------|-----------------|------|-------|
-| **AI tracking** | — | — | — | — | Smart folders, timeline, toasts |
-| **Session history** | — | — | — | — | Persistent timeline + transcripts |
-| **Live reload** | — | Manual | Yes | Yes | SSE with event replay |
-| **Directory browser** | TUI list | — | File explorer | — | Web tree + smart folders |
-| **Cross-platform** | Yes | Yes | Yes | macOS only | Yes |
-| **Price** | Free | Free | Free (with VS Code) | $3.99 | Free |
-| **Startup** | Fast | ~2s | Editor launch | Fast | < 100ms |
-| **Dependencies** | Single binary | Python | VS Code | Mac App Store | Single binary |
-
-## What It Does
-
-**AI session tracking** (with Claude Code):
-- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24h
-- **Timeline** — chronological view of all AI modifications, color-coded by operation
-- **Toast notifications** — instant alerts when AI modifies a file, click to navigate
-- **Session panel** — per-file dropdown with session ID, tool, permission mode, timestamp
-- **Transcript viewer** — read the full AI conversation for any session
-- **Persistent history** — events survive restarts (`~/.peekm/events.jsonl`)
-
-**Markdown viewer**:
+**Also a markdown viewer:**
 - VS Code-style sidebar with tree view and fuzzy search (Cmd/Ctrl+P)
 - Live reload via Server-Sent Events with event replay
 - Light/Dark/Auto themes, persisted
@@ -62,12 +38,25 @@ When connected, peekm tracks every file modification made by AI agents:
 - HTML export
 - Single binary, cross-platform, < 100ms startup
 
+## Comparison
+
+| | `git diff` | [Git AI](https://usegitai.com) | [Gryph](https://github.com/gryph-sh/gryph) | [claude-code-transcripts](https://github.com/nicobailey/claude-code-transcripts) | peekm |
+|---|---|---|---|---|---|
+| **Real-time notifications** | — | — | — | — | Toast + live reload |
+| **Visual UI** | — | VS Code extension | — | Static HTML | Web UI with tree view |
+| **Session correlation** | — | Git notes | — | File-based | Per-file session panel |
+| **Persistent history** | Git log | Git notes | Audit log | JSON files | JSONL timeline |
+| **Zero config** | Yes | Extension install | CLI setup | Post-hoc script | `peekm setup claude-code` |
+| **Free / OSS** | Yes | Freemium | Free | Free | Free / MIT |
+
 ## Installation
 
 **npm** (recommended)
 ```bash
 npm i -g @peekm/peekm
 ```
+
+Upgrade: `npm update -g @peekm/peekm`
 
 Try without installing: `npx @peekm/peekm .`
 
@@ -127,11 +116,11 @@ _site
 <details>
 <summary><strong>How It Works</strong></summary>
 
-1. **Parse** — markdown to HTML via [goldmark](https://github.com/yuin/goldmark)
-2. **Serve** — local HTTP server with graceful shutdown
-3. **Watch** — file changes via [fsnotify](https://github.com/fsnotify/fsnotify)
-4. **Reload** — SSE with event replay
-5. **Track** — correlates AI session metadata with file changes
+1. **Track** — correlates AI session metadata with file changes via PostToolUse hooks
+2. **Watch** — file changes via [fsnotify](https://github.com/fsnotify/fsnotify)
+3. **Notify** — SSE with event replay pushes changes to the browser
+4. **Parse** — markdown to HTML via [goldmark](https://github.com/yuin/goldmark)
+5. **Serve** — local HTTP server with graceful shutdown
 
 </details>
 
@@ -155,7 +144,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## Related
 
-- [glow](https://github.com/charmbracelet/glow) — Terminal markdown renderer
-- [grip](https://github.com/joeyespo/grip) — GitHub-flavored markdown preview
-- [VS Code Markdown Preview](https://code.visualstudio.com/docs/languages/markdown) — Built-in editor preview
-- [Ohai](https://ohai.dev) — macOS markdown viewer for AI workflows
+- [Git AI](https://usegitai.com) — Line-level AI attribution via Git notes
+- [Gryph](https://github.com/gryph-sh/gryph) — CLI audit logger for AI agents
+- [claude-code-transcripts](https://github.com/nicobailey/claude-code-transcripts) — Post-hoc HTML transcript viewer
+- [Vigilo](https://github.com/pchaganti/gx-vigilo) — AI code review guardian

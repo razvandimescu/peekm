@@ -1,17 +1,27 @@
 # peekm
 
-> Zen-like markdown viewer with live reload
+> See what AI coding agents change across all your projects.
 
-A lightweight, fast markdown viewer that displays your markdown files with a clean, VS Code-style layout. Perfect for reading documentation, writing content, or previewing markdown in real-time.
+AI coding agents modify dozens of files per session — but you only see the final diff. peekm watches all your projects in real time and shows you exactly which files changed, when, and what the agent was doing. Single binary, local web UI, all data stays on your machine.
 
-## Features
+## AI Session Tracking
 
-- **Directory Browser** - Browse and navigate all markdown files in a directory with a visual tree
-- **VS Code Layout** - Fixed sidebar with independent scrolling
-- **Live Reload** - Auto-refresh when file changes (SSE-based)
-- **GitHub-Flavored Markdown** - Full GFM support with syntax highlighting
-- **Fast & Lightweight** - Single binary, zero dependencies
-- **Cross-Platform** - Works on macOS, Linux, and Windows
+Works with Claude Code today (connect once with `peekm setup claude-code`):
+
+- **Timeline** — chronological view of every AI file modification, grouped by day
+- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24h
+- **Toast notifications** — instant alerts when AI modifies a file
+- **Session info panel** — per-file session ID, tool, permission mode, timestamp
+- **Transcript viewer** — read the full AI conversation for any session
+- **Persistent history** — events survive restarts
+
+## Also a Markdown Viewer
+
+- VS Code-style sidebar with tree view and fuzzy search
+- Live reload via Server-Sent Events
+- Light/Dark/Auto themes
+- In-browser editing with auto-save
+- GitHub-Flavored Markdown with syntax highlighting
 
 ## Installation
 
@@ -22,45 +32,18 @@ npm install -g @peekm/peekm
 Or use with `npx` (no installation required):
 
 ```bash
-npx @peekm/peekm README.md
+npx @peekm/peekm .
 ```
 
 ## Usage
 
 ```bash
-# Browse all markdown files in current directory
-peekm
-
-# Browse a specific directory
-peekm ../docs
-
-# View a single markdown file
-peekm README.md
-
-# Custom port
-peekm -port 8080
-
-# Don't auto-open browser
-peekm -browser=false
-
-# Show version
-peekm -version
+peekm .                 # browse a directory
+peekm README.md         # view a single file
+peekm -port 8080 .      # custom port
+peekm -browser=false .  # don't auto-open browser
+peekm setup claude-code # connect Claude Code (one time)
 ```
-
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-port` | `6419` | Port to serve on |
-| `-browser` | `true` | Automatically open browser |
-| `-version` | `false` | Show version information |
-
-## How It Works
-
-1. **Parse** - Converts markdown to HTML
-2. **Serve** - Starts a local HTTP server
-3. **Watch** - Monitors file changes
-4. **Reload** - Sends live updates via Server-Sent Events
 
 ## Platform Support
 
