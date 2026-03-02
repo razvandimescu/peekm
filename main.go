@@ -84,6 +84,10 @@ var (
 	fileWatcher   watcherManager
 	dirWatcher    watcherManager
 
+	// Memory browser mode
+	memoryMode   bool
+	memoryFilter string
+
 	// Ignore pattern cache (reduces file I/O on navigation)
 	globalIgnoreCache struct {
 		rootDir  string
@@ -600,6 +604,38 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	for _, dir := range dirsToWatch {
 		if err := watcher.Add(dir); err != nil {
 			log.Printf("Warning: Cannot watch directory %s: %v", dir, err)
+		}
+	}
+
+	go watchDirectoryWithContext(ctx, watcher)
+	return nil
+}
+
+// watchDirectories creates a single watcher for a pre-computed list of directories
+// (no tree walk). Used by memory mode where directories are already known.
+func (m *watcherManager) watchDirectories(dirs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.cancel != nil {
+		m.cancel()
+	}
+	if m.current != nil {
+		m.current.Close()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	m.current = watcher
+
+	for _, dir := range dirs {
+		if addErr := watcher.Add(dir); addErr != nil {
+			log.Printf("Warning: Cannot watch %s: %v", dir, addErr)
 		}
 	}
 
@@ -1412,12 +1448,221 @@ func initSessionTracking() {
 	log.Printf("Loaded %d persisted session events", n)
 }
 
+// decodeProjectName resolves an encoded Claude Code project directory name
+// (e.g. "-Users-rd-projects-rinkt-bot") back to the project's base name.
+// Uses backtracking to handle hyphenated directory names (e.g. "my-projects").
+func decodeProjectName(encoded string) string {
+	s := strings.TrimPrefix(encoded, "-")
+	if s == "" {
+		return encoded
+	}
+	parts := strings.Split(s, "-")
+	if name, ok := resolveDeepestDir(parts, 0, string(filepath.Separator)); ok {
+		return name
+	}
+	return s
+}
+
+// resolveDeepestDir recursively tries all ways to split dash-separated parts
+// into real directory path segments, returning the remainder as the project name.
+func resolveDeepestDir(parts []string, start int, resolved string) (string, bool) {
+	if start >= len(parts) {
+		return filepath.Base(resolved), true
+	}
+	// Try consuming 1, 2, ... remaining parts as a single directory segment
+	for n := 1; n <= len(parts)-start; n++ {
+		segment := strings.Join(parts[start:start+n], "-")
+		candidate := filepath.Join(resolved, segment)
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if name, ok := resolveDeepestDir(parts, start+n, candidate); ok {
+			return name, true
+		}
+	}
+	// No further directory resolution — remainder is the project name
+	if start > 0 {
+		return strings.Join(parts[start:], "-"), true
+	}
+	return "", false
+}
+
+// collectMemoryFiles scans ~/.claude/projects/*/memory/*.md and returns sorted absolute paths.
+// If filter is non-empty, only projects whose decoded name contains the filter are included.
+func collectMemoryFiles(filter string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		if filter != "" {
+			decoded := decodeProjectName(entry.Name())
+			if !strings.Contains(strings.ToLower(decoded), strings.ToLower(filter)) {
+				continue
+			}
+		}
+
+		memDir := filepath.Join(projectsDir, entry.Name(), "memory")
+		mdFiles, err := filepath.Glob(filepath.Join(memDir, "*.md"))
+		if err != nil || len(mdFiles) == 0 {
+			continue
+		}
+		files = append(files, mdFiles...)
+	}
+
+	sort.Strings(files)
+	return files
+}
+
+// uniqueParentDirs returns deduplicated parent directories of the given file paths.
+func uniqueParentDirs(files []string) []string {
+	seen := make(map[string]bool)
+	var dirs []string
+	for _, f := range files {
+		dir := filepath.Dir(f)
+		if !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
+// serveAndWait starts the HTTP server, handles graceful shutdown, and blocks until exit.
+func serveAndWait(addr, startURL string) {
+	if version != "dev" {
+		go checkLatestVersion()
+	}
+	if *openBrowser {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			openURL(startURL)
+		}()
+	}
+
+	server := &http.Server{
+		Addr:        addr,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout intentionally omitted for SSE streaming endpoints
+		// SSE connections are long-lived and should not have write timeouts
+		IdleTimeout: 60 * time.Second,
+	}
+
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigint
+		log.Println("\nShutting down gracefully...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		fileWatcher.close()
+		dirWatcher.close()
+		if globalEventLog != nil {
+			globalEventLog.close()
+		}
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Server shutdown error: %v", err)
+		}
+	}()
+
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+}
+
+func runMemory(args []string) {
+	memoryMode = true
+
+	fs := flag.NewFlagSet("memory", flag.ExitOnError)
+	memPort := fs.Int("port", 6419, "Port to serve on")
+	memBrowser := fs.Bool("browser", true, "Open browser automatically")
+	memDisableHook := fs.Bool("no-ai-tracking", false, "Disable AI session tracking")
+	fs.Parse(args)
+
+	if fs.NArg() > 0 {
+		memoryFilter = fs.Arg(0)
+	}
+
+	*port = *memPort
+	*openBrowser = *memBrowser
+	*disableHook = *memDisableHook
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Cannot determine home directory: %v", err)
+	}
+	browseDir = filepath.Join(home, ".claude", "projects")
+
+	if !*disableHook {
+		initSessionTracking()
+	}
+
+	markdownFiles = collectMemoryFiles(memoryFilter)
+	if len(markdownFiles) == 0 {
+		if memoryFilter != "" {
+			fmt.Printf("No memory files found matching '%s'\n", memoryFilter)
+		} else {
+			fmt.Println("No memory files found in ~/.claude/projects/")
+		}
+		os.Exit(1)
+	}
+
+	dirs := uniqueParentDirs(markdownFiles)
+	if len(dirs) > 0 {
+		if err := dirWatcher.watchDirectories(dirs); err != nil {
+			log.Printf("Warning: Cannot watch memory directories: %v", err)
+		}
+	}
+
+	registerRoutes()
+
+	addr := fmt.Sprintf("localhost:%d", *port)
+	baseURL := fmt.Sprintf("http://%s", addr)
+
+	fmt.Printf("peekm memory browser at %s\n", baseURL)
+	fmt.Printf("Browsing %d project(s), %d memory file(s)\n", len(dirs), len(markdownFiles))
+	if memoryFilter != "" {
+		fmt.Printf("Filter: %s\n", memoryFilter)
+	}
+	fmt.Println("Press Ctrl+C to quit")
+
+	serveAndWait(addr, baseURL)
+}
+
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
+		fmt.Fprintf(os.Stderr, "       peekm memory [options] [project-filter]\n")
+		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
+		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
+		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
+		fmt.Fprintf(os.Stderr, "  memory    Browse Claude Code memory files across all projects\n")
+		fmt.Fprintf(os.Stderr, "  setup     Configure integrations (e.g. Claude Code hooks)\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		flag.PrintDefaults()
+	}
+
 	// Handle subcommands before flag.Parse()
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
 		case "setup":
 			runSetup(os.Args[2:])
+			return
+		case "memory":
+			runMemory(os.Args[2:])
 			return
 		}
 	}
@@ -1444,9 +1689,8 @@ func main() {
 	markdownFiles = collectMarkdownFiles(browseDir)
 	if len(markdownFiles) == 0 {
 		fmt.Printf("No markdown files found in: %s\n", browseDir)
-		fmt.Println("\nUsage: peekm [options] <markdown-file|directory>")
-		fmt.Println("\nOptions:")
-		flag.PrintDefaults()
+		fmt.Fprintln(os.Stderr)
+		flag.Usage()
 		os.Exit(1)
 	}
 
@@ -1464,55 +1708,7 @@ func main() {
 	fullURL := buildStartupURL(url, targetFile)
 	fmt.Println("Press Ctrl+C to quit")
 
-	if version != "dev" {
-		go checkLatestVersion()
-	}
-
-	if *openBrowser {
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			openURL(fullURL)
-		}()
-	}
-
-	// Setup graceful shutdown
-	server := &http.Server{
-		Addr:        addr,
-		ReadTimeout: 15 * time.Second,
-		// WriteTimeout intentionally omitted for SSE streaming endpoints
-		// SSE connections are long-lived and should not have write timeouts
-		IdleTimeout: 60 * time.Second,
-	}
-
-	// Handle shutdown signals
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigint
-
-		log.Println("\nShutting down gracefully...")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// Close watchers
-		fileWatcher.close()
-		dirWatcher.close()
-
-		// Close event log
-		if globalEventLog != nil {
-			globalEventLog.close()
-		}
-
-		// Shutdown HTTP server
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("Server shutdown error: %v", err)
-		}
-	}()
-
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatal(err)
-	}
+	serveAndWait(addr, fullURL)
 }
 
 // tildeRelPath returns a path relative to baseDir, or ~/... if outside baseDir.
@@ -2080,6 +2276,12 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		subtitle = fmt.Sprintf("%s - %d file(s)", currentBrowseDir, len(currentMarkdownFiles))
 	}
 
+	if memoryMode {
+		title = "Memory Browser"
+		projectCount := len(uniqueParentDirs(currentMarkdownFiles))
+		subtitle = fmt.Sprintf("%d project(s), %d file(s)", projectCount, len(currentMarkdownFiles))
+	}
+
 	data := browserTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		Title:            title,
@@ -2199,6 +2401,10 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 func handleNavigate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if memoryMode {
+		http.Error(w, "Navigation disabled in memory browser mode", http.StatusForbidden)
 		return
 	}
 
@@ -2477,9 +2683,25 @@ type sessionFilterStats struct {
 	HasTranscript bool
 }
 
+type timelineSession struct {
+	SessionID     string // truncated 8 chars
+	FullSessionID string
+	Summary       string // first user prompt (truncated)
+	Duration      string // e.g. "12m", "< 1s"
+	FileCount     int
+	EditCount     int
+	Tools         []string // unique tool names
+	HasTranscript bool
+	IsActive      bool // newest event < 5min ago
+	IsExpanded    bool // first session today starts expanded
+	Events        []timelineEntry
+	newestTime    time.Time
+	oldestTime    time.Time
+}
+
 type timelineDayGroup struct {
-	Label  string
-	Events []timelineEntry
+	Label    string
+	Sessions []timelineSession
 }
 
 type timelineEntry struct {
@@ -2497,76 +2719,197 @@ type timelineEntry struct {
 	newestTime    time.Time // unexported, used for time range computation
 }
 
-func buildTimelineGroups(events []SessionEvent, baseDir string) []timelineDayGroup {
-	// Cache transcript availability per unique session
-	transcriptCache := make(map[string]bool)
+func dayLabel(t time.Time) string {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+	switch {
+	case !t.Before(today):
+		return "Today"
+	case !t.Before(yesterday):
+		return "Yesterday"
+	default:
+		return t.Format("Jan 2, 2006")
+	}
+}
+
+func formatSessionDuration(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return "< 1s"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+}
+
+type transcriptInfo struct {
+	hasTranscript bool
+	summary       string
+}
+
+func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
+	cache := make(map[string]transcriptInfo)
 	for _, evt := range events {
 		if evt.SessionID == "" {
 			continue
 		}
-		if _, checked := transcriptCache[evt.SessionID]; !checked {
-			transcriptCache[evt.SessionID] = resolveTranscriptPath(evt.SessionID) != ""
+		if _, checked := cache[evt.SessionID]; !checked {
+			path := resolveTranscriptPath(evt.SessionID)
+			cache[evt.SessionID] = transcriptInfo{
+				hasTranscript: path != "",
+				summary:       extractSessionSummary(path),
+			}
+		}
+	}
+	return cache
+}
+
+type sessionBuild struct {
+	session *timelineSession
+	files   map[string]bool
+	tools   map[string]bool
+}
+
+func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string, transcriptCache map[string]transcriptInfo) {
+	sb.files[evt.FilePath] = true
+	sb.tools[evt.ToolName] = true
+	sb.session.EditCount++
+
+	if sb.session.newestTime.IsZero() || evt.Timestamp.After(sb.session.newestTime) {
+		sb.session.newestTime = evt.Timestamp
+	}
+	if sb.session.oldestTime.IsZero() || evt.Timestamp.Before(sb.session.oldestTime) {
+		sb.session.oldestTime = evt.Timestamp
+	}
+
+	if n := len(sb.session.Events); n > 0 {
+		prev := &sb.session.Events[n-1]
+		if prev.AbsPath == evt.FilePath && prev.ToolName == evt.ToolName {
+			prev.EditCount++
+			prev.oldestTime = evt.Timestamp
+			prev.TimeAgo = formatTimeRange(prev.newestTime, evt.Timestamp)
+			return
 		}
 	}
 
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	sb.session.Events = append(sb.session.Events, timelineEntry{
+		FilePath:      tildeRelPath(evt.FilePath, baseDir),
+		AbsPath:       evt.FilePath,
+		ToolName:      evt.ToolName,
+		TimeAgo:       formatTimeAgo(evt.Timestamp),
+		TimeISO:       evt.Timestamp.Format(time.RFC3339),
+		SessionID:     truncateSessionID(evt.SessionID),
+		FullSessionID: evt.SessionID,
+		IsViewable:    isWhitelistedFile(evt.FilePath),
+		HasTranscript: transcriptCache[evt.SessionID].hasTranscript,
+		EditCount:     1,
+		newestTime:    evt.Timestamp,
+		oldestTime:    evt.Timestamp,
+	})
+}
 
+func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSession {
+	transcriptCache := buildTranscriptCache(events)
+
+	sessionMap := make(map[string]*sessionBuild)
+	var sessionOrder []string
+
+	for _, evt := range events {
+		sid := evt.SessionID
+		if sid == "" {
+			sid = "_unknown"
+		}
+		sb, exists := sessionMap[sid]
+		if !exists {
+			info := transcriptCache[sid]
+			sb = &sessionBuild{
+				session: &timelineSession{
+					SessionID:     truncateSessionID(sid),
+					FullSessionID: sid,
+					Summary:       info.summary,
+					HasTranscript: info.hasTranscript,
+				},
+				files: make(map[string]bool),
+				tools: make(map[string]bool),
+			}
+			if sid == "_unknown" {
+				sb.session.SessionID = "unknown"
+				sb.session.FullSessionID = ""
+			}
+			sessionMap[sid] = sb
+			sessionOrder = append(sessionOrder, sid)
+		}
+		appendOrMergeEntry(sb, evt, baseDir, transcriptCache)
+	}
+
+	sessions := make([]timelineSession, 0, len(sessionOrder))
+	for _, sid := range sessionOrder {
+		sb := sessionMap[sid]
+		s := sb.session
+		s.FileCount = len(sb.files)
+		s.Duration = formatSessionDuration(s.newestTime.Sub(s.oldestTime))
+
+		toolNames := make([]string, 0, len(sb.tools))
+		for t := range sb.tools {
+			toolNames = append(toolNames, t)
+		}
+		sort.Strings(toolNames)
+		s.Tools = toolNames
+
+		sessions = append(sessions, *s)
+	}
+	return sessions
+}
+
+func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	bucketMap := make(map[string]*timelineDayGroup)
 	var bucketOrder []string
 
-	for _, evt := range events {
-		var label string
-		if evt.Timestamp.After(todayStart) || evt.Timestamp.Equal(todayStart) {
-			label = "Today"
-		} else if evt.Timestamp.After(yesterdayStart) || evt.Timestamp.Equal(yesterdayStart) {
-			label = "Yesterday"
-		} else {
-			label = evt.Timestamp.Format("Jan 2, 2006")
-		}
-
+	for i := range sessions {
+		label := dayLabel(sessions[i].newestTime)
 		if _, exists := bucketMap[label]; !exists {
 			bucketMap[label] = &timelineDayGroup{Label: label}
 			bucketOrder = append(bucketOrder, label)
 		}
-		bucket := bucketMap[label]
-
-		// Aggregate consecutive events with same (file, session, tool)
-		if n := len(bucket.Events); n > 0 {
-			prev := &bucket.Events[n-1]
-			if prev.AbsPath == evt.FilePath &&
-				prev.FullSessionID == evt.SessionID &&
-				prev.ToolName == evt.ToolName {
-				prev.EditCount++
-				// Events arrive newest-first, so each merge extends the oldest bound
-				prev.oldestTime = evt.Timestamp
-				prev.TimeAgo = formatTimeRange(prev.newestTime, evt.Timestamp)
-				continue
-			}
-		}
-
-		relPath := tildeRelPath(evt.FilePath, baseDir)
-		bucket.Events = append(bucket.Events, timelineEntry{
-			FilePath:      relPath,
-			AbsPath:       evt.FilePath,
-			ToolName:      evt.ToolName,
-			TimeAgo:       formatTimeAgo(evt.Timestamp),
-			TimeISO:       evt.Timestamp.Format(time.RFC3339),
-			SessionID:     truncateSessionID(evt.SessionID),
-			FullSessionID: evt.SessionID,
-			IsViewable:    isWhitelistedFile(evt.FilePath),
-			HasTranscript: transcriptCache[evt.SessionID],
-			EditCount:     1,
-			newestTime:    evt.Timestamp,
-			oldestTime:    evt.Timestamp,
-		})
+		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
 	}
 
 	groups := make([]timelineDayGroup, 0, len(bucketOrder))
 	for _, label := range bucketOrder {
 		groups = append(groups, *bucketMap[label])
 	}
+	return groups
+}
+
+func markActiveAndExpanded(groups []timelineDayGroup) {
+	now := time.Now()
+	marked := false
+	for i := range groups {
+		for j := range groups[i].Sessions {
+			if now.Sub(groups[i].Sessions[j].newestTime) < 5*time.Minute {
+				groups[i].Sessions[j].IsActive = true
+			}
+			if !marked {
+				groups[i].Sessions[j].IsExpanded = true
+				marked = true
+			}
+		}
+	}
+}
+
+func buildSessionTimeline(events []SessionEvent, baseDir string) []timelineDayGroup {
+	sessions := groupEventsBySession(events, baseDir)
+	groups := assignSessionsToDays(sessions)
+	markActiveAndExpanded(groups)
 	return groups
 }
 
@@ -2595,7 +2938,7 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 			stats = computeSessionStats(events, filterSession)
 		}
 
-		groups = buildTimelineGroups(events, currentBrowseDir)
+		groups = buildSessionTimeline(events, currentBrowseDir)
 	}
 
 	title := "AI Timeline"
@@ -3172,7 +3515,105 @@ func pathEscapeSegments(s string) string {
 	return strings.Join(parts, "/")
 }
 
+type memoryProject struct {
+	encoded   string
+	decoded   string
+	files     []string
+	newestMod time.Time
+}
+
+// groupMemoryByProject groups memory files by their parent project directory,
+// decodes project names, and returns them sorted by most recent modification.
+func groupMemoryByProject(files []string, baseDir string) []*memoryProject {
+	groups := make(map[string]*memoryProject)
+
+	for _, f := range files {
+		rel, err := filepath.Rel(baseDir, f)
+		if err != nil {
+			continue
+		}
+		parts := strings.SplitN(rel, string(filepath.Separator), 3)
+		if len(parts) < 3 {
+			continue
+		}
+		encoded := parts[0]
+
+		g, ok := groups[encoded]
+		if !ok {
+			g = &memoryProject{encoded: encoded, decoded: decodeProjectName(encoded)}
+			groups[encoded] = g
+		}
+		g.files = append(g.files, f)
+
+		if info, err := os.Stat(f); err == nil && info.ModTime().After(g.newestMod) {
+			g.newestMod = info.ModTime()
+		}
+	}
+
+	sorted := make([]*memoryProject, 0, len(groups))
+	for _, g := range groups {
+		// Sort files: MEMORY.md first, rest alphabetical
+		sort.Slice(g.files, func(i, j int) bool {
+			bi, bj := filepath.Base(g.files[i]), filepath.Base(g.files[j])
+			if bi == "MEMORY.md" {
+				return true
+			}
+			if bj == "MEMORY.md" {
+				return false
+			}
+			return bi < bj
+		})
+		sorted = append(sorted, g)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].newestMod.After(sorted[j].newestMod)
+	})
+	return sorted
+}
+
+// generateMemoryTreeHTML builds a two-level tree: decoded project names → memory files.
+func generateMemoryTreeHTML() string {
+	fileMutex.RLock()
+	currentFiles := make([]string, len(markdownFiles))
+	copy(currentFiles, markdownFiles)
+	currentBrowseDir := browseDir
+	activeFile := currentFile
+	fileMutex.RUnlock()
+
+	if len(currentFiles) == 0 {
+		return ""
+	}
+
+	projects := groupMemoryByProject(currentFiles, currentBrowseDir)
+
+	var buf bytes.Buffer
+	for _, g := range projects {
+		projNode := &fileNode{name: g.decoded, path: g.encoded, isDir: true}
+		hasActive := false
+		for _, f := range g.files {
+			relPath := tildeRelPath(f, currentBrowseDir)
+			projNode.children = append(projNode.children, &fileNode{name: filepath.Base(f), path: relPath})
+			if f == activeFile {
+				hasActive = true
+			}
+		}
+		// depth=0 → expanded (collapsed := depth >= 1 is false)
+		// depth=1 → collapsed (collapsed := depth >= 1 is true)
+		depth := 1
+		if hasActive {
+			depth = 0
+		}
+		generateTreeHTMLRecursive(projNode, "", false, false, depth, false, &buf)
+	}
+
+	return buf.String()
+}
+
 func generateTreeHTML() string {
+	if memoryMode {
+		return generateMemoryTreeHTML()
+	}
+
 	// Get state snapshot (thread-safe)
 	fileMutex.RLock()
 	currentBrowseDir := browseDir
@@ -3534,6 +3975,101 @@ func resolveTranscriptPath(sessionID string) string {
 	return ""
 }
 
+func isSystemNoise(text string) bool {
+	return strings.Contains(text, "<local-command-caveat>") ||
+		strings.Contains(text, "<command-name>") ||
+		strings.Contains(text, "<local-command-stdout>") ||
+		strings.HasPrefix(strings.TrimSpace(text), "[Request interrupted")
+}
+
+// extractSessionSummary reads the first real user message from a transcript JSONL.
+// Skips system caveats, slash commands, and empty messages. Returns truncated text.
+func extractSessionSummary(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	for i := 0; i < 50; i++ { // scan at most 50 lines
+		var raw json.RawMessage
+		if dec.Decode(&raw) != nil {
+			break
+		}
+		var entry struct {
+			Type    string `json:"type"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(raw, &entry) != nil || entry.Type != "user" {
+			continue
+		}
+		text := extractUserText(entry.Message.Content)
+		if text == "" {
+			continue
+		}
+		if isSystemNoise(text) {
+			continue
+		}
+		text = strings.TrimSpace(text)
+		// "Implement the following plan:\n\n# Title" → extract the heading
+		if strings.HasPrefix(text, "Implement the following plan") {
+			if title := extractPlanTitle(text); title != "" {
+				return truncateString(title, 120)
+			}
+		}
+		// Take first line only
+		if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+			text = text[:idx]
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		return truncateString(text, 120)
+	}
+	return ""
+}
+
+func extractPlanTitle(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			title := strings.TrimPrefix(line, "# ")
+			// Strip "Plan: " prefix if present
+			title = strings.TrimPrefix(title, "Plan: ")
+			return title
+		}
+	}
+	return ""
+}
+
+func extractUserText(content json.RawMessage) string {
+	// Try string content first
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s
+	}
+	// Try array of content blocks
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &blocks) == nil {
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				return b.Text
+			}
+		}
+	}
+	return ""
+}
+
 // pairToolResults attaches tool_result blocks to their matching tool_use blocks.
 // Paired results are set on the tool_use's Result field and removed from the block list.
 func pairToolResults(turns []transcriptTurn) []transcriptTurn {
@@ -3624,8 +4160,8 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	}
 
 	turns = pairToolResults(turns)
-	turns = mergeConsecutiveTurns(turns)
 	turns = removeEmptyTurns(turns)
+	turns = mergeConsecutiveTurns(turns)
 	return turns, nil
 }
 
@@ -3828,6 +4364,16 @@ func toolIcon(name string) string {
 		return "\u2315" // ⌕
 	case "WebFetch", "WebSearch":
 		return "\u2197" // ↗
+	case "TaskCreate":
+		return "\u002B" // +
+	case "TaskUpdate":
+		return "\u2611" // ☑
+	case "TaskList", "TaskGet":
+		return "\u2610" // ☐
+	case "NotebookEdit":
+		return "\u2338" // ⌸
+	case "Agent":
+		return "\u21BB" // ↻
 	default:
 		return "\u2699" // ⚙
 	}
@@ -3859,9 +4405,7 @@ func formatStructuredToolInput(toolName string, input json.RawMessage) template.
 	}
 	switch toolName {
 	case "Bash":
-		if cmd := toolInputStr(m, "command"); cmd != "" {
-			return template.HTML(`<pre class="transcript-structured-input transcript-bash-input"><code>$ ` + esc(cmd) + `</code></pre>`)
-		}
+		return formatBashInput(m)
 	case "Glob":
 		if pat := toolInputStr(m, "pattern"); pat != "" {
 			return template.HTML(`<code class="transcript-structured-input">` + esc(pat) + `</code>`)
@@ -3874,6 +4418,53 @@ func formatStructuredToolInput(toolName string, input json.RawMessage) template.
 		return formatWriteInput(m)
 	case "Grep":
 		return formatGrepInput(m)
+	case "TaskCreate", "TaskUpdate", "WebSearch", "WebFetch", "NotebookEdit":
+		return formatMiscToolInput(toolName, m)
+	}
+	return ""
+}
+
+func formatBashInput(m map[string]interface{}) template.HTML {
+	cmd := toolInputStr(m, "command")
+	if cmd == "" {
+		return ""
+	}
+	var b strings.Builder
+	if desc := toolInputStr(m, "description"); desc != "" {
+		b.WriteString(`<div class="transcript-bash-description">`)
+		b.WriteString(esc(desc))
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`<pre class="transcript-structured-input transcript-bash-input"><code>$ `)
+	b.WriteString(esc(cmd))
+	b.WriteString(`</code></pre>`)
+	return template.HTML(b.String())
+}
+
+func formatMiscToolInput(toolName string, m map[string]interface{}) template.HTML {
+	switch toolName {
+	case "TaskCreate":
+		if subject := toolInputStr(m, "subject"); subject != "" {
+			return template.HTML(`<span class="transcript-structured-input">` + esc(subject) + `</span>`)
+		}
+	case "TaskUpdate":
+		id := toolInputStr(m, "taskId")
+		status := toolInputStr(m, "status")
+		if id != "" && status != "" {
+			return template.HTML(`<span class="transcript-structured-input">#` + esc(id) + ` &#x2192; ` + esc(status) + `</span>`)
+		}
+	case "WebSearch":
+		if query := toolInputStr(m, "query"); query != "" {
+			return template.HTML(`<code class="transcript-structured-input">` + esc(query) + `</code>`)
+		}
+	case "WebFetch":
+		if u := toolInputStr(m, "url"); u != "" {
+			return template.HTML(`<code class="transcript-structured-input">` + esc(truncateString(u, 100)) + `</code>`)
+		}
+	case "NotebookEdit":
+		if path := toolInputStr(m, "notebook_path"); path != "" {
+			return template.HTML(`<span class="transcript-structured-input">` + esc(filepath.Base(path)) + `</span>`)
+		}
 	}
 	return ""
 }
@@ -4045,7 +4636,18 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		data.NotFound = true
 	} else {
 		data.Turns = turns
-		data.Subtitle = fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
+		model := ""
+		for _, t := range turns {
+			if t.Role == "assistant" && t.Model != "" {
+				model = t.Model
+				break
+			}
+		}
+		if model != "" {
+			data.Subtitle = fmt.Sprintf("Session %s · %s · %d turns", truncateSessionID(sessionID), model, len(turns))
+		} else {
+			data.Subtitle = fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
+		}
 	}
 
 	renderTemplatePair(w, r, transcriptTmpl, transcriptPartialTmpl, data)

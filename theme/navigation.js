@@ -7,6 +7,14 @@ let reconnectAttempts = 0;
 const maxReconnectDelay = 30000; // 30 seconds max
 let refreshTreeTimer = null; // For debouncing tree refreshes
 
+// Timeline session card expand/collapse
+function toggleTimelineSession(header) {
+    var events = header.nextElementSibling;
+    var expanded = header.getAttribute('aria-expanded') === 'true';
+    header.setAttribute('aria-expanded', String(!expanded));
+    events.style.display = expanded ? 'none' : '';
+}
+
 // Connect to SSE and maintain persistent connection
 function connectSSE() {
     if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
