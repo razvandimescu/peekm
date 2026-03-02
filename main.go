@@ -2892,15 +2892,10 @@ func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 
 func markActiveAndExpanded(groups []timelineDayGroup) {
 	now := time.Now()
-	marked := false
 	for i := range groups {
 		for j := range groups[i].Sessions {
 			if now.Sub(groups[i].Sessions[j].newestTime) < 5*time.Minute {
 				groups[i].Sessions[j].IsActive = true
-			}
-			if !marked {
-				groups[i].Sessions[j].IsExpanded = true
-				marked = true
 			}
 		}
 	}
