@@ -1290,7 +1290,7 @@ function initializeSidebar() {
         if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
             const breadcrumb = document.getElementById('breadcrumb');
             if (breadcrumb) {
-                breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none;">Memory</a>';
+                breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
             }
         }
         if (viewType === 'file' && !inMemoryMode) {
