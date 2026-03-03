@@ -7,10 +7,10 @@
 # The script:
 #   1. Creates a demo project with sample markdown
 #   2. Starts peekm on a non-conflicting port
-#   3. Opens Chrome at a fixed viewport size
+#   3. Opens Chrome in --app mode (no tab/address bar)
 #   4. Records the browser window via ffmpeg (screen capture + crop)
-#   5. Orchestrates demo actions: file edits, Claude Code hook simulation,
-#      timeline, transcript, and memory browser
+#   5. Orchestrates demo actions via SPA navigation: file edits,
+#      Claude Code hook simulation, timeline, transcript, memory browser
 #   6. Converts recording to an optimized GIF
 
 set -euo pipefail
@@ -18,11 +18,11 @@ set -euo pipefail
 # --------------- Configuration ---------------
 OUTPUT="${1:-assets/hero-demo.gif}"
 PORT=16419
-RECORD_SECONDS=20
-VIEWPORT_W=1200
-VIEWPORT_H=750
-FPS=8
-GIF_WIDTH=640
+RECORD_SECONDS=22
+VIEWPORT_W=1600
+VIEWPORT_H=900
+FPS=12
+GIF_WIDTH=800
 MAX_GIF_SIZE_MB=5
 
 # --------------- State ---------------
@@ -30,8 +30,11 @@ DEMO_DIR=""
 TRANSCRIPT_DIR=""
 PEEKM_PID=""
 FFMPEG_PID=""
+CHROME_PID=""
 MOV_FILE=""
-CHROME_OPENED=false
+CHROME_DATA_DIR=""
+CDP_HELPER=""
+CDP_PORT=9223
 
 # --------------- Helpers ---------------
 GREEN='\033[0;32m'
@@ -46,22 +49,102 @@ cleanup() {
     log "Cleaning up..."
     [ -n "$PEEKM_PID" ]  && kill "$PEEKM_PID"  2>/dev/null || true
     [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
+    [ -n "$CHROME_PID" ] && kill "$CHROME_PID" 2>/dev/null && wait "$CHROME_PID" 2>/dev/null || true
     [ -n "$DEMO_DIR" ]   && rm -rf "$DEMO_DIR"
     [ -n "$TRANSCRIPT_DIR" ] && rm -rf "$TRANSCRIPT_DIR"
     for mdir in "${MEMORY_DIRS_TO_CLEAN[@]+"${MEMORY_DIRS_TO_CLEAN[@]}"}"; do
         [ -n "$mdir" ] && rm -rf "$mdir"
     done
     [ -n "$MOV_FILE" ] && [ -f "$MOV_FILE" ] && rm -f "$MOV_FILE"
-    if $CHROME_OPENED; then
-        osascript -e 'tell application "Google Chrome"
-            repeat with w in windows
-                if URL of active tab of w contains "localhost:'"$PORT"'" then close w
-            end repeat
-        end tell' 2>/dev/null || true
-    fi
+    [ -n "$CDP_HELPER" ] && rm -f "$CDP_HELPER"
+    [ -n "$CHROME_DATA_DIR" ] && sleep 0.5 && rm -rf "$CHROME_DATA_DIR"
     log "Done."
 }
 trap cleanup EXIT
+
+# Create a Python3 CDP helper (Chrome DevTools Protocol over WebSocket).
+# AppleScript can't see --user-data-dir Chrome instances, so we use CDP instead.
+CDP_HELPER=$(mktemp /tmp/peekm-cdp-XXXXXX.py)
+cat > "$CDP_HELPER" << 'PYTHON'
+import json, socket, struct, os, sys, http.client, urllib.parse
+
+def cdp_eval(port, js):
+    conn = http.client.HTTPConnection('localhost', port, timeout=2)
+    conn.request('GET', '/json')
+    targets = json.loads(conn.getresponse().read())
+    conn.close()
+    # Find the actual page tab (skip background pages, service workers, etc.)
+    page = next((t for t in targets if t.get('type') == 'page'), None)
+    if not page:
+        return
+    ws_url = page.get('webSocketDebuggerUrl')
+    if not ws_url:
+        return
+    parsed = urllib.parse.urlparse(ws_url)
+
+    sock = socket.create_connection((parsed.hostname, parsed.port), timeout=5)
+    key = 'dGhlIHNhbXBsZSBub25jZQ=='
+    handshake = (
+        f"GET {parsed.path} HTTP/1.1\r\n"
+        f"Host: {parsed.hostname}:{parsed.port}\r\n"
+        f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        f"Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    sock.sendall(handshake.encode())
+    sock.recv(4096)
+
+    msg = json.dumps({"id": 1, "method": "Runtime.evaluate",
+                       "params": {"expression": js}}).encode()
+    mask = os.urandom(4)
+    frame = bytearray([0x81])
+    if len(msg) < 126:
+        frame.append(0x80 | len(msg))
+    elif len(msg) < 65536:
+        frame.append(0x80 | 126)
+        frame.extend(struct.pack('>H', len(msg)))
+    else:
+        frame.append(0x80 | 127)
+        frame.extend(struct.pack('>Q', len(msg)))
+    frame.extend(mask)
+    frame.extend(bytes(b ^ mask[i % 4] for i, b in enumerate(msg)))
+    sock.sendall(bytes(frame))
+    sock.recv(4096)
+    sock.close()
+
+if __name__ == '__main__':
+    try:
+        cdp_eval(int(sys.argv[1]), sys.argv[2])
+    except Exception:
+        pass
+PYTHON
+
+# Run JavaScript in the Chrome --app window via CDP
+run_js() {
+    python3 "$CDP_HELPER" "$CDP_PORT" "$1" 2>/dev/null || true
+}
+
+# Show a floating caption overlay at the bottom of the page
+show_caption() {
+    run_js "
+        var cap = document.getElementById('demo-caption');
+        if (!cap) {
+            cap = document.createElement('div');
+            cap.id = 'demo-caption';
+            cap.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#fff;padding:8px 20px;border-radius:8px;font-size:14px;font-weight:500;z-index:99999;pointer-events:none;letter-spacing:0.3px;transition:opacity 0.3s;';
+            document.body.appendChild(cap);
+        }
+        cap.textContent = '$1';
+        cap.style.opacity = '1';
+    "
+}
+
+hide_caption() {
+    run_js "
+        var cap = document.getElementById('demo-caption');
+        if (cap) cap.style.opacity = '0';
+    "
+}
 
 # --------------- Dependency checks ---------------
 for cmd in ffmpeg go; do
@@ -83,7 +166,7 @@ fi
 DEMO_DIR=$(mktemp -d "$HOME/.peekm-demo-XXXXXX")
 log "Demo project at $DEMO_DIR"
 
-mkdir -p "$DEMO_DIR/docs" "$DEMO_DIR/src"
+mkdir -p "$DEMO_DIR/docs" "$DEMO_DIR/src" "$DEMO_DIR/tests" "$DEMO_DIR/.github/workflows"
 
 cat > "$DEMO_DIR/README.md" << 'MD'
 # Acme API
@@ -153,6 +236,64 @@ Generate keys from the dashboard. Include in requests:
 ```bash
 curl -H "Authorization: Bearer sk-..." https://api.acme.dev/widgets
 ```
+MD
+
+# Additional files to populate the sidebar tree (#12)
+cat > "$DEMO_DIR/src/client.md" << 'MD'
+# Client SDK
+
+## Architecture
+
+The TypeScript SDK wraps the REST API with type-safe methods,
+automatic pagination, and retry logic.
+MD
+
+cat > "$DEMO_DIR/src/webhooks.md" << 'MD'
+# Webhook System
+
+## Event Types
+
+- `widget.created` — New widget registered
+- `widget.updated` — Widget configuration changed
+- `widget.deleted` — Widget removed
+MD
+
+cat > "$DEMO_DIR/src/models.md" << 'MD'
+# Data Models
+
+## Widget
+
+| Field    | Type   | Description           |
+|----------|--------|-----------------------|
+| `id`     | string | Unique identifier     |
+| `name`   | string | Display name          |
+| `status` | enum   | active, archived      |
+MD
+
+cat > "$DEMO_DIR/tests/integration.md" << 'MD'
+# Integration Tests
+
+## Setup
+
+Tests run against a local PostgreSQL instance via Docker Compose.
+MD
+
+cat > "$DEMO_DIR/CONTRIBUTING.md" << 'MD'
+# Contributing
+
+## Getting Started
+
+1. Fork the repository
+2. Install dependencies: `npm install`
+3. Run tests: `npm test`
+MD
+
+cat > "$DEMO_DIR/.github/workflows/ci.md" << 'MD'
+# CI Pipeline
+
+## Workflow
+
+Runs on every PR: lint, type-check, unit tests, integration tests.
 MD
 
 # Create fake transcript for the demo session
@@ -255,20 +396,36 @@ if ! kill -0 "$PEEKM_PID" 2>/dev/null; then
     exit 1
 fi
 
-# --------------- Step 3: Open Chrome at fixed size ---------------
-log "Opening Chrome window (${VIEWPORT_W}x${VIEWPORT_H})..."
-osascript << APPLESCRIPT
-tell application "Google Chrome"
-    set newWindow to make new window
-    set URL of active tab of newWindow to "http://localhost:$PORT"
-    set bounds of newWindow to {100, 100, $((100 + VIEWPORT_W)), $((100 + VIEWPORT_H))}
-    activate
-end tell
-APPLESCRIPT
-CHROME_OPENED=true
+# --------------- Step 3: Open Chrome in --app mode (no tab/address bar) ---------------
+log "Opening Chrome in app mode (${VIEWPORT_W}x${VIEWPORT_H})..."
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+CHROME_DATA_DIR=$(mktemp -d /tmp/peekm-chrome-XXXXXX)
+
+"$CHROME" \
+    --app="http://localhost:$PORT" \
+    --window-size=${VIEWPORT_W},${VIEWPORT_H} \
+    --window-position=100,100 \
+    --user-data-dir="$CHROME_DATA_DIR" \
+    --remote-debugging-port=${CDP_PORT} \
+    --no-first-run \
+    --disable-extensions \
+    --disable-infobars 2>/dev/null &
+CHROME_PID=$!
 
 log "Waiting for page load..."
 sleep 3
+
+# Force dark theme regardless of system preference (#7)
+log "Forcing dark theme..."
+run_js "
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.documentElement.setAttribute('data-color-mode', 'dark');
+    localStorage.setItem('theme', 'dark');
+"
+sleep 0.5
+
+# Resize window via CDP (AppleScript can't see --user-data-dir Chrome instances)
+run_js "window.moveTo(100, 100); window.resizeTo(${VIEWPORT_W}, ${VIEWPORT_H});"
 
 # --------------- Step 4: Start screen recording ---------------
 MOV_FILE=$(mktemp /tmp/peekm-demo-XXXXXX.mov)
@@ -286,8 +443,8 @@ log "Screen logical size: ${SCREEN_LOGICAL_W}x${SCREEN_LOGICAL_H}"
 
 # Find the correct screen capture device index (not camera, not iPhone).
 # Note: ffmpeg -list_devices always exits non-zero, so suppress pipefail.
-SCREEN_INDEX=$(set +o pipefail; ffmpeg -f avfoundation -list_devices true -i "" 2>&1 \
-    | grep "Capture screen" | head -1 | sed 's/.*\[\([0-9]*\)\].*/\1/')
+SCREEN_INDEX=$(ffmpeg -f avfoundation -list_devices true -i "" 2>&1 \
+    | grep "Capture screen" | head -1 | sed 's/.*\[\([0-9]*\)\].*/\1/' || true)
 
 if [ -z "$SCREEN_INDEX" ]; then
     err "No screen capture device found. Available devices:"
@@ -296,28 +453,34 @@ if [ -z "$SCREEN_INDEX" ]; then
 fi
 log "Using avfoundation screen device index: $SCREEN_INDEX"
 
+# Record at 24fps — evenly divisible by output 12fps for smooth frame cadence (#11)
 log "Recording ${RECORD_SECONDS}s of full screen (will crop to browser window)..."
 ffmpeg -y -loglevel warning \
-    -f avfoundation -framerate 30 -capture_cursor 0 \
+    -f avfoundation -framerate 24 -capture_cursor 0 \
     -pixel_format uyvy422 \
     -probesize 50M \
     -i "${SCREEN_INDEX}:none" \
     -t "$RECORD_SECONDS" \
-    -r 30 \
+    -r 24 \
     -c:v libx264 -preset ultrafast -crf 18 \
     "$MOV_FILE" &
 FFMPEG_PID=$!
 
 sleep 1  # Let recording stabilize
 
-# Bring Chrome to front (terminal took focus when ffmpeg started)
-osascript -e 'tell application "Google Chrome" to activate'
+# Bring the --app Chrome to front via its PID
+osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $CHROME_PID) to true" || true
 sleep 0.5
 
 # --------------- Step 5: Orchestrate demo actions ---------------
 
-# Scene 1: Simulate Claude Code creating a new file (triggers toast + smart folders)
+# Dwell: let viewer absorb the clean UI before any action (#5)
+show_caption "Markdown viewer with live reload"
+sleep 2
+
+# Scene 1: Simulate Claude Code creating a new file (triggers toast)
 log "Scene 1: Simulating Claude Code creating docs/changelog.md..."
+hide_caption
 NEW_FILE="$DEMO_DIR/docs/changelog.md"
 
 curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
@@ -345,7 +508,7 @@ cat > "$NEW_FILE" << 'MD'
 - OAuth token refresh race condition
 MD
 
-log "Toast + smart folders..."
+show_caption "Real-time AI notification"
 sleep 2
 
 # Scene 2: Second AI edit to build up timeline
@@ -363,27 +526,46 @@ curl -s -X POST "http://localhost:$PORT/hook/file-modified" \
 echo "" >> "$DEMO_DIR/README.md"
 sleep 1.5
 
-# Scene 3: Navigate to new file — shows session badge
+# Scene 3: Navigate to new file — shows session badge (SPA navigation, no white flash)
 log "Scene 3: Navigating to file with session info..."
-osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/view/docs/changelog.md"'
+hide_caption
+run_js "navigate('/view/docs/changelog.md')"
+sleep 0.5
+show_caption "AI-modified file with session metadata"
 sleep 2.5
 
-# Scene 4: Open AI timeline
+# Scene 4: Open AI timeline + expand session card (#8)
 log "Scene 4: Opening AI timeline..."
-osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/timeline"'
-sleep 2.5
+hide_caption
+run_js "navigate('/timeline')"
+sleep 1
+# Expand the first session card to show event details
+run_js "
+    var header = document.querySelector('.timeline-session-header');
+    if (header) toggleTimelineSession(header);
+"
+show_caption "Session timeline"
+sleep 2
 
 # Scene 5: Open transcript viewer
 log "Scene 5: Opening transcript viewer..."
-osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/transcript?session=session-a7f3b2"'
+hide_caption
+run_js "navigate('/transcript?session=session-a7f3b2')"
+sleep 0.5
+show_caption "Full AI conversation transcript"
 sleep 2.5
 
 # Scene 6: Open memory browser dashboard
 log "Scene 6: Opening memory browser..."
-osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/memory"'
-sleep 3
+hide_caption
+run_js "navigate('/memory')"
+sleep 0.5
+show_caption "Cross-project memory browser"
+sleep 2.5
 
-# --------------- Step 7: Stop recording and convert ---------------
+hide_caption
+
+# --------------- Step 6: Stop recording and convert ---------------
 log "Stopping recording..."
 kill "$FFMPEG_PID" 2>/dev/null || true
 wait "$FFMPEG_PID" 2>/dev/null || true
@@ -415,14 +597,14 @@ log "Crop: ${CROP_W}x${CROP_H}+${CROP_X}+${CROP_Y}"
 log "Converting to optimized GIF (${GIF_WIDTH}px wide, ${FPS}fps)..."
 ffmpeg -y -loglevel error \
     -i "$MOV_FILE" \
-    -vf "crop=${CROP_W}:${CROP_H}:${CROP_X}:${CROP_Y},fps=${FPS},scale=${GIF_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
+    -vf "crop=${CROP_W}:${CROP_H}:${CROP_X}:${CROP_Y},fps=${FPS},scale=${GIF_WIDTH}:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
     -loop 0 \
     "$OUTPUT"
 
 # Further compress with gifsicle if available
 if command -v gifsicle &>/dev/null; then
     log "Optimizing with gifsicle..."
-    gifsicle -O3 --lossy=80 --colors 64 "$OUTPUT" -o "$OUTPUT"
+    gifsicle -O3 --lossy=60 --colors 128 "$OUTPUT" -o "$OUTPUT"
 fi
 
 SIZE_BYTES=$(stat -f%z "$OUTPUT")
