@@ -28,20 +28,48 @@
         {{range .Groups}}
         <div class="timeline-day">
             <div class="timeline-day-label">{{.Label}}</div>
-            {{range .Events}}
-            <div class="timeline-entry">
-                <span class="timeline-dot dot-{{.ToolName}}"></span>
-                <div class="timeline-content">
-                    <div class="timeline-file">
-                        {{if .IsViewable}}<a href="/view/{{pathEscape .FilePath}}" title="{{.FilePath}}">{{.FilePath}}</a>{{else}}<span class="timeline-file-path" title="{{.AbsPath}}">{{.AbsPath}}</span><button class="timeline-copy-btn" aria-label="Copy file path" onclick="navigator.clipboard.writeText('{{.AbsPath}}').then(function(){var b=event.target.closest('.timeline-copy-btn');b.classList.add('copied');setTimeout(function(){b.classList.remove('copied')},1200)})" title="Copy path">
-                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
-                        </button>{{end}}
+            {{range .Sessions}}
+            <div class="timeline-session{{if .IsActive}} timeline-session-active{{end}}">
+                <div class="timeline-session-header" role="button" tabindex="0" aria-expanded="{{if .IsExpanded}}true{{else}}false{{end}}" onclick="toggleTimelineSession(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTimelineSession(this)}">
+                    <svg class="timeline-session-chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>
+                    <div class="timeline-session-info">
+                        <div class="timeline-session-title">
+                            {{if .FullSessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-session-id" onclick="event.stopPropagation()">{{.SessionID}}</a>{{else}}<span class="timeline-session-id">unknown</span>{{end}}
+                            {{if .IsActive}}<span class="timeline-active-badge">Active</span>{{end}}
+                        </div>
+                        {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
+                        <div class="timeline-session-stats">
+                            <span>{{.Duration}}</span>
+                            <span class="timeline-stat-sep">&middot;</span>
+                            <span>{{.FileCount}} file{{if ne .FileCount 1}}s{{end}}</span>
+                            <span class="timeline-stat-sep">&middot;</span>
+                            <span>{{.EditCount}} edit{{if ne .EditCount 1}}s{{end}}</span>
+                        </div>
                     </div>
-                    <div class="timeline-meta">
-                        <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>{{if gt .EditCount 1}}<span class="timeline-edit-count">&times;{{.EditCount}}</span>{{end}}
-                        <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
-                        {{if .SessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-sid">{{.SessionID}}</a> {{if .HasTranscript}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-transcript-link">transcript</a>{{end}}{{end}}
+                    <div class="timeline-session-tools">
+                        {{range .Tools}}<span class="session-operation-badge session-operation-{{.}}">{{.}}</span>{{end}}
                     </div>
+                    {{if .HasTranscript}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-session-transcript" onclick="event.stopPropagation()" title="View transcript">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0Zm-4 0v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0Z"/></svg>
+                    </a>{{end}}
+                </div>
+                <div class="timeline-session-events"{{if not .IsExpanded}} style="display:none"{{end}}>
+                    {{range .Events}}
+                    <div class="timeline-entry">
+                        <span class="timeline-dot dot-{{.ToolName}}"></span>
+                        <div class="timeline-content">
+                            <div class="timeline-file">
+                                {{if .IsViewable}}<a href="/view/{{pathEscape .FilePath}}" title="{{.FilePath}}">{{.FilePath}}</a>{{else}}<span class="timeline-file-path" title="{{.AbsPath}}">{{.AbsPath}}</span><button class="timeline-copy-btn" aria-label="Copy file path" onclick="navigator.clipboard.writeText('{{.AbsPath}}').then(function(){var b=event.target.closest('.timeline-copy-btn');b.classList.add('copied');setTimeout(function(){b.classList.remove('copied')},1200)})" title="Copy path">
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                                </button>{{end}}
+                            </div>
+                            <div class="timeline-meta">
+                                <span class="session-operation-badge session-operation-{{.ToolName}}">{{.ToolName}}</span>{{if gt .EditCount 1}}<span class="timeline-edit-count">&times;{{.EditCount}}</span>{{end}}
+                                <span class="timeline-time"><time datetime="{{.TimeISO}}">{{.TimeAgo}}</time></span>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
                 </div>
             </div>
             {{end}}

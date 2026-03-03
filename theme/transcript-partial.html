@@ -24,7 +24,6 @@
             <div class="transcript-turn transcript-{{.Role}}">
                 <div class="transcript-turn-header">
                     <span class="transcript-role-badge transcript-role-{{.Role}}">{{if eq .Role "user"}}You{{else}}Claude{{end}}</span>
-                    {{if .Model}}<span class="transcript-model">{{.Model}}</span>{{end}}
                     {{if .Timestamp}}<span class="transcript-timestamp">{{formatTime .Timestamp}}</span>{{end}}
                 </div>
                 <div class="transcript-turn-body">
