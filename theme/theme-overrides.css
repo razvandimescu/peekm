@@ -667,11 +667,6 @@ a.session-filter-transcript:hover {
     background: rgba(45, 164, 78, 0.1);
     color: var(--fgColor-success, #2da44e);
 }
-.transcript-model {
-    font-size: 0.75em;
-    color: var(--fgColor-muted);
-    font-family: var(--font-mono);
-}
 .transcript-timestamp {
     margin-left: auto;
     font-size: 0.75em;

@@ -2693,7 +2693,6 @@ type timelineSession struct {
 	Tools         []string // unique tool names
 	HasTranscript bool
 	IsActive      bool // newest event < 5min ago
-	IsExpanded    bool // first session today starts expanded
 	Events        []timelineEntry
 	newestTime    time.Time
 	oldestTime    time.Time
@@ -2705,18 +2704,15 @@ type timelineDayGroup struct {
 }
 
 type timelineEntry struct {
-	FilePath      string // relative to browseDir (for display + view links)
-	AbsPath       string // absolute path (for copy button)
-	ToolName      string
-	TimeAgo       string
-	TimeISO       string
-	SessionID     string // truncated for display
-	FullSessionID string // full ID for linking
-	IsViewable    bool   // true if file is in the markdown whitelist
-	HasTranscript bool
-	EditCount     int       // 1 = single event, >1 = aggregated
-	oldestTime    time.Time // unexported, used for time range computation
-	newestTime    time.Time // unexported, used for time range computation
+	FilePath   string // relative to browseDir (for display + view links)
+	AbsPath    string // absolute path (for copy button)
+	ToolName   string
+	TimeAgo    string
+	TimeISO    string
+	IsViewable bool      // true if file is in the markdown whitelist
+	EditCount  int       // 1 = single event, >1 = aggregated
+	oldestTime time.Time // unexported, used for time range computation
+	newestTime time.Time // unexported, used for time range computation
 }
 
 func dayLabel(t time.Time) string {
@@ -2779,7 +2775,7 @@ type sessionBuild struct {
 	tools   map[string]bool
 }
 
-func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string, transcriptCache map[string]transcriptInfo) {
+func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 	sb.files[evt.FilePath] = true
 	sb.tools[evt.ToolName] = true
 	sb.session.EditCount++
@@ -2802,18 +2798,15 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string, tran
 	}
 
 	sb.session.Events = append(sb.session.Events, timelineEntry{
-		FilePath:      tildeRelPath(evt.FilePath, baseDir),
-		AbsPath:       evt.FilePath,
-		ToolName:      evt.ToolName,
-		TimeAgo:       formatTimeAgo(evt.Timestamp),
-		TimeISO:       evt.Timestamp.Format(time.RFC3339),
-		SessionID:     truncateSessionID(evt.SessionID),
-		FullSessionID: evt.SessionID,
-		IsViewable:    isWhitelistedFile(evt.FilePath),
-		HasTranscript: transcriptCache[evt.SessionID].hasTranscript,
-		EditCount:     1,
-		newestTime:    evt.Timestamp,
-		oldestTime:    evt.Timestamp,
+		FilePath:   tildeRelPath(evt.FilePath, baseDir),
+		AbsPath:    evt.FilePath,
+		ToolName:   evt.ToolName,
+		TimeAgo:    formatTimeAgo(evt.Timestamp),
+		TimeISO:    evt.Timestamp.Format(time.RFC3339),
+		IsViewable: isWhitelistedFile(evt.FilePath),
+		EditCount:  1,
+		newestTime: evt.Timestamp,
+		oldestTime: evt.Timestamp,
 	})
 }
 
@@ -2848,7 +2841,7 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 			sessionMap[sid] = sb
 			sessionOrder = append(sessionOrder, sid)
 		}
-		appendOrMergeEntry(sb, evt, baseDir, transcriptCache)
+		appendOrMergeEntry(sb, evt, baseDir)
 	}
 
 	sessions := make([]timelineSession, 0, len(sessionOrder))
@@ -2890,7 +2883,7 @@ func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	return groups
 }
 
-func markActiveAndExpanded(groups []timelineDayGroup) {
+func markActiveSessions(groups []timelineDayGroup) {
 	now := time.Now()
 	for i := range groups {
 		for j := range groups[i].Sessions {
@@ -2904,7 +2897,7 @@ func markActiveAndExpanded(groups []timelineDayGroup) {
 func buildSessionTimeline(events []SessionEvent, baseDir string) []timelineDayGroup {
 	sessions := groupEventsBySession(events, baseDir)
 	groups := assignSessionsToDays(sessions)
-	markActiveAndExpanded(groups)
+	markActiveSessions(groups)
 	return groups
 }
 
