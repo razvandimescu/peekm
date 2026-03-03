@@ -4,13 +4,15 @@ let autoSaveTimeout = null;
 const AUTO_SAVE_DEBOUNCE_MS = 300;
 
 function getCurrentFilePath() {
-    // For browser mode (SPA), get from window.location.pathname
-    // For single-file mode, use window.location.pathname
+    // Prefer data-file attribute (set for / and /memory default file views)
+    const content = document.getElementById('content');
+    if (content && content.dataset.file) {
+        return '/' + content.dataset.file;
+    }
+    // Fall back to URL for /view/<path> routes
     const pathname = window.location.pathname.startsWith('/view/')
         ? window.location.pathname.replace('/view/', '/')
         : window.location.pathname;
-
-    // Decode the URL-encoded path (e.g., npm%2FREADME.md -> npm/README.md)
     return decodeURIComponent(pathname);
 }
 

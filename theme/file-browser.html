@@ -148,23 +148,6 @@
             margin-bottom: 20px;
         }
 
-        .back-button {
-            display: inline-block;
-            padding: 8px 16px;
-            background-color: var(--bgColor-muted);
-            border: 1px solid var(--borderColor-default);
-            border-radius: 6px;
-            color: var(--fgColor-default);
-            text-decoration: none;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        .back-button:hover {
-            background-color: var(--bgColor-neutral-muted);
-            border-color: var(--borderColor-muted);
-        }
-
         .delete-button {
             padding: 8px 16px;
             background-color: #d73a49;
@@ -1433,8 +1416,8 @@
             margin: 8px 8px 12px;
         }
 
-        /* Timeline button (matches .top-bar button but is an <a>) */
-        .timeline-btn {
+        /* Navigation buttons (Files, Timeline, Memory) */
+        .nav-btn {
             display: inline-flex;
             align-items: center;
             text-decoration: none;
@@ -1447,9 +1430,19 @@
             transition: all 0.2s;
             color: var(--fgColor-default);
         }
-        .timeline-btn:hover {
+        .nav-btn:hover {
             background: var(--bgColor-muted);
             border-color: var(--borderColor-emphasis);
+        }
+        .nav-btn.active {
+            background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+            border-color: var(--borderColor-accent-emphasis);
+            color: var(--fgColor-accent);
+        }
+
+        /* Memory mode sidebar accent */
+        .file-sidebar.memory-mode {
+            border-left: 2px solid var(--fgColor-done);
         }
     </style>
 </head>
@@ -1528,9 +1521,15 @@
 
         <div class="top-bar-right">
             <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">⬇️</button>
-            {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="timeline-btn" aria-label="AI Timeline" title="AI Timeline">
+            <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
+            </a>
+            {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
             </a>{{end}}
+            <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4zM5 4h6v1.5H5V4zm0 3h6v1.5H5V7zm0 3h4v1.5H5V10z"/></svg>
+            </a>
             <div class="theme-dropdown-container">
                 <button
                     onclick="toggleThemeDropdown(event)"

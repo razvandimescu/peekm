@@ -1,0 +1,46 @@
+<!-- Sidebar tree (for SPA navigation updates) -->
+<div id="sidebar-tree" style="display: none;">
+    {{if .TreeHTML}}
+        <div class="tree sidebar-tree">{{.TreeHTML}}</div>
+    {{else}}
+        <div class="empty-sidebar">
+            <p>No memory files found</p>
+        </div>
+    {{end}}
+</div>
+
+<main id="content" data-view="memory" data-path="{{.BrowsePath}}" class="content-area">
+    <div class="container">
+        <h1>{{.Title}}</h1>
+        <p class="subtitle">{{.Subtitle}}</p>
+
+        {{if .Projects}}
+        <div class="memory-projects">
+            {{range .Projects}}
+            <div class="memory-card" onclick="navigate('{{.FirstLink}}')" tabindex="0" role="link" onkeydown="if(event.key==='Enter') navigate('{{.FirstLink}}')">
+                <div class="memory-card-header">
+                    <span class="memory-card-name">{{.Name}}</span>
+                    <span class="memory-card-meta">{{.LineCount}} lines &middot; {{.LastMod}}</span>
+                </div>
+                {{if .Snippet}}
+                <div class="memory-card-snippet">{{.Snippet}}</div>
+                {{end}}
+                {{if .Sections}}
+                <div class="memory-card-sections">
+                    {{range .Sections}}<span class="memory-card-section">{{.}}</span>{{end}}
+                </div>
+                {{end}}
+                <div class="memory-card-files">
+                    {{range .Files}}<a href="{{.Link}}" class="memory-card-file" onclick="event.stopPropagation(); event.preventDefault(); navigate('{{.Link}}');">{{.Name}}</a>{{end}}
+                </div>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <div class="memory-empty">
+            <p>No Claude Code memory files found.</p>
+            <p>Memory files appear in <code>~/.claude/projects/*/memory/</code> as Claude Code learns about your projects.</p>
+        </div>
+        {{end}}
+    </div>
+</main>

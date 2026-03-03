@@ -176,12 +176,19 @@ async function navigate(url, addToHistory = true) {
 
         // Only update sidebar tree for root navigation (directory changes)
         // File navigation (/view/*) doesn't need tree update
-        if (url === '/') {
+        if (url === '/' || url === '/memory') {
             const newSidebarTree = doc.getElementById('sidebar-tree');
             const oldSidebarTree = document.getElementById('sidebar-tree');
             if (newSidebarTree && oldSidebarTree) {
                 oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
             }
+        }
+
+        // Track navigation origin for memory mode
+        if (url === '/memory') {
+            sessionStorage.setItem('peekm_memory_mode', 'true');
+        } else if (url === '/' || url.startsWith('/timeline') || url.startsWith('/transcript')) {
+            sessionStorage.removeItem('peekm_memory_mode');
         }
 
         // Update browser history
@@ -212,6 +219,19 @@ async function navigate(url, addToHistory = true) {
 }
 
 // Reinitialize page-specific functionality after content swap
+// Update active state on header nav buttons based on current route
+function updateNavButtons() {
+    const path = window.location.pathname;
+    const inMemoryMode = sessionStorage.getItem('peekm_memory_mode') === 'true';
+    const isView = path.startsWith('/view/');
+    const filesBtn = document.getElementById('files-btn');
+    const timelineBtn = document.getElementById('timeline-btn');
+    const memoryBtn = document.getElementById('memory-btn');
+    if (filesBtn) filesBtn.classList.toggle('active', path === '/' || (isView && !inMemoryMode));
+    if (timelineBtn) timelineBtn.classList.toggle('active', path.startsWith('/timeline') || path.startsWith('/transcript'));
+    if (memoryBtn) memoryBtn.classList.toggle('active', path.startsWith('/memory') || (isView && inMemoryMode));
+}
+
 function reinitializeScripts() {
     const content = document.getElementById('content');
     if (!content) return;
@@ -219,6 +239,9 @@ function reinitializeScripts() {
     const viewType = content.dataset.view;
 
     try {
+        // Update nav button active states
+        updateNavButtons();
+
         // Update download button visibility
         const downloadBtn = document.getElementById('download-btn');
         if (downloadBtn) {
@@ -297,7 +320,7 @@ function interceptLinks(e) {
     }
 
     // Intercept all internal navigation links (root, file views, timeline)
-    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript')) {
+    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/memory')) {
         e.preventDefault();
         navigate(url);
     }
@@ -1238,8 +1261,8 @@ function initializeSidebar() {
 
     const viewType = content.dataset.view;
 
-    // Unified layout: Always show sidebar (for 'file' and 'empty' views)
-    if (viewType === 'file' || viewType === 'empty') {
+    // Unified layout: Always show sidebar (for 'file', 'empty', and 'memory' views)
+    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
         // Show hamburger button
         updateSidebarToggleButton();
 
@@ -1250,22 +1273,30 @@ function initializeSidebar() {
         try {
             const savedState = localStorage.getItem(SIDEBAR_STORAGE_KEY);
             if (savedState === 'collapsed') {
-                // User explicitly hid it before, respect that
                 container.dataset.sidebar = 'collapsed';
             } else {
-                // Default: show sidebar (visible by default)
                 container.dataset.sidebar = 'expanded';
             }
         } catch (error) {
             console.error('[Sidebar] Failed to load state:', error);
-            // Fallback: show sidebar
             container.dataset.sidebar = 'expanded';
         }
 
-        // Update breadcrumb (only for file view)
-        if (viewType === 'file') {
+        // Memory mode accent: driven by sessionStorage so it persists across file clicks
+        const inMemoryMode = viewType === 'memory' || sessionStorage.getItem('peekm_memory_mode') === 'true';
+        const sidebar = document.querySelector('.file-sidebar');
+        if (sidebar) sidebar.classList.toggle('memory-mode', inMemoryMode);
+
+        if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            if (breadcrumb) {
+                breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
+            }
+        }
+        if (viewType === 'file' && !inMemoryMode) {
             updateBreadcrumb();
-            // Highlight current file in sidebar
+        }
+        if (viewType === 'file') {
             highlightCurrentFile();
         }
     }
@@ -1280,8 +1311,8 @@ function updateSidebarToggleButton() {
 
     const viewType = content.dataset.view;
 
-    // Show hamburger button in unified layout (file or empty views)
-    if (viewType === 'file' || viewType === 'empty') {
+    // Show hamburger button in unified layout (file, empty, or memory views)
+    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
         toggleBtn.style.display = 'inline-block';
     } else {
         toggleBtn.style.display = 'none';
