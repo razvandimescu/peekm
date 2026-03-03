@@ -9,7 +9,8 @@
 #   2. Starts peekm on a non-conflicting port
 #   3. Opens Chrome at a fixed viewport size
 #   4. Records the browser window via ffmpeg (screen capture + crop)
-#   5. Orchestrates demo actions: file edits, Claude Code hook simulation
+#   5. Orchestrates demo actions: file edits, Claude Code hook simulation,
+#      timeline, transcript, and memory browser
 #   6. Converts recording to an optimized GIF
 
 set -euo pipefail
@@ -17,7 +18,7 @@ set -euo pipefail
 # --------------- Configuration ---------------
 OUTPUT="${1:-assets/hero-demo.gif}"
 PORT=16419
-RECORD_SECONDS=16
+RECORD_SECONDS=20
 VIEWPORT_W=1200
 VIEWPORT_H=750
 FPS=8
@@ -47,6 +48,9 @@ cleanup() {
     [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
     [ -n "$DEMO_DIR" ]   && rm -rf "$DEMO_DIR"
     [ -n "$TRANSCRIPT_DIR" ] && rm -rf "$TRANSCRIPT_DIR"
+    for mdir in "${MEMORY_DIRS_TO_CLEAN[@]+"${MEMORY_DIRS_TO_CLEAN[@]}"}"; do
+        [ -n "$mdir" ] && rm -rf "$mdir"
+    done
     [ -n "$MOV_FILE" ] && [ -f "$MOV_FILE" ] && rm -f "$MOV_FILE"
     if $CHROME_OPENED; then
         osascript -e 'tell application "Google Chrome"
@@ -179,6 +183,66 @@ cat > "$TRANSCRIPT_DIR/session-a7f3b2.jsonl" << 'JSONL'
 {"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! Here's a summary of all changes:\n\n1. **docs/changelog.md** — Created v1.2.0 changelog with new endpoints, rate limiting, and bug fixes\n2. **README.md** — Added rate limiting to features list\n3. **docs/auth.md** — Rewrote from API keys to OAuth 2.0 with PKCE\n4. **docs/api.md** — Added rate limiting section with headers and retry behavior\n5. **CONTRIBUTING.md** — Created contributing guidelines\n\nFive files touched across the session."}]},"timestamp":"2026-02-25T10:01:02Z"}
 JSONL
 log "Fake transcript at $TRANSCRIPT_DIR"
+
+# Create fake memory files for the Memory Browser demo
+# Each project needs: ~/.claude/projects/<encoded>/memory/MEMORY.md
+MEMORY_BASE="$HOME/.claude/projects"
+DEMO_ENCODED="$(echo "$DEMO_DIR" | tr '/' '-')"
+MEMORY_DIRS_TO_CLEAN=()
+
+create_demo_memory() {
+    local dir="$1" content="$2"
+    mkdir -p "$dir/memory"
+    echo "$content" > "$dir/memory/MEMORY.md"
+    MEMORY_DIRS_TO_CLEAN+=("$dir/memory")
+}
+
+create_demo_memory "$MEMORY_BASE/$DEMO_ENCODED" "# Acme API Memory
+
+## Architecture
+
+- REST API with Express.js, PostgreSQL, Redis cache
+- OAuth 2.0 with PKCE for authentication
+- Rate limiting: 100 req/min per API key
+
+## Key Gotchas
+
+### Cursor pagination
+Use keyset pagination (not offset) — offset skips break on concurrent inserts.
+
+### Webhook retries
+Exponential backoff with jitter. Max 5 retries over 24 hours.
+
+## Dependencies
+
+- express v4.18, pg v8.11, ioredis v5.3
+- jest for testing, supertest for integration tests"
+
+create_demo_memory "$MEMORY_BASE/-Users-rd-projects-demo-webapp" "# Demo Webapp Memory
+
+## Architecture
+
+- Next.js 14 with App Router, TypeScript, Tailwind CSS
+- Vercel deployment with edge functions
+
+## Key Gotchas
+
+### Server components
+Default to server components. Only add 'use client' when needed for interactivity."
+
+create_demo_memory "$MEMORY_BASE/-Users-rd-projects-demo-infra" "# Infra Memory
+
+## Architecture
+
+- Terraform + AWS CDK for infrastructure as code
+- ECS Fargate for container orchestration
+
+## Deployment
+
+- Blue/green deploys via CodeDeploy
+- Rollback triggers on 5xx spike > 5%"
+
+log "Created demo memory files for Memory Browser"
 
 # --------------- Step 2: Start peekm ---------------
 log "Starting peekm on port $PORT..."
@@ -314,7 +378,12 @@ log "Scene 5: Opening transcript viewer..."
 osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/transcript?session=session-a7f3b2"'
 sleep 2.5
 
-# --------------- Step 6: Stop recording and convert ---------------
+# Scene 6: Open memory browser dashboard
+log "Scene 6: Opening memory browser..."
+osascript -e 'tell application "Google Chrome" to set URL of active tab of front window to "http://localhost:'"$PORT"'/memory"'
+sleep 3
+
+# --------------- Step 7: Stop recording and convert ---------------
 log "Stopping recording..."
 kill "$FFMPEG_PID" 2>/dev/null || true
 wait "$FFMPEG_PID" 2>/dev/null || true
