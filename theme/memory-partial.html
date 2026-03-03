@@ -17,7 +17,7 @@
         {{if .Projects}}
         <div class="memory-projects">
             {{range .Projects}}
-            <div class="memory-card" onclick="navigateTo('{{.FirstLink}}')" tabindex="0" role="link" onkeydown="if(event.key==='Enter') navigateTo('{{.FirstLink}}')">
+            <div class="memory-card" onclick="navigate('{{.FirstLink}}')" tabindex="0" role="link" onkeydown="if(event.key==='Enter') navigate('{{.FirstLink}}')">
                 <div class="memory-card-header">
                     <span class="memory-card-name">{{.Name}}</span>
                     <span class="memory-card-meta">{{.LineCount}} lines &middot; {{.LastMod}}</span>
@@ -31,7 +31,7 @@
                 </div>
                 {{end}}
                 <div class="memory-card-files">
-                    {{range .Files}}<a href="{{.Link}}" class="memory-card-file" onclick="event.stopPropagation(); event.preventDefault(); navigateTo('{{.Link}}');">{{.Name}}</a>{{end}}
+                    {{range .Files}}<a href="{{.Link}}" class="memory-card-file" onclick="event.stopPropagation(); event.preventDefault(); navigate('{{.Link}}');">{{.Name}}</a>{{end}}
                 </div>
             </div>
             {{end}}
