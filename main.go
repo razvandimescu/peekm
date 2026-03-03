@@ -105,6 +105,8 @@ var (
 	fileBrowserPartialTmpl *template.Template
 	timelineTmpl           *template.Template
 	timelinePartialTmpl    *template.Template
+	memoryTmpl             *template.Template
+	memoryPartialTmpl      *template.Template
 	transcriptTmpl         *template.Template
 	transcriptPartialTmpl  *template.Template
 
@@ -144,7 +146,32 @@ type browserTemplateData struct {
 	ShowBackButton bool
 	Content        template.HTML
 	BrowsePath     string
+	FilePath       string           // Relative path of displayed file (for edit/raw)
 	SessionData    *SessionMetadata // Claude Code session info for this file
+}
+
+type memoryTemplateData struct {
+	baseTemplateData
+	TreeHTML   template.HTML
+	Title      string
+	Subtitle   string
+	BrowsePath string
+	Projects   []memoryProjectCard
+}
+
+type memoryProjectCard struct {
+	Name      string
+	Files     []memoryFileEntry
+	LastMod   string
+	FirstLink string
+	Sections  []string // H2 headings across all files
+	LineCount int      // total lines across all files
+	Snippet   string   // preview text from first meaningful content
+}
+
+type memoryFileEntry struct {
+	Name string
+	Link string
 }
 
 // fileEventMessage is used for SSE notifications about file changes
@@ -1038,6 +1065,16 @@ func init() {
 
 	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(string(fileBrowserHTML)))
 	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
+
+	// Memory templates: full uses file-browser shell with memory partial as "content"
+	memoryPartialHTML, err := themeFS.ReadFile("theme/memory-partial.html")
+	if err != nil {
+		log.Fatalf("Failed to load memory-partial template: %v", err)
+	}
+	memoryPartialTmpl = template.Must(template.New("memory-partial").Funcs(funcMap).Parse(string(memoryPartialHTML)))
+
+	memoryTmpl = template.Must(template.New("memory").Funcs(funcMap).Parse(string(fileBrowserHTML)))
+	template.Must(memoryTmpl.New("content").Funcs(funcMap).Parse(string(memoryPartialHTML)))
 }
 
 // runSetup handles the "peekm setup" subcommand
@@ -1492,12 +1529,14 @@ func decodeProjectName(encoded string) string {
 }
 
 // resolveEncodedPath recursively tries all ways to split dash-separated parts
-// into real directory path segments, returning the full resolved filesystem path.
+// into real directory path segments, returning the deepest resolved filesystem path.
 // Claude Code encodes both / and _ as -, so both variants are tried.
+// Prefers the longest match to avoid ambiguity (e.g. rinkt_bot vs rinkt_bot_api).
 func resolveEncodedPath(parts []string, start int, resolved string) (string, bool) {
 	if start >= len(parts) {
 		return resolved, true
 	}
+	var best string
 	for n := 1; n <= len(parts)-start; n++ {
 		seg := parts[start : start+n]
 		candidates := [2]string{strings.Join(seg, "-"), strings.Join(seg, "_")}
@@ -1511,10 +1550,13 @@ func resolveEncodedPath(parts []string, start int, resolved string) (string, boo
 			if err != nil || !info.IsDir() {
 				continue
 			}
-			if path, ok := resolveEncodedPath(parts, start+n, candidate); ok {
-				return path, true
+			if path, ok := resolveEncodedPath(parts, start+n, candidate); ok && len(path) > len(best) {
+				best = path
 			}
 		}
+	}
+	if best != "" {
+		return best, true
 	}
 	if start > 0 {
 		return resolved, true
@@ -2347,6 +2389,11 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		subtitle = fmt.Sprintf("%d project(s), %d file(s)", projectCount, len(currentMarkdownFiles))
 	}
 
+	var filePath string
+	if defaultFile != "" {
+		filePath = tildeRelPath(defaultFile, currentBrowseDir)
+	}
+
 	data := browserTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		Title:            title,
@@ -2355,6 +2402,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		Content:          content,
 		ShowBackButton:   showBackButton,
 		BrowsePath:       currentBrowseDir,
+		FilePath:         filePath,
 	}
 
 	renderTemplate(w, r, data)
@@ -2966,40 +3014,6 @@ func buildSessionTimeline(events []SessionEvent, baseDir string) []timelineDayGr
 	return groups
 }
 
-// selectMemoryDefault picks the best default file to display:
-// current project's MEMORY.md if it exists, else the first file.
-func selectMemoryDefault(files []string, currentBrowseDir string) string {
-	if len(files) == 0 {
-		return ""
-	}
-	home, _ := os.UserHomeDir()
-	if home == "" || currentBrowseDir == "" {
-		return files[0]
-	}
-	absDir, _ := filepath.Abs(currentBrowseDir)
-	projectsDir := filepath.Join(home, ".claude", "projects")
-	// Find the encoded project dir matching currentBrowseDir
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return files[0]
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if resolveProjectDir(entry.Name()) == absDir {
-			candidate := filepath.Join(projectsDir, entry.Name(), "memory", "MEMORY.md")
-			for _, f := range files {
-				if f == candidate {
-					return f
-				}
-			}
-			break
-		}
-	}
-	return files[0]
-}
-
 func serveMemory(w http.ResponseWriter, r *http.Request) {
 	memFiles, projectIndex := collectMemoryFiles("")
 	home, _ := os.UserHomeDir()
@@ -3009,42 +3023,45 @@ func serveMemory(w http.ResponseWriter, r *http.Request) {
 	urlBase := browseDir
 	fileMutex.RUnlock()
 
-	treeHTML := buildMemoryTreeHTML(memFiles, projectsDir, urlBase, "", projectIndex)
-
-	defaultFile := selectMemoryDefault(memFiles, urlBase)
-	var content template.HTML
-	var title, subtitle string
-
-	if defaultFile != "" {
-		raw, err := os.ReadFile(defaultFile)
-		if err == nil {
-			md := newMarkdownRenderer()
-			var buf bytes.Buffer
-			if err := md.Convert(raw, &buf); err == nil {
-				content = template.HTML(buf.String())
-			}
+	projects := groupMemoryByProject(memFiles, projectsDir, projectIndex)
+	treeHTML := buildMemoryTreeHTML(projects, urlBase, "")
+	var cards []memoryProjectCard
+	for _, p := range projects {
+		sections, lineCount, snippet := extractMemoryInsights(p.files)
+		card := memoryProjectCard{
+			Name:      p.decoded,
+			LastMod:   formatTimeAgo(p.newestMod),
+			Sections:  sections,
+			LineCount: lineCount,
+			Snippet:   snippet,
 		}
-		title = filepath.Base(defaultFile)
+		for _, f := range p.files {
+			relPath := tildeRelPath(f, urlBase)
+			card.Files = append(card.Files, memoryFileEntry{
+				Name: filepath.Base(f),
+				Link: "/view/" + pathEscapeSegments(relPath),
+			})
+		}
+		if len(card.Files) > 0 {
+			card.FirstLink = card.Files[0].Link
+		}
+		cards = append(cards, card)
 	}
 
-	projectCount := len(groupMemoryByProject(memFiles, projectsDir, projectIndex))
-	subtitle = fmt.Sprintf("%d project(s), %d file(s)", projectCount, len(memFiles))
-
 	if len(memFiles) == 0 {
-		title = "Memory Browser"
 		treeHTML = `<div style="padding: 16px; color: var(--fgColor-muted); font-size: 13px;">No Claude Code memory files found.<br><br>Memory files appear in <code>~/.claude/projects/*/memory/</code> as Claude Code learns about your projects.</div>`
 	}
 
-	data := browserTemplateData{
+	data := memoryTemplateData{
 		baseTemplateData: newBaseTemplateData(),
-		Title:            title,
-		Subtitle:         subtitle,
+		Title:            "Memory Browser",
+		Subtitle:         formatMemorySubtitle(cards),
 		TreeHTML:         template.HTML(treeHTML),
-		Content:          content,
 		BrowsePath:       projectsDir,
+		Projects:         cards,
 	}
 
-	renderTemplate(w, r, data)
+	renderTemplatePair(w, r, memoryTmpl, memoryPartialTmpl, data)
 }
 
 func serveTimeline(w http.ResponseWriter, r *http.Request) {
@@ -3669,6 +3686,53 @@ func memoryFilePriority(path string) string {
 	}
 }
 
+func formatMemorySubtitle(cards []memoryProjectCard) string {
+	totalFiles := 0
+	totalLines := 0
+	for _, c := range cards {
+		totalFiles += len(c.Files)
+		totalLines += c.LineCount
+	}
+	return fmt.Sprintf("%d projects · %d files · %s lines of memory",
+		len(cards), totalFiles, formatNumber(totalLines))
+}
+
+func formatNumber(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+}
+
+// extractMemoryInsights scans markdown files for a project and returns
+// H2 section headers, total line count, and a content snippet.
+func extractMemoryInsights(files []string) (sections []string, lineCount int, snippet string) {
+	seen := make(map[string]bool)
+	for _, f := range files {
+		file, err := os.Open(f)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			lineCount++
+			line := scanner.Text()
+			if strings.HasPrefix(line, "## ") {
+				heading := strings.TrimPrefix(line, "## ")
+				if !seen[heading] {
+					seen[heading] = true
+					sections = append(sections, heading)
+				}
+			}
+			if snippet == "" && line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "---") && !strings.HasPrefix(line, "```") {
+				snippet = truncateString(line, 150)
+			}
+		}
+		file.Close()
+	}
+	return
+}
+
 // decodes project names, and returns them sorted by most recent modification.
 // Files under baseDir (memory files) are grouped by their first path component.
 // Files outside baseDir (e.g. project CLAUDE.md) are matched via projectIndex.
@@ -3719,14 +3783,11 @@ func groupMemoryByProject(files []string, baseDir string, projectIndex map[strin
 }
 
 // buildMemoryTreeHTML builds a two-level tree: decoded project names → memory files.
-// projectsDir is the base for groupMemoryByProject; urlBaseDir is for tildeRelPath URLs.
-// projectIndex maps files outside projectsDir (e.g. project CLAUDE.md) to their encoded project name.
-func buildMemoryTreeHTML(files []string, projectsDir, urlBaseDir, activeFile string, projectIndex map[string]string) string {
-	if len(files) == 0 {
+// Accepts pre-grouped projects to avoid redundant groupMemoryByProject calls.
+func buildMemoryTreeHTML(projects []*memoryProject, urlBaseDir, activeFile string) string {
+	if len(projects) == 0 {
 		return ""
 	}
-
-	projects := groupMemoryByProject(files, projectsDir, projectIndex)
 
 	var buf bytes.Buffer
 	for _, g := range projects {
@@ -3758,7 +3819,8 @@ func generateMemoryTreeHTML() string {
 	activeFile := currentFile
 	fileMutex.RUnlock()
 
-	return buildMemoryTreeHTML(currentFiles, currentBrowseDir, currentBrowseDir, activeFile, nil)
+	projects := groupMemoryByProject(currentFiles, currentBrowseDir, nil)
+	return buildMemoryTreeHTML(projects, currentBrowseDir, activeFile)
 }
 
 func generateTreeHTML() string {

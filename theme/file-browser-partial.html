@@ -9,7 +9,7 @@
     {{end}}
 </div>
 
-<main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" class="content-area">
+<main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" data-file="{{.FilePath}}" class="content-area">
     <div class="container">
         {{if .ShowBackButton}}
         <div class="header-actions">
@@ -45,7 +45,6 @@
         {{if .Content}}
             {{.Content}}
         {{else}}
-            <!-- Empty state -->
             <div class="empty-content">
                 <p>No markdown files found in this directory.</p>
                 <p>Create a <code>.md</code> file to get started.</p>
