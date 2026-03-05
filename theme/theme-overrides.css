@@ -231,6 +231,12 @@ body {
     --badge-border: rgba(139, 92, 246, 0.3);
 }
 
+.session-operation-Plan {
+    --badge-bg: rgba(236, 72, 153, 0.15);
+    --badge-color: #db2777;
+    --badge-border: rgba(236, 72, 153, 0.3);
+}
+
 .session-permission-acceptEdits {
     --badge-bg: rgba(59, 130, 246, 0.15);
     --badge-color: #2563eb;
@@ -252,6 +258,11 @@ body {
 [data-theme="dark"] .session-operation-NotebookEdit {
     --badge-bg: rgba(139, 92, 246, 0.2);
     --badge-color: #a78bfa;
+}
+
+[data-theme="dark"] .session-operation-Plan {
+    --badge-bg: rgba(236, 72, 153, 0.2);
+    --badge-color: #f472b6;
 }
 
 [data-theme="dark"] .session-permission-acceptEdits {

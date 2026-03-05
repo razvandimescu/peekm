@@ -172,9 +172,10 @@ type memoryFileEntry struct {
 
 // fileEventMessage is used for SSE notifications about file changes
 type fileEventMessage struct {
-	Type    string `json:"type"` // "file_added" or "file_removed"
-	Path    string `json:"path"`
-	Session string `json:"session,omitempty"` // Optional Claude Code session ID
+	Type      string `json:"type"` // "file_added" or "file_removed"
+	Path      string `json:"path"`
+	Session   string `json:"session,omitempty"`   // Optional Claude Code session ID
+	PlanTitle string `json:"planTitle,omitempty"` // Non-empty for plan file events
 }
 
 // connectionStatusMessage is used for SSE notifications about connection status
@@ -295,6 +296,7 @@ type SessionEvent struct {
 	ToolUseID      string    `json:"tuid,omitempty"`
 	CWD            string    `json:"cwd,omitempty"`
 	TranscriptPath string    `json:"tp,omitempty"`
+	PlanTitle      string    `json:"pt_title,omitempty"`
 	Timestamp      time.Time `json:"ts"`
 }
 
@@ -1772,15 +1774,10 @@ func removeFromWhitelist(filePath string) {
 }
 
 // sendFileEvent sends a file event notification to clients
-func sendFileEvent(eventType, relPath, sessionID string) {
-	msg := fileEventMessage{
-		Type:    eventType,
-		Path:    relPath,
-		Session: sessionID,
-	}
+func sendFileEvent(msg fileEventMessage) {
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("Error marshaling %s message: %v", eventType, err)
+		log.Printf("Error marshaling %s message: %v", msg.Type, err)
 	} else {
 		notifyClientsWithMessage(string(msgBytes))
 	}
@@ -1846,7 +1843,7 @@ func handleMarkdownCreated(filePath string) {
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
-		sendFileEvent("file_added", getRelativePath(filePath), sessionID)
+		sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(filePath), Session: sessionID})
 	}()
 }
 
@@ -1878,7 +1875,7 @@ func awaitSessionID(filePath string) string {
 func handleMarkdownRemoved(filePath string, reason string) {
 	log.Printf("%s file: %s", reason, filePath)
 	removeFromWhitelist(filePath)
-	sendFileEvent("file_removed", getRelativePath(filePath), "")
+	sendFileEvent(fileEventMessage{Type: "file_removed", Path: getRelativePath(filePath)})
 }
 
 func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
@@ -2319,14 +2316,14 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlanFile caches plan content for durability and whitelists/broadcasts plan files.
-// Always returns the canonical ~/.claude/plans/ path (never rewrites to cache path).
-func handlePlanFile(filePath, content, sessionID string) string {
+// Returns (canonical path, plan title). Title is empty for non-plan files.
+func handlePlanFile(filePath, content, sessionID string) (string, string) {
 	if !strings.HasSuffix(filePath, ".md") {
-		return filePath
+		return filePath, ""
 	}
 	plansDir := claudePlansDir()
 	if plansDir == "" || !strings.HasPrefix(filePath, plansDir+string(os.PathSeparator)) {
-		return filePath
+		return filePath, ""
 	}
 
 	// Cache plan content for durability (survives cleanup, handles remote)
@@ -2345,8 +2342,14 @@ func handlePlanFile(filePath, content, sessionID string) string {
 		fileMutex.Unlock()
 		log.Printf("Whitelisted Claude plan: %s", filePath)
 	}
-	sendFileEvent("file_modified", getRelativePath(filePath), sessionID)
-	return filePath
+	planTitle := extractPlanTitle(content)
+	sendFileEvent(fileEventMessage{
+		Type:      "file_modified",
+		Path:      getRelativePath(filePath),
+		Session:   sessionID,
+		PlanTitle: planTitle,
+	})
+	return filePath, planTitle
 }
 
 // handleClaudeHook receives file modification events from Claude Code hooks
@@ -2404,14 +2407,17 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      parseTimestampOrNow(req.TS),
 	}
 
-	req.FilePath = handlePlanFile(req.FilePath, req.Content, req.SessionID)
+	var planTitle string
+	req.FilePath, planTitle = handlePlanFile(req.FilePath, req.Content, req.SessionID)
 
 	// Register session mapping for file (after path rewrite so plan files use local path)
 	globalSessionStore.register(req.FilePath, metadata)
 
 	// Persist to event log
 	if globalEventLog != nil {
-		if err := globalEventLog.append(sessionEventFrom(metadata, req.FilePath)); err != nil {
+		evt := sessionEventFrom(metadata, req.FilePath)
+		evt.PlanTitle = planTitle
+		if err := globalEventLog.append(evt); err != nil {
 			log.Printf("Warning: failed to persist session event: %v", err)
 		}
 	}
@@ -2729,6 +2735,7 @@ type timelineEntry struct {
 	TimeISO    string
 	IsViewable bool      // true if file is in the markdown whitelist
 	EditCount  int       // 1 = single event, >1 = aggregated
+	PlanTitle  string    // non-empty for plan files (extracted from content)
 	oldestTime time.Time // unexported, used for time range computation
 	newestTime time.Time // unexported, used for time range computation
 }
@@ -2823,6 +2830,7 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 		TimeISO:    evt.Timestamp.Format(time.RFC3339),
 		IsViewable: isWhitelistedFile(evt.FilePath),
 		EditCount:  1,
+		PlanTitle:  evt.PlanTitle,
 		newestTime: evt.Timestamp,
 		oldestTime: evt.Timestamp,
 	})
