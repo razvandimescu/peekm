@@ -84,10 +84,6 @@ var (
 	fileWatcher   watcherManager
 	dirWatcher    watcherManager
 
-	// Memory browser mode
-	memoryMode   bool
-	memoryFilter string
-
 	// Ignore pattern cache (reduces file I/O on navigation)
 	globalIgnoreCache struct {
 		rootDir  string
@@ -176,9 +172,10 @@ type memoryFileEntry struct {
 
 // fileEventMessage is used for SSE notifications about file changes
 type fileEventMessage struct {
-	Type    string `json:"type"` // "file_added" or "file_removed"
-	Path    string `json:"path"`
-	Session string `json:"session,omitempty"` // Optional Claude Code session ID
+	Type      string `json:"type"` // "file_added" or "file_removed"
+	Path      string `json:"path"`
+	Session   string `json:"session,omitempty"`   // Optional Claude Code session ID
+	PlanTitle string `json:"planTitle,omitempty"` // Non-empty for plan file events
 }
 
 // connectionStatusMessage is used for SSE notifications about connection status
@@ -299,6 +296,7 @@ type SessionEvent struct {
 	ToolUseID      string    `json:"tuid,omitempty"`
 	CWD            string    `json:"cwd,omitempty"`
 	TranscriptPath string    `json:"tp,omitempty"`
+	PlanTitle      string    `json:"pt_title,omitempty"`
 	Timestamp      time.Time `json:"ts"`
 }
 
@@ -631,38 +629,6 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	for _, dir := range dirsToWatch {
 		if err := watcher.Add(dir); err != nil {
 			log.Printf("Warning: Cannot watch directory %s: %v", dir, err)
-		}
-	}
-
-	go watchDirectoryWithContext(ctx, watcher)
-	return nil
-}
-
-// watchDirectories creates a single watcher for a pre-computed list of directories
-// (no tree walk). Used by memory mode where directories are already known.
-func (m *watcherManager) watchDirectories(dirs []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.cancel != nil {
-		m.cancel()
-	}
-	if m.current != nil {
-		m.current.Close()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	m.current = watcher
-
-	for _, dir := range dirs {
-		if addErr := watcher.Add(dir); addErr != nil {
-			log.Printf("Warning: Cannot watch %s: %v", dir, addErr)
 		}
 	}
 
@@ -1119,8 +1085,29 @@ func setupClaudeCode(args []string) {
 	fmt.Println("\n  AI Session Tracking Setup")
 	fmt.Println("  " + strings.Repeat("\u2500", 25))
 
-	// Step 1: Create hook script
-	fmt.Printf("\n  Step 1: Hook script\n")
+	added, err := installClaudeHooks(claudeDir, *hookPort)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if added > 0 {
+		fmt.Printf("    Added %d PostToolUse hook(s)\n", added)
+	} else {
+		fmt.Printf("    Hooks already configured (no changes)\n")
+	}
+
+	fmt.Println("\n  Setup complete. Restart Claude Code to activate.")
+	fmt.Println("  To verify: modify a file with Claude Code and check peekm")
+	fmt.Println("  for the AI session badge.")
+	fmt.Println()
+}
+
+// installClaudeHooks creates the hook script and merges PostToolUse hooks into settings.json.
+// Returns the number of hooks added and any error encountered.
+func installClaudeHooks(claudeDir string, hookPort int) (int, error) {
+	hookScriptPath := filepath.Join(claudeDir, "peekm-hook.sh")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 
 	hookScript := fmt.Sprintf(`#!/bin/bash
 # peekm hook: Persist session events to JSONL, then notify running instance
@@ -1159,21 +1146,15 @@ for port in %d 6419 8080 3000; do
             --max-time 0.05 "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && break
     fi
 done
-`, *hookPort)
+`, hookPort)
 
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "    Error creating %s: %v\n", claudeDir, err)
-		os.Exit(1)
+		return 0, fmt.Errorf("creating %s: %w", claudeDir, err)
 	}
 
 	if err := os.WriteFile(hookScriptPath, []byte(hookScript), 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "    Error writing hook script: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("writing hook script: %w", err)
 	}
-	fmt.Printf("    Created %s\n", hookScriptPath)
-
-	// Step 2: Merge hooks into settings.json
-	fmt.Printf("\n  Step 2: Claude Code settings\n")
 
 	hookEntry := map[string]interface{}{
 		"type":    "command",
@@ -1181,37 +1162,13 @@ done
 		"timeout": 0.15,
 	}
 
-	matchers := []string{"Write", "Edit", "NotebookEdit"}
-
-	// Read existing settings or start fresh
-	var settings map[string]interface{}
-	data, err := os.ReadFile(settingsPath)
-	if err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			fmt.Fprintf(os.Stderr, "    Error parsing %s: %v\n", settingsPath, err)
-			os.Exit(1)
-		}
-		fmt.Printf("    Found %s\n", settingsPath)
-	} else {
-		settings = make(map[string]interface{})
-		fmt.Printf("    Creating %s\n", settingsPath)
+	settings, postToolUse, err := loadPostToolUseHooks(settingsPath)
+	if err != nil {
+		return 0, err
 	}
 
-	// Ensure hooks.PostToolUse exists
-	hooks, _ := settings["hooks"].(map[string]interface{})
-	if hooks == nil {
-		hooks = make(map[string]interface{})
-		settings["hooks"] = hooks
-	}
-
-	postToolUse, _ := hooks["PostToolUse"].([]interface{})
-	if postToolUse == nil {
-		postToolUse = []interface{}{}
-	}
-
-	// Add hooks for each matcher (idempotent — skip if peekm hook already exists)
 	added := 0
-	for _, matcher := range matchers {
+	for _, matcher := range peekmHookMatchers {
 		if hasPeekmHook(postToolUse, matcher, hookScriptPath) {
 			continue
 		}
@@ -1224,55 +1181,108 @@ done
 		added++
 	}
 
-	hooks["PostToolUse"] = postToolUse
-	settings["hooks"] = hooks
+	if added == 0 {
+		return 0, nil
+	}
 
-	// Write settings back
+	hooks := settings["hooks"].(map[string]interface{})
+	hooks["PostToolUse"] = postToolUse
+
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "    Error serializing settings: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("serializing settings: %w", err)
 	}
 
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "    Error writing %s: %v\n", settingsPath, err)
-		os.Exit(1)
+		return 0, fmt.Errorf("writing %s: %w", settingsPath, err)
+	}
+
+	return added, nil
+}
+
+// isClaudeHooksInstalled checks if peekm hooks are fully configured.
+func isClaudeHooksInstalled(claudeDir string) bool {
+	hookScriptPath := filepath.Join(claudeDir, "peekm-hook.sh")
+	if _, err := os.Stat(hookScriptPath); err != nil {
+		return false
+	}
+
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	_, postToolUse, err := loadPostToolUseHooks(settingsPath)
+	if err != nil || postToolUse == nil {
+		return false
+	}
+
+	for _, matcher := range peekmHookMatchers {
+		if !hasPeekmHook(postToolUse, matcher, hookScriptPath) {
+			return false
+		}
+	}
+	return true
+}
+
+// autoSetupClaudeHooks silently configures Claude Code hooks on first run.
+func autoSetupClaudeHooks() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	claudeDir := filepath.Join(homeDir, ".claude")
+	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
+		log.Printf("Tip: install Claude Code for AI session tracking (https://claude.ai/code)")
+		return
+	}
+
+	if isClaudeHooksInstalled(claudeDir) {
+		return
+	}
+
+	added, err := installClaudeHooks(claudeDir, *port)
+	if err != nil {
+		log.Printf("Warning: auto-setup failed: %v", err)
+		return
 	}
 
 	if added > 0 {
-		fmt.Printf("    Added %d PostToolUse hook(s) (%s)\n", added, strings.Join(matchers[:added], ", "))
-	} else {
-		fmt.Printf("    Hooks already configured (no changes)\n")
+		log.Printf("Connected to Claude Code (%d hooks installed). Restart Claude Code to activate.", added)
 	}
-
-	fmt.Println("\n  Setup complete. Restart Claude Code to activate.")
-	fmt.Println("  To verify: modify a file with Claude Code and check peekm")
-	fmt.Println("  for the AI session badge.")
-	fmt.Println()
 }
 
-// hasPeekmHook checks if a PostToolUse entry for this matcher already has a peekm hook
+// peekmHookMatchers defines the PostToolUse tool names that peekm hooks into.
+var peekmHookMatchers = []string{"Write", "Edit", "NotebookEdit"}
+
+// loadPostToolUseHooks reads settings.json and extracts the PostToolUse entries.
+// Returns (settings, postToolUse, error). Missing file returns empty structures, nil error.
+func loadPostToolUseHooks(settingsPath string) (map[string]interface{}, []interface{}, error) {
+	settings := make(map[string]interface{})
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return nil, nil, fmt.Errorf("parsing %s: %w", settingsPath, err)
+		}
+	}
+
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+		settings["hooks"] = hooks
+	}
+
+	postToolUse, _ := hooks["PostToolUse"].([]interface{})
+	return settings, postToolUse, nil
+}
+
+// hasPeekmHook checks if a PostToolUse entry for this matcher already has a peekm hook.
 func hasPeekmHook(entries []interface{}, matcher, scriptPath string) bool {
 	for _, entry := range entries {
 		e, ok := entry.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if e["matcher"] != matcher {
+		if !ok || e["matcher"] != matcher {
 			continue
 		}
 		hooks, ok := e["hooks"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, h := range hooks {
-			hook, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if cmd, ok := hook["command"].(string); ok && cmd == scriptPath {
-				return true
-			}
+		if ok && containsPeekmHook(hooks, scriptPath) {
+			return true
 		}
 	}
 	return false
@@ -1326,27 +1336,11 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	}
 
 	// Remove hooks from settings.json
-	data, err := os.ReadFile(settingsPath)
+	settings, postToolUse, err := loadPostToolUseHooks(settingsPath)
 	if err != nil {
-		fmt.Println("    No settings file found")
-		fmt.Print("\n  Done.\n\n")
-		return
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error parsing settings: %v\n", err)
 		os.Exit(1)
 	}
-
-	hooks, _ := settings["hooks"].(map[string]interface{})
-	if hooks == nil {
-		fmt.Println("    No hooks found in settings")
-		fmt.Print("\n  Done.\n\n")
-		return
-	}
-
-	postToolUse, _ := hooks["PostToolUse"].([]interface{})
 	if postToolUse == nil {
 		fmt.Println("    No PostToolUse hooks found")
 		fmt.Print("\n  Done.\n\n")
@@ -1357,6 +1351,7 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	filtered, removed := filterPeekmHooks(postToolUse, hookScriptPath)
 
 	if removed > 0 {
+		hooks := settings["hooks"].(map[string]interface{})
 		hooks["PostToolUse"] = filtered
 		out, _ := json.MarshalIndent(settings, "", "  ")
 		os.WriteFile(settingsPath, append(out, '\n'), 0644)
@@ -1634,20 +1629,6 @@ func collectMemoryFiles(filter string) ([]string, map[string]string) {
 	return files, projectIndex
 }
 
-// uniqueParentDirs returns deduplicated parent directories of the given file paths.
-func uniqueParentDirs(files []string) []string {
-	seen := make(map[string]bool)
-	var dirs []string
-	for _, f := range files {
-		dir := filepath.Dir(f)
-		if !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	return dirs
-}
-
 // serveAndWait starts the HTTP server, handles graceful shutdown, and blocks until exit.
 func serveAndWait(addr, startURL string) {
 	if version != "dev" {
@@ -1690,73 +1671,12 @@ func serveAndWait(addr, startURL string) {
 	}
 }
 
-func runMemory(args []string) {
-	memoryMode = true
-
-	fs := flag.NewFlagSet("memory", flag.ExitOnError)
-	memPort := fs.Int("port", 6419, "Port to serve on")
-	memBrowser := fs.Bool("browser", true, "Open browser automatically")
-	memDisableHook := fs.Bool("no-ai-tracking", false, "Disable AI session tracking")
-	fs.Parse(args)
-
-	if fs.NArg() > 0 {
-		memoryFilter = fs.Arg(0)
-	}
-
-	*port = *memPort
-	*openBrowser = *memBrowser
-	*disableHook = *memDisableHook
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("Cannot determine home directory: %v", err)
-	}
-	browseDir = filepath.Join(home, ".claude", "projects")
-
-	if !*disableHook {
-		initSessionTracking()
-	}
-
-	markdownFiles, _ = collectMemoryFiles(memoryFilter)
-	if len(markdownFiles) == 0 {
-		if memoryFilter != "" {
-			fmt.Printf("No memory files found matching '%s'\n", memoryFilter)
-		} else {
-			fmt.Println("No memory files found in ~/.claude/projects/")
-		}
-		os.Exit(1)
-	}
-
-	dirs := uniqueParentDirs(markdownFiles)
-	if len(dirs) > 0 {
-		if err := dirWatcher.watchDirectories(dirs); err != nil {
-			log.Printf("Warning: Cannot watch memory directories: %v", err)
-		}
-	}
-
-	registerRoutes()
-
-	addr := fmt.Sprintf("localhost:%d", *port)
-	baseURL := fmt.Sprintf("http://%s", addr)
-
-	fmt.Printf("peekm memory browser at %s\n", baseURL)
-	fmt.Printf("Browsing %d project(s), %d memory file(s)\n", len(dirs), len(markdownFiles))
-	if memoryFilter != "" {
-		fmt.Printf("Filter: %s\n", memoryFilter)
-	}
-	fmt.Println("Press Ctrl+C to quit")
-
-	serveAndWait(addr, baseURL)
-}
-
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
-		fmt.Fprintf(os.Stderr, "       peekm memory [options] [project-filter]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
 		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
-		fmt.Fprintf(os.Stderr, "  memory    Browse Claude Code memory files across all projects\n")
 		fmt.Fprintf(os.Stderr, "  setup     Configure integrations (e.g. Claude Code hooks)\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
@@ -1767,9 +1687,6 @@ func main() {
 		switch os.Args[1] {
 		case "setup":
 			runSetup(os.Args[2:])
-			return
-		case "memory":
-			runMemory(os.Args[2:])
 			return
 		}
 	}
@@ -1787,6 +1704,7 @@ func main() {
 	}
 
 	if !*disableHook {
+		autoSetupClaudeHooks()
 		initSessionTracking()
 	}
 
@@ -1856,15 +1774,10 @@ func removeFromWhitelist(filePath string) {
 }
 
 // sendFileEvent sends a file event notification to clients
-func sendFileEvent(eventType, relPath, sessionID string) {
-	msg := fileEventMessage{
-		Type:    eventType,
-		Path:    relPath,
-		Session: sessionID,
-	}
+func sendFileEvent(msg fileEventMessage) {
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("Error marshaling %s message: %v", eventType, err)
+		log.Printf("Error marshaling %s message: %v", msg.Type, err)
 	} else {
 		notifyClientsWithMessage(string(msgBytes))
 	}
@@ -1930,7 +1843,7 @@ func handleMarkdownCreated(filePath string) {
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
-		sendFileEvent("file_added", getRelativePath(filePath), sessionID)
+		sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(filePath), Session: sessionID})
 	}()
 }
 
@@ -1962,7 +1875,7 @@ func awaitSessionID(filePath string) string {
 func handleMarkdownRemoved(filePath string, reason string) {
 	log.Printf("%s file: %s", reason, filePath)
 	removeFromWhitelist(filePath)
-	sendFileEvent("file_removed", getRelativePath(filePath), "")
+	sendFileEvent(fileEventMessage{Type: "file_removed", Path: getRelativePath(filePath)})
 }
 
 func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
@@ -2383,12 +2296,6 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		subtitle = fmt.Sprintf("%s - %d file(s)", currentBrowseDir, len(currentMarkdownFiles))
 	}
 
-	if memoryMode {
-		title = "Memory Browser"
-		projectCount := len(uniqueParentDirs(currentMarkdownFiles))
-		subtitle = fmt.Sprintf("%d project(s), %d file(s)", projectCount, len(currentMarkdownFiles))
-	}
-
 	var filePath string
 	if defaultFile != "" {
 		filePath = tildeRelPath(defaultFile, currentBrowseDir)
@@ -2409,14 +2316,14 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlanFile caches plan content for durability and whitelists/broadcasts plan files.
-// Always returns the canonical ~/.claude/plans/ path (never rewrites to cache path).
-func handlePlanFile(filePath, content, sessionID string) string {
+// Returns (canonical path, plan title). Title is empty for non-plan files.
+func handlePlanFile(filePath, content, sessionID string) (string, string) {
 	if !strings.HasSuffix(filePath, ".md") {
-		return filePath
+		return filePath, ""
 	}
 	plansDir := claudePlansDir()
 	if plansDir == "" || !strings.HasPrefix(filePath, plansDir+string(os.PathSeparator)) {
-		return filePath
+		return filePath, ""
 	}
 
 	// Cache plan content for durability (survives cleanup, handles remote)
@@ -2435,8 +2342,14 @@ func handlePlanFile(filePath, content, sessionID string) string {
 		fileMutex.Unlock()
 		log.Printf("Whitelisted Claude plan: %s", filePath)
 	}
-	sendFileEvent("file_modified", getRelativePath(filePath), sessionID)
-	return filePath
+	planTitle := extractPlanTitle(content)
+	sendFileEvent(fileEventMessage{
+		Type:      "file_modified",
+		Path:      getRelativePath(filePath),
+		Session:   sessionID,
+		PlanTitle: planTitle,
+	})
+	return filePath, planTitle
 }
 
 // handleClaudeHook receives file modification events from Claude Code hooks
@@ -2494,14 +2407,17 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      parseTimestampOrNow(req.TS),
 	}
 
-	req.FilePath = handlePlanFile(req.FilePath, req.Content, req.SessionID)
+	var planTitle string
+	req.FilePath, planTitle = handlePlanFile(req.FilePath, req.Content, req.SessionID)
 
 	// Register session mapping for file (after path rewrite so plan files use local path)
 	globalSessionStore.register(req.FilePath, metadata)
 
 	// Persist to event log
 	if globalEventLog != nil {
-		if err := globalEventLog.append(sessionEventFrom(metadata, req.FilePath)); err != nil {
+		evt := sessionEventFrom(metadata, req.FilePath)
+		evt.PlanTitle = planTitle
+		if err := globalEventLog.append(evt); err != nil {
 			log.Printf("Warning: failed to persist session event: %v", err)
 		}
 	}
@@ -2516,11 +2432,6 @@ func handleNavigate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if memoryMode {
-		http.Error(w, "Navigation disabled in memory browser mode", http.StatusForbidden)
-		return
-	}
-
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -2824,6 +2735,7 @@ type timelineEntry struct {
 	TimeISO    string
 	IsViewable bool      // true if file is in the markdown whitelist
 	EditCount  int       // 1 = single event, >1 = aggregated
+	PlanTitle  string    // non-empty for plan files (extracted from content)
 	oldestTime time.Time // unexported, used for time range computation
 	newestTime time.Time // unexported, used for time range computation
 }
@@ -2918,6 +2830,7 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 		TimeISO:    evt.Timestamp.Format(time.RFC3339),
 		IsViewable: isWhitelistedFile(evt.FilePath),
 		EditCount:  1,
+		PlanTitle:  evt.PlanTitle,
 		newestTime: evt.Timestamp,
 		oldestTime: evt.Timestamp,
 	})
@@ -3810,24 +3723,7 @@ func buildMemoryTreeHTML(projects []*memoryProject, urlBaseDir, activeFile strin
 	return buf.String()
 }
 
-// generateMemoryTreeHTML wraps buildMemoryTreeHTML using global state (for memoryMode subcommand).
-func generateMemoryTreeHTML() string {
-	fileMutex.RLock()
-	currentFiles := make([]string, len(markdownFiles))
-	copy(currentFiles, markdownFiles)
-	currentBrowseDir := browseDir
-	activeFile := currentFile
-	fileMutex.RUnlock()
-
-	projects := groupMemoryByProject(currentFiles, currentBrowseDir, nil)
-	return buildMemoryTreeHTML(projects, currentBrowseDir, activeFile)
-}
-
 func generateTreeHTML() string {
-	if memoryMode {
-		return generateMemoryTreeHTML()
-	}
-
 	// Get state snapshot (thread-safe)
 	fileMutex.RLock()
 	currentBrowseDir := browseDir

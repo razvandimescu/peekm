@@ -73,16 +73,16 @@ function connectSSE() {
                         navigate(window.location.pathname, false);
 
                         // Show notification if modified by Claude Code session
-                        if (data.session) {
+                        if (data.planTitle) {
+                            showToast(`Plan updated: ${data.planTitle}`, data.path, data.session);
+                        } else if (data.session) {
                             showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
                         }
                     } else {
-                        // Different file modified, show notification
-                        showToast(`File updated: ${data.path}`, data.path, data.session);
+                        fileModifiedToast(data);
                     }
                 } else {
-                    // In browser view, just show notification
-                    showToast(`File updated: ${data.path}`, data.path, data.session);
+                    fileModifiedToast(data);
                 }
             } else if (data.type === 'connection_status') {
                 console.log('[SSE] Handling connection_status:', data.count);
@@ -406,6 +406,13 @@ const TOAST_CONFIG = {
     BATCH_DURATION: 6000,     // ms for batches
     TRANSITION_TIME: 300      // CSS transition duration
 };
+
+function fileModifiedToast(data) {
+    const msg = data.planTitle
+        ? `Plan updated: ${data.planTitle}`
+        : `File updated: ${data.path}`;
+    showToast(msg, data.path, data.session);
+}
 
 function showToast(message, filePath, session) {
     // Create file info object
