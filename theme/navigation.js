@@ -252,6 +252,18 @@ function reinitializeScripts() {
             }
         }
 
+        // Update share button visibility
+        var shareBtn = document.getElementById('share-btn');
+        if (shareBtn) {
+            shareBtn.style.display = viewType === 'file' ? 'inline-block' : 'none';
+            if (viewType === 'file') {
+                checkShareStatus();
+            } else {
+                setSharePanelOpen(false);
+                shareBtn.classList.remove('share-active');
+            }
+        }
+
         // Common initialization for both views
         if (viewType === 'browser') {
             // Browser mode - setup collapsible directories
@@ -955,6 +967,105 @@ function downloadHTML() {
         showErrorToast('Failed to download HTML file');
     });
 }
+
+// ===== LAN Share =====
+
+function setSharePanelOpen(open) {
+    var panel = document.getElementById('share-panel');
+    var btn = document.getElementById('share-btn');
+    if (panel) panel.style.display = open ? 'block' : 'none';
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+async function toggleShare() {
+    var shareBtn = document.getElementById('share-btn');
+    if (shareBtn.classList.contains('share-active')) {
+        var panel = document.getElementById('share-panel');
+        setSharePanelOpen(panel && panel.style.display === 'none');
+        return;
+    }
+    var match = window.location.pathname.match(/\/view\/(.+)/);
+    var filePath = match ? '/' + decodeURIComponent(match[1]) : '';
+    if (!filePath) {
+        showErrorToast('No file currently open');
+        return;
+    }
+    try {
+        var resp = await fetch('/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filePath })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        var data = await resp.json();
+        document.getElementById('share-url').value = data.url;
+        document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
+        shareBtn.classList.add('share-active');
+        setSharePanelOpen(true);
+        await navigator.clipboard.writeText(data.url);
+        showToast('Share link copied to clipboard');
+    } catch (err) {
+        showErrorToast('Failed to create share: ' + err.message);
+    }
+}
+
+async function stopSharing() {
+    var shareBtn = document.getElementById('share-btn');
+    var url = document.getElementById('share-url').value;
+    var token = url.split('/s/').pop();
+    try {
+        await fetch('/share', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token })
+        });
+        shareBtn.classList.remove('share-active');
+        setSharePanelOpen(false);
+        showToast('Share revoked');
+    } catch (err) {
+        showErrorToast('Failed to revoke share');
+    }
+}
+
+function copyShareURL() {
+    var url = document.getElementById('share-url').value;
+    navigator.clipboard.writeText(url).then(function() { showToast('URL copied'); });
+}
+
+async function checkShareStatus() {
+    var match = window.location.pathname.match(/\/view\/(.+)/);
+    if (!match) return;
+    var filePath = '/' + decodeURIComponent(match[1]);
+    try {
+        var resp = await fetch('/share?path=' + encodeURIComponent(filePath));
+        var data = await resp.json();
+        var shareBtn = document.getElementById('share-btn');
+        if (data.active) {
+            shareBtn.classList.add('share-active');
+            document.getElementById('share-url').value = data.url;
+            document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
+        } else {
+            shareBtn.classList.remove('share-active');
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Click-outside and Escape to dismiss share panel
+document.addEventListener('click', function(e) {
+    var container = document.querySelector('.share-container');
+    var panel = document.getElementById('share-panel');
+    if (container && panel && panel.style.display !== 'none' && !container.contains(e.target)) {
+        setSharePanelOpen(false);
+    }
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var panel = document.getElementById('share-panel');
+        if (panel && panel.style.display !== 'none') {
+            setSharePanelOpen(false);
+        }
+    }
+});
 
 // ===== Tree State Persistence =====
 

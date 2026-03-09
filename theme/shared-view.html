@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.FileName}} - Shared via peekm</title>
+    <style>
+        {{.GitHubCSS}}
+        {{.ThemeOverrides}}
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bgColor-muted, #f6f8fa);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        }
+
+        .shared-banner {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 24px;
+            background: var(--bgColor-default, #fff);
+            border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+            font-size: 13px;
+            color: var(--fgColor-default, #1f2328);
+            gap: 12px;
+        }
+
+        .shared-banner-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .shared-banner-left strong {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 400px;
+        }
+
+        .shared-banner-sep {
+            color: var(--fgColor-muted, #656d76);
+        }
+
+        .shared-banner-link {
+            color: var(--fgColor-muted, #656d76);
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .shared-banner-link:hover {
+            color: var(--fgColor-accent, #0969da);
+            text-decoration: underline;
+        }
+
+        .expiry-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            font-size: 12px;
+            color: var(--fgColor-muted, #656d76);
+            white-space: nowrap;
+        }
+
+        .expiry-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--fgColor-success, #1a7f37);
+        }
+
+        .expiry-badge.warning {
+            background: var(--bgColor-attention-muted, #fff8c5);
+            border-color: var(--borderColor-attention-muted, #d4a72c66);
+            color: var(--fgColor-attention, #9a6700);
+        }
+
+        .expiry-badge.warning .expiry-dot {
+            background: var(--fgColor-attention, #9a6700);
+        }
+
+        .expiry-badge.expired {
+            background: var(--bgColor-danger-muted, #ffebe9);
+            border-color: var(--borderColor-danger-muted, #ff818266);
+            color: var(--fgColor-danger, #d1242f);
+        }
+
+        .expiry-badge.expired .expiry-dot {
+            background: var(--fgColor-danger, #d1242f);
+        }
+
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 45px;
+            background: var(--bgColor-default, #fff);
+            min-height: calc(100vh - 50px);
+        }
+
+        .expired-message {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 60vh;
+            text-align: center;
+            color: var(--fgColor-muted, #656d76);
+        }
+
+        .expired-message h2 {
+            margin: 0 0 8px;
+            font-size: 20px;
+            color: var(--fgColor-default, #1f2328);
+        }
+
+        .expired-message p {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .expired-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 767px) {
+            .container { padding: 15px; }
+        }
+
+        @media (max-width: 480px) {
+            .shared-banner { padding: 8px 12px; }
+            .shared-banner-left strong { max-width: 180px; }
+            .shared-banner-sep, .shared-banner-link { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shared-banner">
+        <div class="shared-banner-left">
+            <strong>{{.FileName}}</strong>
+            <span class="shared-banner-sep">·</span>
+            <a class="shared-banner-link" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener">peekm</a>
+        </div>
+        {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
+        {{else}}<span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
+        {{end}}
+    </div>
+
+    <div class="markdown-body container" id="shared-content">
+        {{if .IsExpired}}<div class="expired-message">
+            <div class="expired-icon">🔗</div>
+            <h2>Link Expired</h2>
+            <p>This shared link is no longer available. Ask the owner to share it again.</p>
+        </div>
+        {{else}}{{.Content}}
+        {{end}}
+    </div>
+
+    <script>{{.ThemeManagerJS}}</script>
+    {{if not .IsExpired}}<script>
+        (function() {
+            var token = '{{.Token}}';
+            var expiresAt = new Date('{{.ExpiresAt}}');
+            var filePath = '{{.FilePath}}';
+
+            function updateExpiry() {
+                var remaining = expiresAt - new Date();
+                var badge = document.getElementById('expiry-badge');
+                var text = document.getElementById('expiry-text');
+                if (!badge || !text) return;
+                if (remaining <= 0) {
+                    document.getElementById('shared-content').innerHTML =
+                        '<div class="expired-message"><div class="expired-icon">🔗</div><h2>Link Expired</h2><p>This shared link is no longer available. Ask the owner to share it again.</p></div>';
+                    text.textContent = 'Expired';
+                    badge.className = 'expiry-badge expired';
+                    return;
+                }
+                var mins = Math.ceil(remaining / 60000);
+                text.textContent = mins > 60
+                    ? 'Expires in ' + Math.floor(mins/60) + 'h ' + (mins%60) + 'm'
+                    : 'Expires in ' + mins + 'm';
+                if (mins <= 10) badge.className = 'expiry-badge warning';
+            }
+            updateExpiry();
+            setInterval(updateExpiry, 30000);
+
+            // Re-check on tab focus (browser throttles timers on background tabs)
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) {
+                    updateExpiry();
+                    if (expiresAt - new Date() > 0) {
+                        fetchContent();
+                    }
+                }
+            });
+
+            function fetchContent() {
+                fetch('/s/' + token, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                    .then(function(r) { return r.ok ? r.text() : null; })
+                    .then(function(html) {
+                        if (html) document.getElementById('shared-content').innerHTML = html;
+                    });
+            }
+
+            // SSE live reload — filter by file path to avoid unnecessary re-fetches
+            var es;
+            function connectSSE() {
+                es = new EventSource('/events');
+                es.onmessage = function(e) {
+                    try {
+                        var data = JSON.parse(e.data);
+                        if (data.type === 'file_modified' && (!data.path || data.path === filePath)) {
+                            fetchContent();
+                        }
+                    } catch(err) {}
+                };
+                es.onerror = function() {
+                    es.close();
+                    setTimeout(connectSSE, 3000);
+                };
+            }
+            connectSSE();
+        })();
+    </script>
+    {{end}}
+</body>
+</html>
