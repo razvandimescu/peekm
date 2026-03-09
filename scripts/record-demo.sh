@@ -18,7 +18,7 @@ set -euo pipefail
 # --------------- Configuration ---------------
 OUTPUT="${1:-assets/hero-demo.gif}"
 PORT=16419
-RECORD_SECONDS=22
+RECORD_SECONDS=30
 VIEWPORT_W=1600
 VIEWPORT_H=900
 FPS=12
@@ -323,7 +323,15 @@ cat > "$TRANSCRIPT_DIR/session-a7f3b2.jsonl" << 'JSONL'
 {"type":"tool_result","message":{"role":"tool","content":"File created: CONTRIBUTING.md (20 lines)"},"timestamp":"2026-02-25T10:00:59Z"}
 {"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! Here's a summary of all changes:\n\n1. **docs/changelog.md** — Created v1.2.0 changelog with new endpoints, rate limiting, and bug fixes\n2. **README.md** — Added rate limiting to features list\n3. **docs/auth.md** — Rewrote from API keys to OAuth 2.0 with PKCE\n4. **docs/api.md** — Added rate limiting section with headers and retry behavior\n5. **CONTRIBUTING.md** — Created contributing guidelines\n\nFive files touched across the session."}]},"timestamp":"2026-02-25T10:01:02Z"}
 JSONL
-log "Fake transcript at $TRANSCRIPT_DIR"
+# Conversation-only transcript (no hook events — discovered via transcript scanning)
+cat > "$TRANSCRIPT_DIR/session-conv01.jsonl" << 'JSONL'
+{"type":"user","message":{"role":"user","content":"What's the best approach for adding WebSocket support to our widget API? Should we use Server-Sent Events or full WebSocket connections?"},"timestamp":"2026-02-25T09:30:00Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"For your widget API, I'd recommend Server-Sent Events (SSE) over WebSockets for a few reasons:\n\n1. **Unidirectional updates** — Widget state changes flow server→client. You don't need bidirectional communication.\n2. **HTTP/2 multiplexing** — SSE works over regular HTTP, so you get connection multiplexing for free.\n3. **Simpler infrastructure** — No WebSocket upgrade handling, works through most proxies and load balancers.\n4. **Auto-reconnection** — The EventSource API handles reconnection with Last-Event-ID replay.\n\nWebSockets would be better if you needed client→server streaming (e.g., collaborative editing), but for push notifications about widget changes, SSE is the simpler and more robust choice."}]},"timestamp":"2026-02-25T09:30:15Z"}
+{"type":"user","message":{"role":"user","content":"Good points. How would we handle authentication for SSE connections? Our API uses OAuth tokens that expire after 1 hour."},"timestamp":"2026-02-25T09:31:00Z"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"SSE has a limitation here — the EventSource API doesn't support custom headers, so you can't pass the Bearer token directly.\n\nThree common approaches:\n\n1. **Query parameter token** — `new EventSource('/events?token=...')`. Simple but the token appears in server logs. Use short-lived tokens.\n2. **Cookie-based auth** — Set an HttpOnly cookie on login. EventSource sends cookies automatically. Best security but requires cookie infrastructure.\n3. **Ticket-based** — POST to get a one-time ticket, then `EventSource('/events?ticket=...')`. The ticket is single-use and short-lived (~30s). Best of both worlds.\n\nI'd go with option 3 (ticket-based) for your setup since you already have OAuth. The flow would be: exchange OAuth token for a one-time SSE ticket via POST, then connect with that ticket."}]},"timestamp":"2026-02-25T09:32:00Z"}
+JSONL
+
+log "Fake transcripts at $TRANSCRIPT_DIR"
 
 # Create fake memory files for the Memory Browser demo
 # Each project needs: ~/.claude/projects/<encoded>/memory/MEMORY.md
@@ -532,10 +540,22 @@ hide_caption
 run_js "navigate('/view/docs/changelog.md')"
 sleep 0.5
 show_caption "AI-modified file with session metadata"
+sleep 2
+
+# Scene 4: LAN sharing — click share button, show share panel
+log "Scene 4: Sharing file on LAN..."
+hide_caption
+run_js "toggleShare()"
+sleep 0.5
+show_caption "Share on your local network"
 sleep 2.5
 
-# Scene 4: Open AI timeline + expand session card (#8)
-log "Scene 4: Opening AI timeline..."
+# Close share panel before moving on
+run_js "setSharePanelOpen(false)"
+sleep 0.3
+
+# Scene 5: Open AI timeline + expand session card — shows both edit and conversation sessions
+log "Scene 5: Opening AI timeline..."
 hide_caption
 run_js "navigate('/timeline')"
 sleep 1
@@ -544,19 +564,31 @@ run_js "
     var header = document.querySelector('.timeline-session-header');
     if (header) toggleTimelineSession(header);
 "
-show_caption "Session timeline"
-sleep 2
+show_caption "All AI sessions — edits and conversations"
+sleep 2.5
 
-# Scene 5: Open transcript viewer
-log "Scene 5: Opening transcript viewer..."
+# Scene 6: Toggle filter to "Edits only" then back to "All"
+log "Scene 6: Demonstrating filter toggle..."
+hide_caption
+run_js "setTimelineFilter('edits')"
+sleep 0.3
+show_caption "Filter: Edits only"
+sleep 1.5
+run_js "setTimelineFilter('all')"
+sleep 0.3
+show_caption "Filter: All sessions"
+sleep 1.5
+
+# Scene 7: Open transcript viewer
+log "Scene 7: Opening transcript viewer..."
 hide_caption
 run_js "navigate('/transcript?session=session-a7f3b2')"
 sleep 0.5
 show_caption "Full AI conversation transcript"
 sleep 2.5
 
-# Scene 6: Open memory browser dashboard
-log "Scene 6: Opening memory browser..."
+# Scene 8: Open memory browser dashboard
+log "Scene 8: Opening memory browser..."
 hide_caption
 run_js "navigate('/memory')"
 sleep 0.5
