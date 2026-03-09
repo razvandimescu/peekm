@@ -416,6 +416,59 @@ a.timeline-session-id:hover {
     color: var(--fgColor-accent);
 }
 
+/* Conversation sessions (no file edits) */
+.timeline-conversation-header {
+    cursor: default;
+}
+.timeline-conversation-header:hover {
+    background: var(--bgColor-muted);
+}
+.timeline-conversation-icon {
+    flex-shrink: 0;
+    color: var(--fgColor-muted);
+    opacity: 0.6;
+}
+.timeline-session-conversation .timeline-session-summary {
+    color: var(--fgColor-muted);
+}
+.timeline-session-conversation .timeline-session-stats {
+    color: var(--fgColor-muted);
+    opacity: 0.7;
+}
+
+/* Filter toggle */
+.timeline-filter-toggle {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 16px;
+    background: var(--bgColor-muted);
+    border-radius: 6px;
+    padding: 2px;
+    width: fit-content;
+}
+.timeline-filter-btn {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fgColor-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.timeline-filter-btn:hover {
+    color: var(--fgColor-default);
+}
+.timeline-filter-btn.active {
+    background: var(--bgColor-default);
+    color: var(--fgColor-default);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+.timeline-filter-edits .timeline-session-conversation {
+    display: none;
+}
+
 .timeline-session-events {
     padding: 0 14px 6px;
 }
