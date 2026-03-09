@@ -924,9 +924,7 @@ function scheduleTreeRefresh() {
 
 // Download HTML functionality
 function downloadHTML() {
-    // Extract current file path from URL
-    const match = window.location.pathname.match(/\/view\/(.+)/);
-    const filePath = match ? '/' + decodeURIComponent(match[1]) : '';
+    const filePath = getCurrentFilePath();
     if (!filePath) {
         showErrorToast('No file currently open');
         return;
@@ -970,11 +968,21 @@ function downloadHTML() {
 
 // ===== LAN Share =====
 
+function getCurrentFilePath() {
+    var match = window.location.pathname.match(/\/view\/(.+)/);
+    return match ? '/' + decodeURIComponent(match[1]) : '';
+}
+
 function setSharePanelOpen(open) {
     var panel = document.getElementById('share-panel');
     var btn = document.getElementById('share-btn');
     if (panel) panel.style.display = open ? 'block' : 'none';
     if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function updateSharePanel(data) {
+    document.getElementById('share-url').value = data.url;
+    document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
 }
 
 async function toggleShare() {
@@ -984,8 +992,7 @@ async function toggleShare() {
         setSharePanelOpen(panel && panel.style.display === 'none');
         return;
     }
-    var match = window.location.pathname.match(/\/view\/(.+)/);
-    var filePath = match ? '/' + decodeURIComponent(match[1]) : '';
+    var filePath = getCurrentFilePath();
     if (!filePath) {
         showErrorToast('No file currently open');
         return;
@@ -998,8 +1005,7 @@ async function toggleShare() {
         });
         if (!resp.ok) throw new Error(await resp.text());
         var data = await resp.json();
-        document.getElementById('share-url').value = data.url;
-        document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
+        updateSharePanel(data);
         shareBtn.classList.add('share-active');
         setSharePanelOpen(true);
         await navigator.clipboard.writeText(data.url);
@@ -1033,17 +1039,15 @@ function copyShareURL() {
 }
 
 async function checkShareStatus() {
-    var match = window.location.pathname.match(/\/view\/(.+)/);
-    if (!match) return;
-    var filePath = '/' + decodeURIComponent(match[1]);
+    var filePath = getCurrentFilePath();
+    if (!filePath) return;
     try {
         var resp = await fetch('/share?path=' + encodeURIComponent(filePath));
         var data = await resp.json();
         var shareBtn = document.getElementById('share-btn');
         if (data.active) {
             shareBtn.classList.add('share-active');
-            document.getElementById('share-url').value = data.url;
-            document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
+            updateSharePanel(data);
         } else {
             shareBtn.classList.remove('share-active');
         }

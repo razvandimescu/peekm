@@ -184,6 +184,7 @@
                         '<div class="expired-message"><div class="expired-icon">🔗</div><h2>Link Expired</h2><p>This shared link is no longer available. Ask the owner to share it again.</p></div>';
                     text.textContent = 'Expired';
                     badge.className = 'expiry-badge expired';
+                    if (es) es.close();
                     return;
                 }
                 var mins = Math.ceil(remaining / 60000);

@@ -149,14 +149,23 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, e := range s.entries {
 		if e.FilePath == filePath && time.Now().Before(e.ExpiresAt) {
-			return e
+			return e, true
 		}
 	}
+	return nil, false
+}
+
+func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
+	if existing, ok := s.findByPath(filePath); ok {
+		return existing
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entry := &shareEntry{
 		Token:     generateToken(),
 		FilePath:  filePath,
@@ -819,26 +828,32 @@ func localOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+var lanIP string
+var lanIPOnce sync.Once
+
 func detectLANIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
+	lanIPOnce.Do(func() {
+		ifaces, err := net.Interfaces()
 		if err != nil {
-			continue
+			return
 		}
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
-				return ipnet.IP.String()
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+					lanIP = ipnet.IP.String()
+					return
+				}
 			}
 		}
-	}
-	return ""
+	})
+	return lanIP
 }
 
 func buildShareURL(token string) string {
@@ -849,15 +864,35 @@ func buildShareURL(token string) string {
 	return fmt.Sprintf("http://%s:%d/s/%s", host, *port, token)
 }
 
+type shareResponse struct {
+	Active    bool   `json:"active"`
+	Token     string `json:"token,omitempty"`
+	URL       string `json:"url,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+func newShareResponse(entry *shareEntry) shareResponse {
+	return shareResponse{
+		Active:    true,
+		Token:     entry.Token,
+		URL:       buildShareURL(entry.Token),
+		ExpiresAt: entry.ExpiresAt.Format(time.RFC3339),
+	}
+}
+
+func cleanInputPath(raw string) string {
+	return resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(raw), "/")))
+}
+
 // handleShare dispatches GET (status), POST (create), DELETE (revoke) for LAN sharing
 func handleShare(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		handleShareStatus(w, r)
 	case http.MethodPost:
-		handleShareCreate(w, r)
+		withCSRFCheck(handleShareCreate).ServeHTTP(w, r)
 	case http.MethodDelete:
-		handleShareRevoke(w, r)
+		withCSRFCheck(handleShareRevoke).ServeHTTP(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -871,19 +906,14 @@ func handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	resolved := resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(req.Path), "/")))
-	absPath, err := validateAndResolvePath(resolved)
+	absPath, err := validateAndResolvePath(cleanInputPath(req.Path))
 	if err != nil || !isWhitelistedFile(absPath) {
 		http.Error(w, "file not found or not accessible", http.StatusNotFound)
 		return
 	}
 	entry := globalShareStore.create(absPath, 1*time.Hour)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"token":      entry.Token,
-		"url":        buildShareURL(entry.Token),
-		"expires_at": entry.ExpiresAt.Format(time.RFC3339),
-	})
+	json.NewEncoder(w).Encode(newShareResponse(entry))
 }
 
 func handleShareRevoke(w http.ResponseWriter, r *http.Request) {
@@ -904,33 +934,18 @@ func handleShareStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path parameter", http.StatusBadRequest)
 		return
 	}
-	resolved := resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(filePath), "/")))
-	absPath, err := validateAndResolvePath(resolved)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"active": false})
-		return
-	}
-	globalShareStore.mu.RLock()
-	var found *shareEntry
-	for _, e := range globalShareStore.entries {
-		if e.FilePath == absPath && time.Now().Before(e.ExpiresAt) {
-			found = e
-			break
-		}
-	}
-	globalShareStore.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	if found == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{"active": false})
+	absPath, err := validateAndResolvePath(cleanInputPath(filePath))
+	if err != nil {
+		json.NewEncoder(w).Encode(shareResponse{})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"active":     true,
-		"token":      found.Token,
-		"url":        buildShareURL(found.Token),
-		"expires_at": found.ExpiresAt.Format(time.RFC3339),
-	})
+	found, ok := globalShareStore.findByPath(absPath)
+	if !ok {
+		json.NewEncoder(w).Encode(shareResponse{})
+		return
+	}
+	json.NewEncoder(w).Encode(newShareResponse(found))
 }
 
 // sharedViewData is used for rendering the shared file view
@@ -957,13 +972,13 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 			FileName:         "Expired Link",
 			IsExpired:        true,
 		}
-		w.WriteHeader(http.StatusGone)
 		var renderBuf bytes.Buffer
 		if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
-			fmt.Fprint(w, "This shared link has expired.")
+			http.Error(w, "This shared link has expired.", http.StatusGone)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
 		renderBuf.WriteTo(w)
 		return
 	}
@@ -1016,8 +1031,8 @@ func registerRoutes() {
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
 
-	// Share management (local only + CSRF)
-	http.HandleFunc("/share", localOnly(withRecovery(withCSRFCheck(handleShare))))
+	// Share management (local only; CSRF applied per-method inside handleShare)
+	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
 
 	// LAN-accessible routes (token-gated or non-sensitive)
 	http.HandleFunc("/s/", withRecovery(serveSharedFile))
