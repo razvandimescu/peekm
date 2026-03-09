@@ -2972,7 +2972,8 @@ type timelineSession struct {
 	EditCount     int
 	Tools         []string // unique tool names
 	HasTranscript bool
-	IsActive      bool // newest event < 5min ago
+	IsActive      bool   // newest event < 5min ago
+	SessionType   string // "edit" or "conversation"
 	Events        []timelineEntry
 	newestTime    time.Time
 	oldestTime    time.Time
@@ -3050,6 +3051,140 @@ func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
 	return cache
 }
 
+// discoverTranscriptSessions scans Claude transcript files for sessions
+// not already tracked via events.jsonl (i.e. conversation-only sessions).
+func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool) []timelineSession {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	encodedDir := strings.ReplaceAll(baseDir, "/", "-")
+	sessionsDir := filepath.Join(projectsDir, encodedDir)
+
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil
+	}
+
+	var sessions []timelineSession
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		sessionID := strings.TrimSuffix(entry.Name(), ".jsonl")
+		if knownSessionIDs[sessionID] {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		modTime := info.ModTime()
+		transcriptPath := filepath.Join(sessionsDir, entry.Name())
+		summary, firstTS, lastTS := extractTranscriptMeta(transcriptPath)
+		oldest, newest := modTime, modTime
+		if !firstTS.IsZero() {
+			oldest = firstTS
+		}
+		if !lastTS.IsZero() {
+			newest = lastTS
+		}
+
+		sessions = append(sessions, timelineSession{
+			SessionID:     truncateSessionID(sessionID),
+			FullSessionID: sessionID,
+			Summary:       summary,
+			HasTranscript: true,
+			SessionType:   "conversation",
+			newestTime:    newest,
+			oldestTime:    oldest,
+			Duration:      formatSessionDuration(newest.Sub(oldest)),
+		})
+	}
+	// Sort newest first for merge
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].newestTime.After(sessions[j].newestTime)
+	})
+	return sessions
+}
+
+func parseTranscriptTimestamp(raw json.RawMessage) (time.Time, bool) {
+	var ts struct {
+		Timestamp string `json:"timestamp"`
+	}
+	if json.Unmarshal(raw, &ts) != nil || ts.Timestamp == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, ts.Timestamp); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339, ts.Timestamp); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+func extractSummaryFromRaw(raw json.RawMessage) string {
+	var entry struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &entry) != nil || entry.Type != "user" {
+		return ""
+	}
+	text := extractUserText(entry.Message.Content)
+	if text == "" || isSystemNoise(text) {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "Implement the following plan") {
+		if title := extractPlanTitle(text); title != "" {
+			return truncateString(title, 120)
+		}
+	}
+	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+		text = text[:idx]
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return truncateString(text, 120)
+}
+
+// extractTranscriptMeta extracts summary, first timestamp, and last timestamp
+// from a transcript JSONL in a single pass.
+func extractTranscriptMeta(path string) (summary string, first, last time.Time) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	for i := 0; ; i++ {
+		var raw json.RawMessage
+		if dec.Decode(&raw) != nil {
+			break
+		}
+		if t, ok := parseTranscriptTimestamp(raw); ok {
+			if first.IsZero() {
+				first = t
+			}
+			last = t
+		}
+		if summary == "" && i < 50 {
+			summary = extractSummaryFromRaw(raw)
+		}
+	}
+	return
+}
+
 type sessionBuild struct {
 	session *timelineSession
 	files   map[string]bool
@@ -3112,6 +3247,7 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 					FullSessionID: sid,
 					Summary:       info.summary,
 					HasTranscript: info.hasTranscript,
+					SessionType:   "edit",
 				},
 				files: make(map[string]bool),
 				tools: make(map[string]bool),
@@ -3176,11 +3312,45 @@ func markActiveSessions(groups []timelineDayGroup) {
 	}
 }
 
-func buildSessionTimeline(events []SessionEvent, baseDir string) []timelineDayGroup {
-	sessions := groupEventsBySession(events, baseDir)
+func buildSessionTimeline(events []SessionEvent, baseDir string, discoverConversations bool) []timelineDayGroup {
+	editSessions := groupEventsBySession(events, baseDir)
+
+	sessions := editSessions
+	if discoverConversations {
+		knownIDs := make(map[string]bool, len(editSessions))
+		for _, s := range editSessions {
+			if s.FullSessionID != "" {
+				knownIDs[s.FullSessionID] = true
+			}
+		}
+		convSessions := discoverTranscriptSessions(baseDir, knownIDs)
+		sessions = mergeSessionsByTime(editSessions, convSessions)
+	}
+
 	groups := assignSessionsToDays(sessions)
 	markActiveSessions(groups)
 	return groups
+}
+
+// mergeSessionsByTime interleaves two session slices by newestTime (newest first).
+func mergeSessionsByTime(a, b []timelineSession) []timelineSession {
+	if len(b) == 0 {
+		return a
+	}
+	merged := make([]timelineSession, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if !a[i].newestTime.Before(b[j].newestTime) {
+			merged = append(merged, a[i])
+			i++
+		} else {
+			merged = append(merged, b[j])
+			j++
+		}
+	}
+	merged = append(merged, a[i:]...)
+	merged = append(merged, b[j:]...)
+	return merged
 }
 
 func serveMemory(w http.ResponseWriter, r *http.Request) {
@@ -3233,6 +3403,23 @@ func serveMemory(w http.ResponseWriter, r *http.Request) {
 	renderTemplatePair(w, r, memoryTmpl, memoryPartialTmpl, data)
 }
 
+func filterTimelineBySession(filteredEvents []SessionEvent, filterSession string, groups []timelineDayGroup) *sessionFilterStats {
+	stats := computeSessionStats(filteredEvents, filterSession)
+
+	// For conversation-only sessions (0 events), populate stats from discovered session
+	if stats.EditCount == 0 {
+		for _, g := range groups {
+			for _, s := range g.Sessions {
+				if s.FullSessionID == filterSession {
+					stats.HasTranscript = s.HasTranscript
+					stats.Duration = s.Duration
+				}
+			}
+		}
+	}
+	return stats
+}
+
 func serveTimeline(w http.ResponseWriter, r *http.Request) {
 	fileMutex.RLock()
 	currentBrowseDir := browseDir
@@ -3240,25 +3427,53 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 
 	filterSession := r.URL.Query().Get("session")
 
-	var groups []timelineDayGroup
-	var stats *sessionFilterStats
-
+	var events []SessionEvent
 	if globalEventLog != nil {
-		events := globalEventLog.eventsForDir(currentBrowseDir)
+		events = globalEventLog.eventsForDir(currentBrowseDir)
+	}
 
-		// Filter by session if requested
-		if filterSession != "" {
-			var filtered []SessionEvent
-			for _, evt := range events {
-				if evt.SessionID == filterSession {
-					filtered = append(filtered, evt)
-				}
+	var filteredEvents []SessionEvent
+	if filterSession != "" {
+		for _, evt := range events {
+			if evt.SessionID == filterSession {
+				filteredEvents = append(filteredEvents, evt)
 			}
-			events = filtered
-			stats = computeSessionStats(events, filterSession)
 		}
+	} else {
+		filteredEvents = events
+	}
 
-		groups = buildSessionTimeline(events, currentBrowseDir)
+	// Skip full transcript scanning when filtering by session
+	groups := buildSessionTimeline(filteredEvents, currentBrowseDir, filterSession == "")
+
+	var stats *sessionFilterStats
+	if filterSession != "" {
+		// If no edit sessions found, check if it's a conversation-only session
+		if len(filteredEvents) == 0 {
+			if path := resolveTranscriptPath(filterSession); path != "" {
+				summary, firstTS, lastTS := extractTranscriptMeta(path)
+				oldest, newest := firstTS, lastTS
+				if oldest.IsZero() {
+					oldest = time.Now()
+					newest = oldest
+				}
+				s := timelineSession{
+					SessionID:     truncateSessionID(filterSession),
+					FullSessionID: filterSession,
+					Summary:       summary,
+					HasTranscript: true,
+					SessionType:   "conversation",
+					newestTime:    newest,
+					oldestTime:    oldest,
+					Duration:      formatSessionDuration(newest.Sub(oldest)),
+				}
+				groups = []timelineDayGroup{{
+					Label:    dayLabel(newest),
+					Sessions: []timelineSession{s},
+				}}
+			}
+		}
+		stats = filterTimelineBySession(filteredEvents, filterSession, groups)
 	}
 
 	title := "AI Timeline"
