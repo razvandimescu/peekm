@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -105,6 +108,7 @@ var (
 	memoryPartialTmpl      *template.Template
 	transcriptTmpl         *template.Template
 	transcriptPartialTmpl  *template.Template
+	sharedViewTmpl         *template.Template
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
 	globalEventBuffer = newEventBuffer(50)
@@ -114,7 +118,85 @@ var (
 
 	// Persistent event log (JSONL file for session history)
 	globalEventLog *eventLog
+
+	// LAN share store (in-memory, dies on restart)
+	globalShareStore *shareStore
 )
+
+// shareEntry represents one active LAN share
+type shareEntry struct {
+	Token     string
+	FilePath  string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+// shareStore maintains active LAN shares keyed by token
+type shareStore struct {
+	mu      sync.RWMutex
+	entries map[string]*shareEntry
+}
+
+func newShareStore() *shareStore {
+	return &shareStore{entries: make(map[string]*shareEntry)}
+}
+
+func generateToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("failed to generate share token: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.entries {
+		if e.FilePath == filePath && time.Now().Before(e.ExpiresAt) {
+			return e, true
+		}
+	}
+	return nil, false
+}
+
+func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
+	if existing, ok := s.findByPath(filePath); ok {
+		return existing
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := &shareEntry{
+		Token:     generateToken(),
+		FilePath:  filePath,
+		ExpiresAt: time.Now().Add(ttl),
+		CreatedAt: time.Now(),
+	}
+	s.entries[entry.Token] = entry
+	return entry
+}
+
+func (s *shareStore) get(token string) (*shareEntry, bool) {
+	s.mu.RLock()
+	entry, ok := s.entries[token]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		s.mu.Lock()
+		delete(s.entries, token)
+		s.mu.Unlock()
+		return nil, false
+	}
+	return entry, true
+}
+
+func (s *shareStore) revoke(token string) {
+	s.mu.Lock()
+	delete(s.entries, token)
+	s.mu.Unlock()
+}
 
 // watcherManager manages file watching with proper cleanup
 type watcherManager struct {
@@ -734,24 +816,231 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// localOnly rejects requests from non-localhost addresses
+func localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if host != "127.0.0.1" && host != "::1" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+var lanIP string
+var lanIPOnce sync.Once
+
+func detectLANIP() string {
+	lanIPOnce.Do(func() {
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			return
+		}
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+					lanIP = ipnet.IP.String()
+					return
+				}
+			}
+		}
+	})
+	return lanIP
+}
+
+func buildShareURL(token string) string {
+	host := detectLANIP()
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%d/s/%s", host, *port, token)
+}
+
+type shareResponse struct {
+	Active    bool   `json:"active"`
+	Token     string `json:"token,omitempty"`
+	URL       string `json:"url,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+func newShareResponse(entry *shareEntry) shareResponse {
+	return shareResponse{
+		Active:    true,
+		Token:     entry.Token,
+		URL:       buildShareURL(entry.Token),
+		ExpiresAt: entry.ExpiresAt.Format(time.RFC3339),
+	}
+}
+
+func cleanInputPath(raw string) string {
+	return resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(raw), "/")))
+}
+
+// handleShare dispatches GET (status), POST (create), DELETE (revoke) for LAN sharing
+func handleShare(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleShareStatus(w, r)
+	case http.MethodPost:
+		withCSRFCheck(handleShareCreate).ServeHTTP(w, r)
+	case http.MethodDelete:
+		withCSRFCheck(handleShareRevoke).ServeHTTP(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleShareCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	absPath, err := validateAndResolvePath(cleanInputPath(req.Path))
+	if err != nil || !isWhitelistedFile(absPath) {
+		http.Error(w, "file not found or not accessible", http.StatusNotFound)
+		return
+	}
+	entry := globalShareStore.create(absPath, 1*time.Hour)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(newShareResponse(entry))
+}
+
+func handleShareRevoke(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	globalShareStore.revoke(req.Token)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleShareStatus(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	absPath, err := validateAndResolvePath(cleanInputPath(filePath))
+	if err != nil {
+		json.NewEncoder(w).Encode(shareResponse{})
+		return
+	}
+	found, ok := globalShareStore.findByPath(absPath)
+	if !ok {
+		json.NewEncoder(w).Encode(shareResponse{})
+		return
+	}
+	json.NewEncoder(w).Encode(newShareResponse(found))
+}
+
+// sharedViewData is used for rendering the shared file view
+type sharedViewData struct {
+	baseTemplateData
+	Content   template.HTML
+	Token     string
+	ExpiresAt string
+	FileName  string
+	FilePath  string // relative path for SSE event filtering
+	IsExpired bool
+}
+
+func serveSharedFile(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.URL.Path, "/s/")
+	if token == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	entry, ok := globalShareStore.get(token)
+	if !ok {
+		data := sharedViewData{
+			baseTemplateData: newBaseTemplateData(),
+			FileName:         "Expired Link",
+			IsExpired:        true,
+		}
+		var renderBuf bytes.Buffer
+		if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
+			http.Error(w, "This shared link has expired.", http.StatusGone)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusGone)
+		renderBuf.WriteTo(w)
+		return
+	}
+	content, err := os.ReadFile(entry.FilePath)
+	if err != nil {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	md := newMarkdownRenderer()
+	var buf bytes.Buffer
+	if err := md.Convert(content, &buf); err != nil {
+		http.Error(w, "render error", http.StatusInternalServerError)
+		return
+	}
+	// Content-only partial for SSE live reload
+	if isPartialRequest(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(buf.Bytes())
+		return
+	}
+	data := sharedViewData{
+		baseTemplateData: newBaseTemplateData(),
+		Content:          template.HTML(buf.String()),
+		Token:            token,
+		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
+		FileName:         filepath.Base(entry.FilePath),
+		FilePath:         entry.FilePath,
+	}
+	var renderBuf bytes.Buffer
+	if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	renderBuf.WriteTo(w)
+}
+
 // registerRoutes registers all HTTP routes
 func registerRoutes() {
-	http.HandleFunc("/", withRecovery(serveBrowser))
-	http.HandleFunc("/view/", withRecovery(serveFile))
-	http.HandleFunc("/navigate", withRecovery(withCSRFCheck(handleNavigate)))
-	http.HandleFunc("/delete", withRecovery(withCSRFCheck(handleDelete)))
-	http.HandleFunc("/raw/", withRecovery(serveRaw))
-	http.HandleFunc("/save", withRecovery(withCSRFCheck(handleSave)))
-	http.HandleFunc("/download", withRecovery(withCSRFCheck(handleDownload)))
+	// Local-only routes (owner's browser)
+	http.HandleFunc("/", localOnly(withRecovery(serveBrowser)))
+	http.HandleFunc("/view/", localOnly(withRecovery(serveFile)))
+	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
+	http.HandleFunc("/delete", localOnly(withRecovery(withCSRFCheck(handleDelete))))
+	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
+	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
+	http.HandleFunc("/download", localOnly(withRecovery(withCSRFCheck(handleDownload))))
+	http.HandleFunc("/tree-html", localOnly(withRecovery(serveTreeHTML)))
+	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
+	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
+	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
+
+	// Share management (local only; CSRF applied per-method inside handleShare)
+	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
+
+	// LAN-accessible routes (token-gated or non-sensitive)
+	http.HandleFunc("/s/", withRecovery(serveSharedFile))
 	http.HandleFunc("/events", withRecovery(serveSSE))
-	http.HandleFunc("/tree-html", withRecovery(serveTreeHTML))
-	http.HandleFunc("/timeline", withRecovery(serveTimeline))
-	http.HandleFunc("/memory", withRecovery(serveMemory))
-	http.HandleFunc("/transcript", withRecovery(serveTranscript))
 
 	// AI session tracking endpoint (always on unless --no-ai-tracking)
 	if !*disableHook {
-		http.HandleFunc("/hook/file-modified", withRecovery(handleClaudeHook))
+		http.HandleFunc("/hook/file-modified", localOnly(withRecovery(handleClaudeHook)))
 	}
 }
 
@@ -929,47 +1218,23 @@ func isWhitelistedFile(path string) bool {
 	return isMemoryFile(path)
 }
 
-func init() {
-	// Load CSS files
-	cssData, err := themeFS.ReadFile("theme/github-markdown.css")
+// mustReadThemeFile reads a file from themeFS or fatally logs
+func mustReadThemeFile(name string) string {
+	data, err := themeFS.ReadFile(name)
 	if err != nil {
-		log.Fatalf("Failed to load GitHub CSS: %v", err)
+		log.Fatalf("Failed to load %s: %v", name, err)
 	}
-	githubCSS = string(cssData)
+	return string(data)
+}
 
-	overridesData, err := themeFS.ReadFile("theme/theme-overrides.css")
-	if err != nil {
-		log.Fatalf("Failed to load theme overrides CSS: %v", err)
-	}
-	themeOverrides = string(overridesData)
-
-	// Load JavaScript files
-	themeManagerData, err := themeFS.ReadFile("theme/theme-manager.js")
-	if err != nil {
-		log.Fatalf("Failed to load theme manager JS: %v", err)
-	}
-	themeManagerJS = string(themeManagerData)
-
-	editorData, err := themeFS.ReadFile("theme/editor.js")
-	if err != nil {
-		log.Fatalf("Failed to load editor JS: %v", err)
-	}
-	editorJS = string(editorData)
-
-	navigationData, err := themeFS.ReadFile("theme/navigation.js")
-	if err != nil {
-		log.Fatalf("Failed to load navigation JS: %v", err)
-	}
-	navigationJS = string(navigationData)
-
-	// Load HTML templates with custom functions
-	funcMap := template.FuncMap{
+// templateFuncMap returns the shared template function map
+func templateFuncMap() template.FuncMap {
+	return template.FuncMap{
 		"formatISO": func(t time.Time) string {
 			return t.Format(time.RFC3339)
 		},
 		"formatTimeAgo": formatTimeAgo,
 		"pathEscape": func(s string) string {
-			// Escape each segment individually, preserving /
 			parts := strings.Split(s, "/")
 			for i, p := range parts {
 				parts[i] = url.PathEscape(p)
@@ -986,61 +1251,50 @@ func init() {
 			return ""
 		},
 	}
+}
 
-	// Load shared session info panel template
-	sessionInfoPanelHTML, err := themeFS.ReadFile("theme/session-info-panel.html")
-	if err != nil {
-		log.Fatalf("Failed to load session-info-panel template: %v", err)
-	}
+func init() {
+	githubCSS = mustReadThemeFile("theme/github-markdown.css")
+	themeOverrides = mustReadThemeFile("theme/theme-overrides.css")
+	themeManagerJS = mustReadThemeFile("theme/theme-manager.js")
+	editorJS = mustReadThemeFile("theme/editor.js")
+	navigationJS = mustReadThemeFile("theme/navigation.js")
 
-	fileBrowserHTML, err := themeFS.ReadFile("theme/file-browser.html")
-	if err != nil {
-		log.Fatalf("Failed to load file-browser template: %v", err)
-	}
-	// File-browser shell defines {{template "content" .}} — register the default content block
-	fileBrowserContentHTML, err := themeFS.ReadFile("theme/file-browser-partial.html")
-	if err != nil {
-		log.Fatalf("Failed to load file-browser-partial template: %v", err)
-	}
+	funcMap := templateFuncMap()
+	sessionInfoPanelHTML := mustReadThemeFile("theme/session-info-panel.html")
+	fileBrowserHTML := mustReadThemeFile("theme/file-browser.html")
+	fileBrowserContentHTML := mustReadThemeFile("theme/file-browser-partial.html")
 
-	// Full page: file-browser shell + file-browser content as "content" block + session panel
-	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	template.Must(fileBrowserTmpl.New("content").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
-	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(string(sessionInfoPanelHTML)))
+	// Full page: file-browser shell + content block + session panel
+	fileBrowserTmpl = template.Must(template.New("file-browser").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(fileBrowserTmpl.New("content").Funcs(funcMap).Parse(fileBrowserContentHTML))
+	fileBrowserTmpl = template.Must(fileBrowserTmpl.Parse(sessionInfoPanelHTML))
 
 	// SPA partial: standalone file-browser-partial + session panel
-	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(string(fileBrowserContentHTML)))
-	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(string(sessionInfoPanelHTML)))
+	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(fileBrowserContentHTML))
+	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(sessionInfoPanelHTML))
 
-	// Timeline templates: full uses file-browser shell with timeline partial as "content"
-	timelinePartialHTML, err := themeFS.ReadFile("theme/timeline-partial.html")
-	if err != nil {
-		log.Fatalf("Failed to load timeline-partial template: %v", err)
-	}
-	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(string(timelinePartialHTML)))
+	// Timeline
+	timelinePartialHTML := mustReadThemeFile("theme/timeline-partial.html")
+	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(timelinePartialHTML))
+	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(timelineTmpl.New("content").Funcs(funcMap).Parse(timelinePartialHTML))
 
-	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	template.Must(timelineTmpl.New("content").Funcs(funcMap).Parse(string(timelinePartialHTML)))
+	// Transcript
+	transcriptPartialHTML := mustReadThemeFile("theme/transcript-partial.html")
+	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(transcriptPartialHTML))
+	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(transcriptPartialHTML))
 
-	// Transcript templates: full uses file-browser shell with transcript partial as "content"
-	transcriptPartialHTML, err := themeFS.ReadFile("theme/transcript-partial.html")
-	if err != nil {
-		log.Fatalf("Failed to load transcript-partial template: %v", err)
-	}
-	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
+	// Memory
+	memoryPartialHTML := mustReadThemeFile("theme/memory-partial.html")
+	memoryPartialTmpl = template.Must(template.New("memory-partial").Funcs(funcMap).Parse(memoryPartialHTML))
+	memoryTmpl = template.Must(template.New("memory").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(memoryTmpl.New("content").Funcs(funcMap).Parse(memoryPartialHTML))
 
-	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(string(transcriptPartialHTML)))
-
-	// Memory templates: full uses file-browser shell with memory partial as "content"
-	memoryPartialHTML, err := themeFS.ReadFile("theme/memory-partial.html")
-	if err != nil {
-		log.Fatalf("Failed to load memory-partial template: %v", err)
-	}
-	memoryPartialTmpl = template.Must(template.New("memory-partial").Funcs(funcMap).Parse(string(memoryPartialHTML)))
-
-	memoryTmpl = template.Must(template.New("memory").Funcs(funcMap).Parse(string(fileBrowserHTML)))
-	template.Must(memoryTmpl.New("content").Funcs(funcMap).Parse(string(memoryPartialHTML)))
+	// Shared view (standalone, not using file-browser shell)
+	sharedViewHTML := mustReadThemeFile("theme/shared-view.html")
+	sharedViewTmpl = template.Must(template.New("shared-view").Funcs(funcMap).Parse(sharedViewHTML))
 }
 
 // runSetup handles the "peekm setup" subcommand
@@ -1708,6 +1962,8 @@ func main() {
 		initSessionTracking()
 	}
 
+	globalShareStore = newShareStore()
+
 	targetFile := resolveTarget()
 
 	// Collect markdown files
@@ -1727,8 +1983,8 @@ func main() {
 	// Register all routes
 	registerRoutes()
 
-	addr := fmt.Sprintf("localhost:%d", *port)
-	url := fmt.Sprintf("http://%s", addr)
+	addr := fmt.Sprintf("0.0.0.0:%d", *port)
+	url := fmt.Sprintf("http://localhost:%d", *port)
 
 	fullURL := buildStartupURL(url, targetFile)
 	fmt.Println("Press Ctrl+C to quit")

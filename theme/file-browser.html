@@ -1444,6 +1444,77 @@
         .file-sidebar.memory-mode {
             border-left: 2px solid var(--fgColor-done);
         }
+
+        /* LAN Share */
+        #share-btn.share-active {
+            background: var(--bgColor-accent-muted);
+            border-color: var(--borderColor-accent-emphasis);
+            color: var(--fgColor-accent);
+        }
+        .share-panel {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 8px;
+            padding: 12px;
+            min-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 100;
+            font-size: 13px;
+        }
+        .share-panel-url {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin: 8px 0;
+        }
+        .share-panel-url input {
+            flex: 1;
+            min-width: 0;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--fgColor-default);
+            text-overflow: ellipsis;
+            overflow: hidden;
+        }
+        .share-copy-btn {
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            color: var(--fgColor-muted);
+        }
+        .share-copy-btn:hover {
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+        }
+        .share-expiry-text {
+            color: var(--fgColor-muted);
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        .share-stop-btn {
+            background: var(--bgColor-danger-muted);
+            color: var(--fgColor-danger);
+            border: 1px solid var(--borderColor-danger-muted);
+            border-radius: 6px;
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+        }
+        .share-stop-btn:hover {
+            background: var(--bgColor-danger-emphasis);
+            color: var(--fgColor-onEmphasis);
+        }
     </style>
 </head>
 <body class="markdown-body">
@@ -1521,6 +1592,22 @@
 
         <div class="top-bar-right">
             <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">⬇️</button>
+            <div class="share-container" style="position: relative; display: inline-block;">
+                <button onclick="toggleShare()" id="share-btn" aria-label="Share on LAN" title="Share on LAN" aria-haspopup="true" aria-expanded="false" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5Z"/></svg>
+                </button>
+                <div class="share-panel" id="share-panel" style="display: none;">
+                    <div style="font-weight: 600; margin-bottom: 8px;">LAN Share</div>
+                    <div class="share-panel-url">
+                        <input type="text" id="share-url" readonly>
+                        <button onclick="copyShareURL()" class="share-copy-btn" title="Copy URL">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                        </button>
+                    </div>
+                    <div class="share-expiry-text">Expires: <span id="share-expiry"></span></div>
+                    <button class="share-stop-btn" onclick="stopSharing()">Stop Sharing</button>
+                </div>
+            </div>
             <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
             </a>
