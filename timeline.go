@@ -1,0 +1,599 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+func findGitRoot(startDir string) (string, error) {
+	dir := startDir
+	for {
+		if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not a git repository (or any parent up to /)")
+		}
+		dir = parent
+	}
+}
+
+// Timeline template data types
+
+type timelineTemplateData struct {
+	baseTemplateData
+	TreeHTML      template.HTML
+	Title         string
+	Subtitle      string
+	BrowsePath    string
+	Groups        []timelineDayGroup
+	FilterSession string // non-empty when filtered by session ID
+	SessionStats  *sessionFilterStats
+	RepoInfo      *repoInfo
+}
+
+type repoInfo struct {
+	Name   string // e.g. "peekm"
+	Branch string // e.g. "main"
+	Remote string // e.g. "github.com/razvandimescu/peekm"
+}
+
+type sessionFilterStats struct {
+	FullID        string
+	FileCount     int
+	EditCount     int
+	Duration      string
+	Tools         string // e.g. "Edit: 14, Write: 3"
+	HasTranscript bool
+}
+
+type timelineSession struct {
+	SessionID     string // truncated 8 chars
+	FullSessionID string
+	Summary       string // first user prompt (truncated)
+	Duration      string // e.g. "12m", "< 1s"
+	FileCount     int
+	EditCount     int
+	Tools         []string // unique tool names
+	HasTranscript bool
+	IsActive      bool   // newest event < 5min ago
+	SessionType   string // "edit" or "conversation"
+	Events        []timelineEntry
+	newestTime    time.Time
+	oldestTime    time.Time
+}
+
+type timelineDayGroup struct {
+	Label    string
+	Sessions []timelineSession
+}
+
+type timelineEntry struct {
+	FilePath   string // relative to browseDir (for display + view links)
+	AbsPath    string // absolute path (for copy button)
+	ToolName   string
+	TimeAgo    string
+	TimeISO    string
+	IsViewable bool      // true if file is in the markdown whitelist
+	EditCount  int       // 1 = single event, >1 = aggregated
+	PlanTitle  string    // non-empty for plan files (extracted from content)
+	oldestTime time.Time // unexported, used for time range computation
+	newestTime time.Time // unexported, used for time range computation
+}
+
+func dayLabel(t time.Time) string {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+	switch {
+	case !t.Before(today):
+		return "Today"
+	case !t.Before(yesterday):
+		return "Yesterday"
+	default:
+		return t.Format("Jan 2, 2006")
+	}
+}
+
+func formatSessionDuration(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return "< 1s"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+}
+
+type transcriptInfo struct {
+	hasTranscript bool
+	summary       string
+}
+
+func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
+	cache := make(map[string]transcriptInfo)
+	for _, evt := range events {
+		if evt.SessionID == "" {
+			continue
+		}
+		if _, checked := cache[evt.SessionID]; !checked {
+			path := resolveTranscriptPath(evt.SessionID)
+			cache[evt.SessionID] = transcriptInfo{
+				hasTranscript: path != "",
+				summary:       extractSessionSummary(path),
+			}
+		}
+	}
+	return cache
+}
+
+// discoverTranscriptSessions scans Claude transcript files for sessions
+// not already tracked via events.jsonl (i.e. conversation-only sessions).
+func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool) []timelineSession {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	encodedDir := strings.ReplaceAll(baseDir, "/", "-")
+	sessionsDir := filepath.Join(projectsDir, encodedDir)
+
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil
+	}
+
+	var sessions []timelineSession
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		sessionID := strings.TrimSuffix(entry.Name(), ".jsonl")
+		if knownSessionIDs[sessionID] {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		modTime := info.ModTime()
+		transcriptPath := filepath.Join(sessionsDir, entry.Name())
+		summary, firstTS, lastTS := extractTranscriptMeta(transcriptPath)
+		oldest, newest := modTime, modTime
+		if !firstTS.IsZero() {
+			oldest = firstTS
+		}
+		if !lastTS.IsZero() {
+			newest = lastTS
+		}
+
+		sessions = append(sessions, timelineSession{
+			SessionID:     truncateSessionID(sessionID),
+			FullSessionID: sessionID,
+			Summary:       summary,
+			HasTranscript: true,
+			SessionType:   "conversation",
+			newestTime:    newest,
+			oldestTime:    oldest,
+			Duration:      formatSessionDuration(newest.Sub(oldest)),
+		})
+	}
+	// Sort newest first for merge
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].newestTime.After(sessions[j].newestTime)
+	})
+	return sessions
+}
+
+func parseTranscriptTimestamp(raw json.RawMessage) (time.Time, bool) {
+	var ts struct {
+		Timestamp string `json:"timestamp"`
+	}
+	if json.Unmarshal(raw, &ts) != nil {
+		return time.Time{}, false
+	}
+	return parseTimestamp(ts.Timestamp)
+}
+
+// extractTranscriptMeta extracts summary, first timestamp, and last timestamp
+// from a transcript JSONL in a single pass.
+func extractTranscriptMeta(path string) (summary string, first, last time.Time) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	for i := 0; ; i++ {
+		var raw json.RawMessage
+		if dec.Decode(&raw) != nil {
+			break
+		}
+		if t, ok := parseTranscriptTimestamp(raw); ok {
+			if first.IsZero() {
+				first = t
+			}
+			last = t
+		}
+		if summary == "" && i < 50 {
+			summary = extractSummaryFromRaw(raw)
+		}
+	}
+	return
+}
+
+type sessionBuild struct {
+	session *timelineSession
+	files   map[string]bool
+	tools   map[string]bool
+}
+
+func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
+	sb.files[evt.FilePath] = true
+	sb.tools[evt.ToolName] = true
+	sb.session.EditCount++
+
+	if sb.session.newestTime.IsZero() || evt.Timestamp.After(sb.session.newestTime) {
+		sb.session.newestTime = evt.Timestamp
+	}
+	if sb.session.oldestTime.IsZero() || evt.Timestamp.Before(sb.session.oldestTime) {
+		sb.session.oldestTime = evt.Timestamp
+	}
+
+	if n := len(sb.session.Events); n > 0 {
+		prev := &sb.session.Events[n-1]
+		if prev.AbsPath == evt.FilePath && prev.ToolName == evt.ToolName {
+			prev.EditCount++
+			prev.oldestTime = evt.Timestamp
+			prev.TimeAgo = formatTimeRange(prev.newestTime, evt.Timestamp)
+			return
+		}
+	}
+
+	sb.session.Events = append(sb.session.Events, timelineEntry{
+		FilePath:   tildeRelPath(evt.FilePath, baseDir),
+		AbsPath:    evt.FilePath,
+		ToolName:   evt.ToolName,
+		TimeAgo:    formatTimeAgo(evt.Timestamp),
+		TimeISO:    evt.Timestamp.Format(time.RFC3339),
+		IsViewable: isWhitelistedFile(evt.FilePath),
+		EditCount:  1,
+		PlanTitle:  evt.PlanTitle,
+		newestTime: evt.Timestamp,
+		oldestTime: evt.Timestamp,
+	})
+}
+
+func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSession {
+	transcriptCache := buildTranscriptCache(events)
+
+	sessionMap := make(map[string]*sessionBuild)
+	var sessionOrder []string
+
+	for _, evt := range events {
+		sid := evt.SessionID
+		if sid == "" {
+			sid = "_unknown"
+		}
+		sb, exists := sessionMap[sid]
+		if !exists {
+			info := transcriptCache[sid]
+			sb = &sessionBuild{
+				session: &timelineSession{
+					SessionID:     truncateSessionID(sid),
+					FullSessionID: sid,
+					Summary:       info.summary,
+					HasTranscript: info.hasTranscript,
+					SessionType:   "edit",
+				},
+				files: make(map[string]bool),
+				tools: make(map[string]bool),
+			}
+			if sid == "_unknown" {
+				sb.session.SessionID = "unknown"
+				sb.session.FullSessionID = ""
+			}
+			sessionMap[sid] = sb
+			sessionOrder = append(sessionOrder, sid)
+		}
+		appendOrMergeEntry(sb, evt, baseDir)
+	}
+
+	sessions := make([]timelineSession, 0, len(sessionOrder))
+	for _, sid := range sessionOrder {
+		sb := sessionMap[sid]
+		s := sb.session
+		s.FileCount = len(sb.files)
+		s.Duration = formatSessionDuration(s.newestTime.Sub(s.oldestTime))
+
+		toolNames := make([]string, 0, len(sb.tools))
+		for t := range sb.tools {
+			toolNames = append(toolNames, t)
+		}
+		sort.Strings(toolNames)
+		s.Tools = toolNames
+
+		sessions = append(sessions, *s)
+	}
+	return sessions
+}
+
+func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
+	bucketMap := make(map[string]*timelineDayGroup)
+	var bucketOrder []string
+
+	for i := range sessions {
+		label := dayLabel(sessions[i].newestTime)
+		if _, exists := bucketMap[label]; !exists {
+			bucketMap[label] = &timelineDayGroup{Label: label}
+			bucketOrder = append(bucketOrder, label)
+		}
+		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
+	}
+
+	groups := make([]timelineDayGroup, 0, len(bucketOrder))
+	for _, label := range bucketOrder {
+		groups = append(groups, *bucketMap[label])
+	}
+	return groups
+}
+
+func markActiveSessions(groups []timelineDayGroup) {
+	now := time.Now()
+	for i := range groups {
+		for j := range groups[i].Sessions {
+			if now.Sub(groups[i].Sessions[j].newestTime) < 5*time.Minute {
+				groups[i].Sessions[j].IsActive = true
+			}
+		}
+	}
+}
+
+func buildSessionTimeline(events []SessionEvent, baseDir string, discoverConversations bool) []timelineDayGroup {
+	editSessions := groupEventsBySession(events, baseDir)
+
+	sessions := editSessions
+	if discoverConversations {
+		knownIDs := make(map[string]bool, len(editSessions))
+		for _, s := range editSessions {
+			if s.FullSessionID != "" {
+				knownIDs[s.FullSessionID] = true
+			}
+		}
+		convSessions := discoverTranscriptSessions(baseDir, knownIDs)
+		sessions = mergeSessionsByTime(editSessions, convSessions)
+	}
+
+	groups := assignSessionsToDays(sessions)
+	markActiveSessions(groups)
+	return groups
+}
+
+// mergeSessionsByTime interleaves two session slices by newestTime (newest first).
+func mergeSessionsByTime(a, b []timelineSession) []timelineSession {
+	if len(b) == 0 {
+		return a
+	}
+	merged := make([]timelineSession, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if !a[i].newestTime.Before(b[j].newestTime) {
+			merged = append(merged, a[i])
+			i++
+		} else {
+			merged = append(merged, b[j])
+			j++
+		}
+	}
+	merged = append(merged, a[i:]...)
+	merged = append(merged, b[j:]...)
+	return merged
+}
+
+func filterTimelineBySession(filteredEvents []SessionEvent, filterSession string, groups []timelineDayGroup) *sessionFilterStats {
+	stats := computeSessionStats(filteredEvents, filterSession)
+
+	// For conversation-only sessions (0 events), populate stats from discovered session
+	if stats.EditCount == 0 {
+		for _, g := range groups {
+			for _, s := range g.Sessions {
+				if s.FullSessionID == filterSession {
+					stats.HasTranscript = s.HasTranscript
+					stats.Duration = s.Duration
+				}
+			}
+		}
+	}
+	return stats
+}
+
+func serveTimeline(w http.ResponseWriter, r *http.Request) {
+	fileMutex.RLock()
+	currentBrowseDir := browseDir
+	fileMutex.RUnlock()
+
+	filterSession := r.URL.Query().Get("session")
+
+	var events []SessionEvent
+	if globalEventLog != nil {
+		events = globalEventLog.eventsForDir(currentBrowseDir)
+	}
+
+	var filteredEvents []SessionEvent
+	if filterSession != "" {
+		for _, evt := range events {
+			if evt.SessionID == filterSession {
+				filteredEvents = append(filteredEvents, evt)
+			}
+		}
+	} else {
+		filteredEvents = events
+	}
+
+	// Skip full transcript scanning when filtering by session
+	groups := buildSessionTimeline(filteredEvents, currentBrowseDir, filterSession == "")
+
+	var stats *sessionFilterStats
+	if filterSession != "" {
+		// If no edit sessions found, check if it's a conversation-only session
+		if len(filteredEvents) == 0 {
+			if path := resolveTranscriptPath(filterSession); path != "" {
+				summary, firstTS, lastTS := extractTranscriptMeta(path)
+				oldest, newest := firstTS, lastTS
+				if oldest.IsZero() {
+					oldest = time.Now()
+					newest = oldest
+				}
+				s := timelineSession{
+					SessionID:     truncateSessionID(filterSession),
+					FullSessionID: filterSession,
+					Summary:       summary,
+					HasTranscript: true,
+					SessionType:   "conversation",
+					newestTime:    newest,
+					oldestTime:    oldest,
+					Duration:      formatSessionDuration(newest.Sub(oldest)),
+				}
+				groups = []timelineDayGroup{{
+					Label:    dayLabel(newest),
+					Sessions: []timelineSession{s},
+				}}
+			}
+		}
+		stats = filterTimelineBySession(filteredEvents, filterSession, groups)
+	}
+
+	title := "AI Timeline"
+	subtitle := fmt.Sprintf("Session history for %s", currentBrowseDir)
+	if filterSession != "" {
+		title = fmt.Sprintf("Session %s", truncateSessionID(filterSession))
+		subtitle = ""
+	}
+
+	data := timelineTemplateData{
+		baseTemplateData: newBaseTemplateData(),
+		TreeHTML:         template.HTML(generateTreeHTML()),
+		Title:            title,
+		Subtitle:         subtitle,
+		BrowsePath:       currentBrowseDir,
+		Groups:           groups,
+		FilterSession:    filterSession,
+		SessionStats:     stats,
+		RepoInfo:         detectRepoInfo(currentBrowseDir),
+	}
+
+	renderTemplatePair(w, r, timelineTmpl, timelinePartialTmpl, data)
+}
+
+func computeSessionStats(events []SessionEvent, sessionID string) *sessionFilterStats {
+	if len(events) == 0 {
+		return &sessionFilterStats{FullID: sessionID}
+	}
+	files := make(map[string]bool)
+	tools := make(map[string]int)
+	var earliest, latest time.Time
+	for _, evt := range events {
+		files[evt.FilePath] = true
+		tools[evt.ToolName]++
+		if earliest.IsZero() || evt.Timestamp.Before(earliest) {
+			earliest = evt.Timestamp
+		}
+		if evt.Timestamp.After(latest) {
+			latest = evt.Timestamp
+		}
+	}
+
+	durStr := formatSessionDuration(latest.Sub(earliest))
+
+	// Format tool breakdown: "Edit: 14, Write: 3"
+	var toolNames []string
+	for t := range tools {
+		toolNames = append(toolNames, t)
+	}
+	sort.Strings(toolNames)
+	var toolParts []string
+	for _, t := range toolNames {
+		toolParts = append(toolParts, fmt.Sprintf("%s: %d", t, tools[t]))
+	}
+
+	return &sessionFilterStats{
+		FullID:        sessionID,
+		FileCount:     len(files),
+		EditCount:     len(events),
+		Duration:      durStr,
+		Tools:         strings.Join(toolParts, ", "),
+		HasTranscript: resolveTranscriptPath(sessionID) != "",
+	}
+}
+
+func detectRepoInfo(dir string) *repoInfo {
+	d, err := findGitRoot(dir)
+	if err != nil {
+		return nil
+	}
+
+	ri := &repoInfo{Name: filepath.Base(d)}
+
+	// Read current branch from .git/HEAD
+	if head, err := os.ReadFile(filepath.Join(d, ".git", "HEAD")); err == nil {
+		s := strings.TrimSpace(string(head))
+		if strings.HasPrefix(s, "ref: refs/heads/") {
+			ri.Branch = strings.TrimPrefix(s, "ref: refs/heads/")
+		}
+	}
+
+	// Read remote URL from git config
+	ri.Remote = parseGitOriginURL(filepath.Join(d, ".git", "config"))
+
+	return ri
+}
+
+func parseGitOriginURL(configPath string) string {
+	cfg, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(cfg), "\n")
+	inOrigin := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == `[remote "origin"]` {
+			inOrigin = true
+			continue
+		}
+		if inOrigin && strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		if inOrigin && strings.HasPrefix(trimmed, "url = ") {
+			remote := strings.TrimPrefix(trimmed, "url = ")
+			remote = strings.TrimSuffix(remote, ".git")
+			if strings.HasPrefix(remote, "git@") {
+				remote = strings.TrimPrefix(remote, "git@")
+				remote = strings.Replace(remote, ":", "/", 1)
+			} else if strings.HasPrefix(remote, "https://") {
+				remote = strings.TrimPrefix(remote, "https://")
+			}
+			return remote
+		}
+	}
+	return ""
+}
