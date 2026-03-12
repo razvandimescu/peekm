@@ -15,6 +15,23 @@ function toggleTimelineSession(header) {
     events.style.display = expanded ? 'none' : '';
 }
 
+// Timeline filter toggle (All / Edits only)
+function setTimelineFilter(filter) {
+    var container = document.querySelector('.container');
+    if (!container) return;
+    container.classList.toggle('timeline-filter-edits', filter === 'edits');
+    document.querySelectorAll('.timeline-filter-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === filter);
+    });
+    sessionStorage.setItem('peekm_timeline_filter', filter);
+}
+
+// Restore timeline filter from sessionStorage on page load
+function restoreTimelineFilter() {
+    var filter = sessionStorage.getItem('peekm_timeline_filter');
+    if (filter === 'edits') setTimelineFilter('edits');
+}
+
 // Connect to SSE and maintain persistent connection
 function connectSSE() {
     if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
@@ -285,6 +302,11 @@ function reinitializeScripts() {
         // Initialize session info timestamps (if present)
         if (typeof initializeSessionInfo === 'function') {
             initializeSessionInfo();
+        }
+
+        // Restore timeline filter on SPA navigation
+        if (viewType === 'timeline') {
+            restoreTimelineFilter();
         }
 
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
