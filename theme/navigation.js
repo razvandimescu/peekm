@@ -343,8 +343,8 @@ window.addEventListener('popstate', function(e) {
     if (e.state && e.state.url) {
         navigate(e.state.url, false);
     } else {
-        // Fallback to current location
-        navigate(window.location.pathname, false);
+        // Fallback to current location (preserve query string)
+        navigate(window.location.pathname + window.location.search, false);
     }
 });
 
@@ -364,8 +364,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Restore tree state on initial page load
     restoreTreeState();
 
-    // Add initial history state
-    history.replaceState({ url: window.location.pathname }, '', window.location.pathname);
+    // Add initial history state (preserve query string for transcript, timeline filters)
+    var initialURL = window.location.pathname + window.location.search;
+    history.replaceState({ url: initialURL }, '', initialURL);
 
     console.log('[SPA] Initialization complete');
 });

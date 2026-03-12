@@ -41,9 +41,12 @@
                             <span class="transcript-tool-icon">{{toolIcon .ToolName}}</span>
                             {{if .ToolServer}}<span class="transcript-tool-server">{{.ToolServer}}/</span>{{end}}
                             <span class="transcript-tool-name">{{.ToolDisplayName}}</span>
+                            {{if .ToolSummary}}<span class="transcript-tool-summary">{{.ToolSummary}}</span>{{end}}
                         </summary>
+                        {{if not .ToolSummary}}
                         {{if .ToolInputHTML}}
                         <div class="transcript-tool-structured">{{.ToolInputHTML}}</div>
+                        {{end}}
                         {{end}}
                         {{if .ToolInput}}
                         <details class="transcript-tool-raw">

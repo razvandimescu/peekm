@@ -774,6 +774,13 @@ a.session-filter-transcript:hover {
     font-weight: 600;
     color: var(--fgColor-accent);
 }
+.transcript-tool-summary {
+    margin-left: 8px;
+    font-size: 0.85em;
+    color: var(--fgColor-muted);
+    font-family: var(--font-mono);
+    white-space: pre-line;
+}
 
 /* Structured tool input */
 .transcript-tool-structured {

@@ -54,6 +54,7 @@ type contentBlock struct {
 	Result          *contentBlock // paired tool_result (nil if unpaired)
 	ToolDisplayName string        // humanized name
 	ToolServer      string        // MCP server prefix
+	ToolSummary     string        // short preview for collapsed summary line
 	ToolInputHTML   template.HTML // structured rendering
 	ItemCount       int           // for context_summary
 	Images          []imageData   // for tool_result blocks containing images
@@ -411,14 +412,21 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 			}
 		case "tool_use":
 			displayName, server := humanizeToolName(peek.Name)
+			inputMap := parseToolInput(peek.Input)
+			summary := toolSummaryFromMap(peek.Name, inputMap)
+			var structuredHTML template.HTML
+			if summary == "" {
+				structuredHTML = formatStructuredFromMap(peek.Name, inputMap)
+			}
 			blocks = append(blocks, contentBlock{
 				Type:            "tool_use",
 				ToolName:        peek.Name,
-				ToolInput:       formatToolInput(peek.Input),
+				ToolInput:       formatToolInputFromMap(inputMap, peek.Input),
 				ToolID:          peek.ID,
 				ToolDisplayName: displayName,
 				ToolServer:      server,
-				ToolInputHTML:   formatStructuredToolInput(peek.Name, peek.Input),
+				ToolSummary:     summary,
+				ToolInputHTML:   structuredHTML,
 			})
 		case "tool_result":
 			text, images := extractToolResultContent(peek.Content)
@@ -446,18 +454,26 @@ func renderMarkdownToHTML(md goldmark.Markdown, text string) template.HTML {
 	return template.HTML(buf.String())
 }
 
-// formatToolInput pretty-prints tool input JSON, truncated to a reasonable size
-func formatToolInput(input json.RawMessage) string {
+// parseToolInput unmarshals tool input JSON once for reuse across summary/structured/raw formatters.
+func parseToolInput(input json.RawMessage) map[string]interface{} {
 	if len(input) == 0 {
-		return ""
+		return nil
 	}
-	var v interface{}
-	if err := json.Unmarshal(input, &v); err != nil {
-		return truncateString(string(input), 2000)
+	var m map[string]interface{}
+	if json.Unmarshal(input, &m) != nil {
+		return nil
 	}
-	pretty, err := json.MarshalIndent(v, "", "  ")
+	return m
+}
+
+// formatToolInputFromMap pretty-prints tool input JSON, truncated to a reasonable size.
+func formatToolInputFromMap(m map[string]interface{}, raw json.RawMessage) string {
+	if m == nil {
+		return truncateString(string(raw), 2000)
+	}
+	pretty, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return truncateString(string(input), 2000)
+		return truncateString(string(raw), 2000)
 	}
 	return truncateString(string(pretty), 2000)
 }
@@ -519,14 +535,10 @@ func toolInputStr(m map[string]interface{}, key string) string {
 // and the risk of forgetting to escape in HTML-building helpers.
 var esc = template.HTMLEscapeString
 
-// formatStructuredToolInput returns a structured HTML rendering for known tools.
+// formatStructuredFromMap returns a structured HTML rendering for known tools.
 // Returns empty HTML for unknown tools (template falls back to raw JSON).
-func formatStructuredToolInput(toolName string, input json.RawMessage) template.HTML {
-	if len(input) == 0 {
-		return ""
-	}
-	var m map[string]interface{}
-	if json.Unmarshal(input, &m) != nil {
+func formatStructuredFromMap(toolName string, m map[string]interface{}) template.HTML {
+	if m == nil {
 		return ""
 	}
 	switch toolName {
@@ -548,6 +560,50 @@ func formatStructuredToolInput(toolName string, input json.RawMessage) template.
 		return formatMiscToolInput(toolName, m)
 	}
 	return ""
+}
+
+// toolSummaryFromMap returns a short plain-text preview for the tool call summary line.
+func toolSummaryFromMap(toolName string, m map[string]interface{}) string {
+	if m == nil {
+		return ""
+	}
+	switch toolName {
+	case "Bash":
+		return bashSummary(m)
+	case "Read", "Edit", "Write":
+		return toolInputStr(m, "file_path")
+	case "Grep":
+		return grepSummary(m)
+	case "Glob":
+		return toolInputStr(m, "pattern")
+	case "Agent":
+		return toolInputStr(m, "description")
+	case "WebSearch":
+		return toolInputStr(m, "query")
+	case "WebFetch":
+		return truncateString(toolInputStr(m, "url"), 80)
+	case "TaskCreate":
+		return toolInputStr(m, "subject")
+	case "NotebookEdit":
+		return toolInputStr(m, "notebook_path")
+	}
+	return ""
+}
+
+func bashSummary(m map[string]interface{}) string {
+	cmd := truncateString(toolInputStr(m, "command"), 80)
+	if desc := toolInputStr(m, "description"); desc != "" {
+		return desc + "\n$ " + cmd
+	}
+	return "$ " + cmd
+}
+
+func grepSummary(m map[string]interface{}) string {
+	s := "/" + toolInputStr(m, "pattern") + "/"
+	if p := toolInputStr(m, "path"); p != "" {
+		s += " in " + filepath.Base(p)
+	}
+	return s
 }
 
 func formatBashInput(m map[string]interface{}) template.HTML {
