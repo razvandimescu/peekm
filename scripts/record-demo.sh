@@ -395,7 +395,7 @@ log "Created demo memory files for Memory Browser"
 
 # --------------- Step 2: Start peekm ---------------
 log "Starting peekm on port $PORT..."
-"$PEEKM_BIN" -port "$PORT" -browser=false "$DEMO_DIR" &
+"$PEEKM_BIN" -port "$PORT" -browser=false -demo "$DEMO_DIR" &
 PEEKM_PID=$!
 sleep 1
 
@@ -542,13 +542,19 @@ sleep 0.5
 show_caption "AI-modified file with session metadata"
 sleep 2
 
-# Scene 4: LAN sharing — click share button, show share panel
-log "Scene 4: Sharing file on LAN..."
+# Scene 4: Two-tier sharing — LAN then public
+log "Scene 4: Sharing file (LAN + public)..."
 hide_caption
 run_js "toggleShare()"
 sleep 0.5
 show_caption "Share on your local network"
-sleep 2.5
+sleep 1.3
+
+# Click "Make public" — triggers mock tunnel via --demo flag
+run_js "makeSharePublic()"
+sleep 0.8
+show_caption "...or make it public with one click"
+sleep 1.5
 
 # Close share panel before moving on
 run_js "setSharePanelOpen(false)"
@@ -573,11 +579,11 @@ hide_caption
 run_js "setTimelineFilter('edits')"
 sleep 0.3
 show_caption "Filter: Edits only"
-sleep 1.5
+sleep 1
 run_js "setTimelineFilter('all')"
 sleep 0.3
 show_caption "Filter: All sessions"
-sleep 1.5
+sleep 1
 
 # Scene 7: Open transcript viewer
 log "Scene 7: Opening transcript viewer..."

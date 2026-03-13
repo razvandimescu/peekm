@@ -1004,8 +1004,31 @@ function setSharePanelOpen(open) {
 }
 
 function updateSharePanel(data) {
-    document.getElementById('share-url').value = data.url;
-    document.getElementById('share-expiry').textContent = new Date(data.expires_at).toLocaleTimeString();
+    var panel = document.getElementById('share-panel');
+    panel.dataset.token = data.token;
+    document.getElementById('share-lan-url').value = data.url;
+    var publicSection = document.getElementById('share-public-section');
+    var makePublicBtn = document.getElementById('share-make-public-btn');
+    if (data.public_url) {
+        document.getElementById('share-public-url').value = data.public_url;
+        publicSection.style.display = 'block';
+        makePublicBtn.style.display = 'none';
+    } else {
+        publicSection.style.display = 'none';
+        makePublicBtn.style.display = 'block';
+        makePublicBtn.disabled = false;
+        makePublicBtn.textContent = 'Make public';
+    }
+    var remaining = new Date(data.expires_at) - new Date();
+    var mins = Math.ceil(remaining / 60000);
+    var expiryEl = document.getElementById('share-expiry');
+    if (mins <= 0) {
+        expiryEl.textContent = 'Expired';
+    } else if (mins > 60) {
+        expiryEl.textContent = Math.floor(mins/60) + 'h ' + (mins%60) + 'm remaining';
+    } else {
+        expiryEl.textContent = mins + 'm remaining';
+    }
 }
 
 async function toggleShare() {
@@ -1020,6 +1043,7 @@ async function toggleShare() {
         showErrorToast('No file currently open');
         return;
     }
+    shareBtn.disabled = true;
     try {
         var resp = await fetch('/share', {
             method: 'POST',
@@ -1032,16 +1056,40 @@ async function toggleShare() {
         shareBtn.classList.add('share-active');
         setSharePanelOpen(true);
         await navigator.clipboard.writeText(data.url);
-        showToast('Share link copied to clipboard');
+        showToast('LAN share link copied');
     } catch (err) {
         showErrorToast('Failed to create share: ' + err.message);
+    } finally {
+        shareBtn.disabled = false;
+    }
+}
+
+async function makeSharePublic() {
+    var btn = document.getElementById('share-make-public-btn');
+    var token = document.getElementById('share-panel').dataset.token;
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    try {
+        var resp = await fetch('/share/public', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        var data = await resp.json();
+        updateSharePanel(data);
+        await navigator.clipboard.writeText(data.public_url);
+        showToast('Public link copied');
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Make public';
+        showErrorToast('Failed to make public: ' + err.message);
     }
 }
 
 async function stopSharing() {
     var shareBtn = document.getElementById('share-btn');
-    var url = document.getElementById('share-url').value;
-    var token = url.split('/s/').pop();
+    var token = document.getElementById('share-panel').dataset.token;
     try {
         await fetch('/share', {
             method: 'DELETE',
@@ -1056,8 +1104,8 @@ async function stopSharing() {
     }
 }
 
-function copyShareURL() {
-    var url = document.getElementById('share-url').value;
+function copyShareURL(inputId) {
+    var url = document.getElementById(inputId).value;
     navigator.clipboard.writeText(url).then(function() { showToast('URL copied'); });
 }
 

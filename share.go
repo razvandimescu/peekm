@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -17,7 +18,7 @@ import (
 	"time"
 )
 
-// shareEntry represents one active LAN share
+// shareEntry represents one active share
 type shareEntry struct {
 	Token     string
 	FilePath  string
@@ -25,14 +26,18 @@ type shareEntry struct {
 	CreatedAt time.Time
 }
 
-// shareStore maintains active LAN shares keyed by token
+// shareStore maintains active shares keyed by token
 type shareStore struct {
 	mu      sync.RWMutex
 	entries map[string]*shareEntry
+	tunnels map[string]context.CancelFunc // token → cancel
 }
 
 func newShareStore() *shareStore {
-	return &shareStore{entries: make(map[string]*shareEntry)}
+	return &shareStore{
+		entries: make(map[string]*shareEntry),
+		tunnels: make(map[string]context.CancelFunc),
+	}
 }
 
 func generateToken() string {
@@ -55,11 +60,13 @@ func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
 }
 
 func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
-	if existing, ok := s.findByPath(filePath); ok {
-		return existing
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.FilePath == filePath && time.Now().Before(e.ExpiresAt) {
+			return e
+		}
+	}
 	entry := &shareEntry{
 		Token:     generateToken(),
 		FilePath:  filePath,
@@ -78,6 +85,7 @@ func (s *shareStore) get(token string) (*shareEntry, bool) {
 		return nil, false
 	}
 	if time.Now().After(entry.ExpiresAt) {
+		s.cancelTunnel(token)
 		s.mu.Lock()
 		delete(s.entries, token)
 		s.mu.Unlock()
@@ -87,8 +95,58 @@ func (s *shareStore) get(token string) (*shareEntry, bool) {
 }
 
 func (s *shareStore) revoke(token string) {
+	s.cancelTunnel(token)
 	s.mu.Lock()
 	delete(s.entries, token)
+	s.mu.Unlock()
+}
+
+func (s *shareStore) startTunnelForToken(token string) {
+	s.mu.Lock()
+	if _, exists := s.tunnels[token]; exists {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.tunnels[token] = cancel
+	s.mu.Unlock()
+	go startTunnel(ctx, token, *port)
+}
+
+func (s *shareStore) fakeTunnelForToken(token string) {
+	s.mu.Lock()
+	s.tunnels[token] = func() {} // no-op cancel
+	s.mu.Unlock()
+}
+
+func (s *shareStore) hasTunnel(token string) bool {
+	s.mu.RLock()
+	_, exists := s.tunnels[token]
+	s.mu.RUnlock()
+	return exists
+}
+
+func (s *shareStore) reapExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for token, entry := range s.entries {
+		if now.After(entry.ExpiresAt) {
+			if cancel, ok := s.tunnels[token]; ok {
+				cancel()
+				delete(s.tunnels, token)
+			}
+			delete(s.entries, token)
+		}
+	}
+}
+
+func (s *shareStore) cancelTunnel(token string) {
+	s.mu.Lock()
+	if cancel, ok := s.tunnels[token]; ok {
+		cancel()
+		delete(s.tunnels, token)
+	}
 	s.mu.Unlock()
 }
 
@@ -132,16 +190,21 @@ type shareResponse struct {
 	Active    bool   `json:"active"`
 	Token     string `json:"token,omitempty"`
 	URL       string `json:"url,omitempty"`
+	PublicURL string `json:"public_url,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 func newShareResponse(entry *shareEntry) shareResponse {
-	return shareResponse{
+	resp := shareResponse{
 		Active:    true,
 		Token:     entry.Token,
 		URL:       buildShareURL(entry.Token),
 		ExpiresAt: entry.ExpiresAt.Format(time.RFC3339),
 	}
+	if globalShareStore.hasTunnel(entry.Token) {
+		resp.PublicURL = fmt.Sprintf("https://%s/%s", relayHost, entry.Token)
+	}
+	return resp
 }
 
 func cleanInputPath(raw string) string {
@@ -192,6 +255,28 @@ func handleShareRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func handleShareMakePublic(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	entry, ok := globalShareStore.get(req.Token)
+	if !ok {
+		http.Error(w, "share not found", http.StatusNotFound)
+		return
+	}
+	if *demoMode {
+		globalShareStore.fakeTunnelForToken(entry.Token)
+	} else {
+		globalShareStore.startTunnelForToken(entry.Token)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(newShareResponse(entry))
+}
+
 func handleShareStatus(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -221,6 +306,7 @@ type sharedViewData struct {
 	FileName  string
 	FilePath  string // relative path for SSE event filtering
 	IsExpired bool
+	IsTunnel  bool // true when served via tunnel (suppresses SSE)
 }
 
 func serveSharedFile(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +356,7 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
 		FileName:         filepath.Base(entry.FilePath),
 		FilePath:         entry.FilePath,
+		IsTunnel:         r.Header.Get("X-Tunnel") == "true",
 	}
 	var renderBuf bytes.Buffer
 	if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {

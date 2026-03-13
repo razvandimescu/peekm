@@ -10,7 +10,7 @@ See what AI coding agents do across all your projects.
 
 AI coding agents run dozens of operations per session — but you only see the final diff. peekm watches all your projects in real time and shows you every session, every file change, and every conversation. It runs as a local web UI backed by a single binary, with a markdown viewer built in for reading docs along the way.
 
-**All data stays local. Nothing leaves your machine.**
+**All data stays local by default.** Public sharing is opt-in and tunnels through a relay — no accounts, no sign-up.
 
 ```bash
 npm i -g @peekm/peekm               # install
@@ -27,7 +27,7 @@ Or try without installing: `npx @peekm/peekm .`
 - **Timeline** — every AI session across all projects: file edits, conversations, research, debugging. Grouped by day with session duration, tool breakdown, and All/Edits-only filter
 - **Transcript viewer** — read the full AI conversation for any session
 - **Memory browser** — cross-project dashboard of Claude Code's learned context (`~/.claude/projects/*/memory/`)
-- **LAN sharing** — share a rendered markdown file on your local network with one click. Token-scoped, read-only, live-reloading
+- **Sharing** — share a rendered markdown file with one click. LAN by default (token-scoped URL on your local network) or public via `share.peekm.dev` (opt-in, HTTPS, 1-hour TTL, auto-expires)
 - **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
 - **Toast notifications** — appear the instant AI modifies a file, click to navigate
 - **Session info panel** — per-file dropdown showing session ID, tool, permission mode, timestamp
@@ -49,7 +49,7 @@ Or try without installing: `npx @peekm/peekm .`
 | **Visual UI** | — | VS Code extension | — | Static HTML | Web UI with tree view |
 | **Session correlation** | — | Git notes | — | File-based | Per-file session panel |
 | **Persistent history** | Git log | Git notes | Audit log | JSON files | JSONL timeline |
-| **LAN sharing** | — | — | — | — | Token-scoped, live reload |
+| **Sharing** | — | — | — | — | LAN + public tunnel (opt-in) |
 | **Zero config** | Yes | Extension install | CLI setup | Post-hoc script | Yes (auto-detects Claude Code) |
 | **Free / OSS** | Yes | Freemium | Free | Free | Free / MIT |
 
@@ -107,7 +107,10 @@ peekm -browser=false .  # don't open browser
 
 Setup is idempotent and non-destructive. Creates `~/.claude/peekm-hook.sh` and adds PostToolUse hooks to `~/.claude/settings.json`.
 
-**LAN sharing** — when viewing a file, click the share button in the top bar. A token-scoped URL is generated and copied to your clipboard. Recipients see a read-only rendered view with live reload.
+**Sharing** — when viewing a file, click the share button in the top bar.
+
+- **LAN** (default): a token-scoped URL on your local network is generated and copied to your clipboard. Recipients see a read-only rendered view with live reload.
+- **Public** (opt-in): click "Make public" to tunnel through `share.peekm.dev`. This gives you an HTTPS URL anyone can open. The link expires after 1 hour. No account or sign-up required. Content transits through the relay while the tunnel is active.
 
 ## Ignoring Directories
 
@@ -128,7 +131,7 @@ _site
 2. **Discover** — scans transcript files to find all sessions, including conversation-only
 3. **Watch** — file changes via [fsnotify](https://github.com/fsnotify/fsnotify)
 4. **Notify** — SSE with event replay pushes changes to the browser
-5. **Share** — token-scoped URLs expose single files on the LAN (read-only)
+5. **Share** — token-scoped URLs expose a single file on the LAN (read-only), with optional public tunneling via relay
 6. **Parse** — markdown to HTML via [goldmark](https://github.com/yuin/goldmark)
 7. **Serve** — local HTTP server with graceful shutdown
 
@@ -151,6 +154,7 @@ MIT — see [LICENSE](LICENSE).
 - [goldmark](https://github.com/yuin/goldmark) — Markdown parser
 - [fsnotify](https://github.com/fsnotify/fsnotify) — File watching
 - [chroma](https://github.com/alecthomas/chroma) — Syntax highlighting
+- [remotedialer](https://github.com/rancher/remotedialer) — WebSocket tunneling (public sharing)
 
 ## Related
 

@@ -71,6 +71,7 @@ var (
 	showVersion = flag.Bool("version", false, "Show version information")
 	showIgnored = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
 	disableHook = flag.Bool("no-ai-tracking", false, "Disable AI session tracking endpoint")
+	demoMode    = flag.Bool("demo", false, "Demo mode (fake tunnel for public sharing)")
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
 	clients      = make(map[chan string]bool)
@@ -665,6 +666,7 @@ func registerRoutes() {
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
+	http.HandleFunc("/share/public", localOnly(withRecovery(withCSRFCheck(handleShareMakePublic))))
 
 	// LAN-accessible routes (token-gated or non-sensitive)
 	http.HandleFunc("/s/", withRecovery(serveSharedFile))
@@ -1133,6 +1135,11 @@ func main() {
 	}
 
 	globalShareStore = newShareStore()
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			globalShareStore.reapExpired()
+		}
+	}()
 
 	targetFile := resolveTarget()
 
@@ -1468,7 +1475,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absFilePath := resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(req.Path), "/")))
+	absFilePath := cleanInputPath(req.Path)
 
 	filePath, err := validateAndResolvePath(absFilePath)
 	if err != nil {
