@@ -4,7 +4,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-See what AI coding agents do across all your projects.
+**[peekm.dev](https://peekm.dev)** — See what AI coding agents do across all your projects.
 
 ![peekm demo](assets/hero-demo.gif)
 
