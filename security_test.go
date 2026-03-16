@@ -340,19 +340,36 @@ func TestCollectMarkdownFiles_EmptyDirectory(t *testing.T) {
 	}
 }
 
-// TestCollectMarkdownFiles_OnlyNonMarkdown tests non-.md files are ignored
+// TestCollectMarkdownFiles_OnlyNonMarkdown tests unsupported file types are ignored
 func TestCollectMarkdownFiles_OnlyNonMarkdown(t *testing.T) {
 	testDir := t.TempDir()
 
-	// Create non-markdown files
-	os.WriteFile(filepath.Join(testDir, "test.txt"), []byte("text"), 0644)
-	os.WriteFile(filepath.Join(testDir, "test.html"), []byte("html"), 0644)
+	// Create unsupported file types (not .md, .html, .htm, .svg, .txt)
 	os.WriteFile(filepath.Join(testDir, "test.go"), []byte("go"), 0644)
+	os.WriteFile(filepath.Join(testDir, "test.py"), []byte("python"), 0644)
+	os.WriteFile(filepath.Join(testDir, "test.jpg"), []byte("image"), 0644)
 
 	files := collectMarkdownFiles(testDir)
 
 	if len(files) != 0 {
-		t.Errorf("expected 0 markdown files, got %d: %v", len(files), files)
+		t.Errorf("expected 0 files, got %d: %v", len(files), files)
+	}
+}
+
+// TestCollectMarkdownFiles_ShareableTypes tests HTML/SVG/TXT files are collected
+func TestCollectMarkdownFiles_ShareableTypes(t *testing.T) {
+	testDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(testDir, "page.html"), []byte("<html>"), 0644)
+	os.WriteFile(filepath.Join(testDir, "icon.svg"), []byte("<svg>"), 0644)
+	os.WriteFile(filepath.Join(testDir, "notes.txt"), []byte("text"), 0644)
+	os.WriteFile(filepath.Join(testDir, "readme.md"), []byte("# Hi"), 0644)
+	os.WriteFile(filepath.Join(testDir, "skip.go"), []byte("go"), 0644)
+
+	files := collectMarkdownFiles(testDir)
+
+	if len(files) != 4 {
+		t.Errorf("expected 4 files (html+svg+txt+md), got %d: %v", len(files), files)
 	}
 }
 

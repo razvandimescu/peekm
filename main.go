@@ -149,6 +149,7 @@ type browserTemplateData struct {
 	BrowsePath     string
 	FilePath       string           // Relative path of displayed file (for edit/raw)
 	SessionData    *SessionMetadata // Claude Code session info for this file
+	IsPreview      bool             // true for HTML/SVG/TXT files (no edit mode)
 }
 
 // SessionMetadata contains complete Claude Code session information
@@ -659,6 +660,7 @@ func registerRoutes() {
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
 	http.HandleFunc("/download", localOnly(withRecovery(withCSRFCheck(handleDownload))))
+	http.HandleFunc("/preview-content/", localOnly(withRecovery(servePreviewContent)))
 	http.HandleFunc("/tree-html", localOnly(withRecovery(serveTreeHTML)))
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
@@ -1920,11 +1922,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 func serveFile(w http.ResponseWriter, r *http.Request) {
 	filePath := strings.TrimPrefix(r.URL.Path, "/view/")
 	filePath = strings.TrimPrefix(filePath, "/")
-
-	// Clean the path
 	filePath = filepath.Clean(filePath)
-
-	// Resolve to absolute path using browseDir
 	absFilePath := resolveFilePath(filePath)
 
 	if !isWhitelistedFile(absFilePath) {
@@ -1936,34 +1934,26 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
 
-	// Render the markdown file (with cache fallback for plan files)
-	var content []byte
-	var err error
-	if isPlanFile(absFilePath) {
-		content, err = readPlanFile(absFilePath)
+	ext := strings.ToLower(filepath.Ext(absFilePath))
+	isPreview := shareableRawExts[ext]
+
+	var contentHTML template.HTML
+	if isPreview {
+		contentHTML = renderPreviewContent(absFilePath, filePath, ext)
 	} else {
-		content, err = os.ReadFile(absFilePath)
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	md := newMarkdownRenderer()
-
-	var buf bytes.Buffer
-	if err := md.Convert(content, &buf); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		var err error
+		contentHTML, err = renderMarkdownContent(absFilePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
-	// Generate tree HTML only for full page loads (not SPA navigation)
 	var treeHTML string
 	if !isPartialRequest(r) {
 		treeHTML = generateTreeHTML()
 	}
 
-	// Fetch session metadata for this file (if available)
 	var sessionData *SessionMetadata
 	if globalSessionStore != nil {
 		if metadata, found := globalSessionStore.get(absFilePath); found {
@@ -1976,19 +1966,18 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		Title:            filepath.Base(absFilePath),
 		Subtitle:         absFilePath,
 		TreeHTML:         template.HTML(treeHTML),
-		Content:          template.HTML(buf.String()),
+		Content:          contentHTML,
 		ShowBackButton:   true,
 		BrowsePath:       currentBrowseDir,
 		SessionData:      sessionData,
+		IsPreview:        isPreview,
 	}
 
-	// Set current file for watching
 	fileMutex.Lock()
 	oldFile := currentFile
 	currentFile = absFilePath
 	fileMutex.Unlock()
 
-	// Start watching the new file if it changed
 	if oldFile != absFilePath {
 		if err := fileWatcher.watch(absFilePath); err != nil {
 			log.Printf("Error watching file: %v", err)
@@ -1996,6 +1985,103 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderTemplate(w, r, data)
+}
+
+func renderMarkdownContent(absFilePath string) (template.HTML, error) {
+	var content []byte
+	var err error
+	if isPlanFile(absFilePath) {
+		content, err = readPlanFile(absFilePath)
+	} else {
+		content, err = os.ReadFile(absFilePath)
+	}
+	if err != nil {
+		return "", err
+	}
+	md := newMarkdownRenderer()
+	var buf bytes.Buffer
+	if err := md.Convert(content, &buf); err != nil {
+		return "", err
+	}
+	return template.HTML(buf.String()), nil
+}
+
+func renderPreviewContent(absPath, relPath, ext string) template.HTML {
+	escapedPath := pathEscapeSegments(relPath)
+	switch ext {
+	case ".html", ".htm":
+		return template.HTML(fmt.Sprintf(
+			`<iframe src="/preview-content/%s" style="width:100%%; height:calc(100vh - 200px); border:1px solid var(--borderColor-muted); border-radius:6px; background:white;"></iframe>`,
+			escapedPath))
+	case ".svg":
+		return template.HTML(fmt.Sprintf(
+			`<div style="text-align:center; padding:16px;"><img src="/preview-content/%s" style="max-width:100%%; max-height:calc(100vh - 200px);" alt="%s"></div>`,
+			escapedPath, esc(filepath.Base(absPath))))
+	case ".txt":
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return ""
+		}
+		return template.HTML(fmt.Sprintf(
+			`<pre style="white-space:pre-wrap; font-family:var(--font-mono); padding:16px; background:var(--bgColor-default); border-radius:6px; border:1px solid var(--borderColor-muted); overflow:auto; max-height:calc(100vh - 200px);">%s</pre>`,
+			esc(string(content))))
+	default:
+		return ""
+	}
+}
+
+// servePreviewContent serves HTML/SVG/TXT files and co-located assets for iframe embedding.
+func servePreviewContent(w http.ResponseWriter, r *http.Request) {
+	relPath := strings.TrimPrefix(r.URL.Path, "/preview-content/")
+	if relPath == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	cleaned := filepath.Clean(relPath)
+	absPath := resolveFilePath(cleaned)
+
+	validated, err := validateAndResolvePath(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Directory request: serve index.html (handles http.ServeFile's index.html redirect)
+	if info, statErr := os.Stat(validated); statErr == nil && info.IsDir() {
+		for _, idx := range []string{"index.html", "index.htm"} {
+			indexPath := filepath.Join(validated, idx)
+			if isWhitelistedFile(indexPath) {
+				http.ServeFile(w, r, indexPath)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
+
+	if isWhitelistedFile(validated) {
+		http.ServeFile(w, r, validated)
+		return
+	}
+
+	// Co-located assets: allowed extensions within browseDir
+	ext := strings.ToLower(filepath.Ext(validated))
+	if _, ok := allowedAssetExts[ext]; !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	fileMutex.RLock()
+	dir := browseDir
+	fileMutex.RUnlock()
+
+	if !isWithinDir(validated, dir) {
+		http.NotFound(w, r)
+		return
+	}
+
+	http.ServeFile(w, r, validated)
 }
 
 // parseIgnoreFile reads and parses .peekmignore file
@@ -2171,6 +2257,15 @@ func selectDefaultFile(files []string) string {
 	return mostRecent.Path
 }
 
+// isCollectableFile returns true for file types shown in the sidebar tree.
+func isCollectableFile(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".md") {
+		return true
+	}
+	return shareableRawExts[filepath.Ext(lower)]
+}
+
 func collectMarkdownFiles(rootDir string) []string {
 	customPatterns := getIgnorePatterns(rootDir)
 	if len(customPatterns) > 0 {
@@ -2255,7 +2350,7 @@ func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns [
 			}
 		}
 
-		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
+		if !info.IsDir() && isCollectableFile(info.Name()) {
 			*files = append(*files, remapPath(resolved, walkDir, path))
 		}
 

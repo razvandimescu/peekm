@@ -259,21 +259,18 @@ function reinitializeScripts() {
         // Update nav button active states
         updateNavButtons();
 
-        // Update download button visibility
+        // Update download button visibility (markdown only, not preview)
         const downloadBtn = document.getElementById('download-btn');
         if (downloadBtn) {
-            if (viewType === 'file') {
-                downloadBtn.style.display = 'inline-block';
-            } else {
-                downloadBtn.style.display = 'none';
-            }
+            downloadBtn.style.display = viewType === 'file' ? 'inline-block' : 'none';
         }
 
-        // Update share button visibility
+        // Update share button visibility (file + preview)
         var shareBtn = document.getElementById('share-btn');
         if (shareBtn) {
-            shareBtn.style.display = viewType === 'file' ? 'inline-block' : 'none';
-            if (viewType === 'file') {
+            var showShare = viewType === 'file' || viewType === 'preview';
+            shareBtn.style.display = showShare ? 'inline-block' : 'none';
+            if (showShare) {
                 checkShareStatus();
             } else {
                 setSharePanelOpen(false);

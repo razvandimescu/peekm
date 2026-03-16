@@ -31,8 +31,8 @@ Works with Claude Code today. More agents coming.
 
 **Also included:**
 
-- **Sharing** — share a rendered markdown file via LAN (default) or public URL via `share.peekm.dev` (opt-in, 1-hour TTL, no account)
-- **Markdown viewer** — VS Code-style sidebar, fuzzy search (Cmd/Ctrl+P), in-browser editing, syntax highlighting, light/dark/auto themes
+- **Sharing** — share any file (Markdown, HTML, SVG, TXT) via LAN or public URL via `share.peekm.dev` (opt-in, 1-hour TTL, no account). HTML shares include co-located assets (CSS, JS, images)
+- **File viewer** — VS Code-style sidebar with Markdown, HTML, SVG, and TXT support. Fuzzy search (Cmd/Ctrl+P), in-browser editing (Markdown), syntax highlighting, light/dark/auto themes
 - **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
 - **Persistent history** — events survive restarts via `~/.peekm/events.jsonl`
 
@@ -112,7 +112,7 @@ Claude Code (for AI tracking). macOS, Linux, or Windows. No runtime dependencies
 ## FAQ
 
 **Does peekm send my code anywhere?**
-No. Everything stays on your machine. Public sharing is opt-in and only shares a single rendered markdown file through a relay — your codebase is never exposed.
+No. Everything stays on your machine. Public sharing is opt-in and only shares the specific file (and its co-located assets for HTML) through a relay — your codebase is never exposed.
 
 **Why not just read the JSONL or git log?**
 You can. peekm adds session correlation (which changes belong to which AI conversation), real-time notifications, and a visual timeline that makes it practical to monitor multiple projects simultaneously.

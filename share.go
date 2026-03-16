@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -18,12 +19,52 @@ import (
 	"time"
 )
 
+// shareableRawExts are file types that can be shared directly (served as-is, no markdown rendering).
+var shareableRawExts = map[string]bool{
+	".html": true, ".htm": true, ".svg": true, ".txt": true,
+}
+
+// allowedAssetExts maps extensions to content types for share asset passthrough.
+// Only these file types can be served as assets alongside a shared HTML file.
+var allowedAssetExts = map[string]string{
+	".js":    "application/javascript",
+	".mjs":   "application/javascript",
+	".css":   "text/css",
+	".json":  "application/json",
+	".png":   "image/png",
+	".jpg":   "image/jpeg",
+	".jpeg":  "image/jpeg",
+	".gif":   "image/gif",
+	".svg":   "image/svg+xml",
+	".webp":  "image/webp",
+	".ico":   "image/x-icon",
+	".woff":  "font/woff",
+	".woff2": "font/woff2",
+	".ttf":   "font/ttf",
+	".map":   "application/json",
+	".wasm":  "application/wasm",
+}
+
+// isWithinDir checks if path is contained within baseDir after resolving symlinks.
+func isWithinDir(path, baseDir string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	resolvedBase, err := filepath.EvalSymlinks(baseDir)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(resolved, resolvedBase+string(filepath.Separator))
+}
+
 // shareEntry represents one active share
 type shareEntry struct {
-	Token     string
-	FilePath  string
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	Token           string
+	FilePath        string
+	ResolvedBaseDir string // cached filepath.EvalSymlinks(filepath.Dir(FilePath))
+	ExpiresAt       time.Time
+	CreatedAt       time.Time
 }
 
 // shareStore maintains active shares keyed by token
@@ -67,11 +108,13 @@ func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
 			return e
 		}
 	}
+	resolvedBase, _ := filepath.EvalSymlinks(filepath.Dir(filePath))
 	entry := &shareEntry{
-		Token:     generateToken(),
-		FilePath:  filePath,
-		ExpiresAt: time.Now().Add(ttl),
-		CreatedAt: time.Now(),
+		Token:           generateToken(),
+		FilePath:        filePath,
+		ResolvedBaseDir: resolvedBase,
+		ExpiresAt:       time.Now().Add(ttl),
+		CreatedAt:       time.Now(),
 	}
 	s.entries[entry.Token] = entry
 	return entry
@@ -225,6 +268,22 @@ func handleShare(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isShareableFile checks if a file can be shared: either whitelisted markdown or
+// an HTML/SVG/text file within the browse directory.
+func isShareableFile(absPath string) bool {
+	if isWhitelistedFile(absPath) {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if !shareableRawExts[ext] {
+		return false
+	}
+	fileMutex.RLock()
+	dir := browseDir
+	fileMutex.RUnlock()
+	return isWithinDir(absPath, dir)
+}
+
 func handleShareCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
@@ -234,7 +293,7 @@ func handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	absPath, err := validateAndResolvePath(cleanInputPath(req.Path))
-	if err != nil || !isWhitelistedFile(absPath) {
+	if err != nil || !isShareableFile(absPath) {
 		http.Error(w, "file not found or not accessible", http.StatusNotFound)
 		return
 	}
@@ -310,11 +369,19 @@ type sharedViewData struct {
 }
 
 func serveSharedFile(w http.ResponseWriter, r *http.Request) {
-	token := strings.TrimPrefix(r.URL.Path, "/s/")
+	path := strings.TrimPrefix(r.URL.Path, "/s/")
+	parts := strings.SplitN(path, "/", 2)
+	token := parts[0]
+	assetPath := ""
+	if len(parts) == 2 {
+		assetPath = parts[1]
+	}
+
 	if token == "" {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
 	entry, ok := globalShareStore.get(token)
 	if !ok {
 		data := sharedViewData{
@@ -332,6 +399,42 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 		renderBuf.WriteTo(w)
 		return
 	}
+
+	// Asset passthrough: /s/{token}/style.css
+	if assetPath != "" {
+		serveSharedAsset(w, r, entry, assetPath)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(entry.FilePath))
+
+	// HTML/SVG/text files: serve raw content (no peekm wrapper)
+	if shareableRawExts[ext] {
+		serveSharedRawFile(w, r, entry, ext)
+		return
+	}
+
+	// Markdown: render through goldmark with peekm shared-view template
+	serveSharedMarkdown(w, r, entry, token)
+}
+
+// serveSharedRawFile serves HTML/SVG/text files as-is (no peekm wrapper).
+func serveSharedRawFile(w http.ResponseWriter, r *http.Request, entry *shareEntry, ext string) {
+	// Redirect to trailing slash so relative URLs resolve correctly
+	if (ext == ".html" || ext == ".htm") && !strings.HasSuffix(r.URL.Path, "/") {
+		http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
+		return
+	}
+	ct := mime.TypeByExtension(ext)
+	if ct == "" {
+		ct = "text/plain; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	http.ServeFile(w, r, entry.FilePath)
+}
+
+// serveSharedMarkdown renders a markdown file through goldmark with the shared-view template.
+func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEntry, token string) {
 	content, err := os.ReadFile(entry.FilePath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
@@ -343,7 +446,6 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "render error", http.StatusInternalServerError)
 		return
 	}
-	// Content-only partial for SSE live reload
 	if isPartialRequest(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(buf.Bytes())
@@ -365,4 +467,41 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	renderBuf.WriteTo(w)
+}
+
+// serveSharedAsset serves a file co-located with a shared HTML file.
+// Security: validates path containment, extension allowlist, and symlink resolution.
+func serveSharedAsset(w http.ResponseWriter, r *http.Request, entry *shareEntry, assetPath string) {
+	cleaned := filepath.Clean(assetPath)
+
+	// Reject any traversal attempt
+	if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Resolve against the shared file's directory
+	fullPath := filepath.Join(filepath.Dir(entry.FilePath), cleaned)
+
+	// Resolve symlinks, then verify containment against cached base
+	resolved, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if entry.ResolvedBaseDir == "" || !strings.HasPrefix(resolved, entry.ResolvedBaseDir+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Check extension allowlist
+	ext := strings.ToLower(filepath.Ext(resolved))
+	contentType, allowed := allowedAssetExts[ext]
+	if !allowed {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	http.ServeFile(w, r, resolved)
 }

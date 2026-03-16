@@ -4,12 +4,12 @@
         <div class="tree sidebar-tree">{{.TreeHTML}}</div>
     {{else}}
         <div class="empty-sidebar">
-            <p>No markdown files found</p>
+            <p>No files found</p>
         </div>
     {{end}}
 </div>
 
-<main id="content" data-view="{{if .Content}}file{{else}}empty{{end}}" data-path="{{.BrowsePath}}" data-file="{{.FilePath}}" class="content-area">
+<main id="content" data-view="{{if .Content}}{{if .IsPreview}}preview{{else}}file{{end}}{{else}}empty{{end}}" data-path="{{.BrowsePath}}" data-file="{{.FilePath}}" class="content-area">
     <div class="container">
         {{if .ShowBackButton}}
         <div class="header-actions">
@@ -29,7 +29,9 @@
                     <span class="session-info-ai-badge">AI</span>
                 </button>
                 {{end}}
+                {{if not .IsPreview}}
                 <button class="edit-button" onclick="toggleEditMode()">✏️ Edit</button>
+                {{end}}
                 <button class="delete-button" onclick="confirmDelete()" title="Move this file to trash">🗑️ Delete File</button>
             </div>
         </div>
@@ -46,8 +48,8 @@
             {{.Content}}
         {{else}}
             <div class="empty-content">
-                <p>No markdown files found in this directory.</p>
-                <p>Create a <code>.md</code> file to get started.</p>
+                <p>No files found in this directory.</p>
+                <p>Supported types: Markdown, HTML, SVG, TXT</p>
             </div>
         {{end}}
     </div>
