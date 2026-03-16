@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>peekm — See what AI coding agents do across all your projects</title>
+    <meta name="description" content="Real-time AI session tracking for Claude Code. Timeline, transcripts, memory browser, and sharing — in a single binary.">
+    <meta property="og:title" content="peekm — AI coding agent observer">
+    <meta property="og:description" content="See what AI coding agents do across all your projects. Real-time timeline, transcripts, memory browser, and sharing.">
+    <meta property="og:image" content="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif">
+    <meta property="og:url" content="https://peekm.dev">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁</text></svg>">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --bg-surface: #151b23;
+            --bg-hover: #1c2333;
+            --fg: #f0f6fc;
+            --fg-muted: #9198a1;
+            --fg-accent: #4493f8;
+            --fg-success: #3fb950;
+            --fg-attention: #d29922;
+            --fg-done: #ab7df8;
+            --border: #3d444d;
+            --border-muted: #3d444db3;
+            --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            --max-width: 880px;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #ffffff;
+                --bg-surface: #f6f8fa;
+                --bg-hover: #eef1f5;
+                --fg: #1f2328;
+                --fg-muted: #59636e;
+                --fg-accent: #0969da;
+                --fg-success: #1a7f37;
+                --fg-attention: #9a6700;
+                --fg-done: #8250df;
+                --border: #d1d9e0;
+                --border-muted: #d1d9e0b3;
+            }
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- Layout --- */
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* --- Nav --- */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--bg);
+            border-bottom: 1px solid var(--border-muted);
+            backdrop-filter: blur(12px);
+            background: color-mix(in srgb, var(--bg) 85%, transparent);
+        }
+
+        nav .container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 56px;
+        }
+
+        .nav-brand {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--fg);
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .nav-links a {
+            font-size: 14px;
+            color: var(--fg-muted);
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+
+        .nav-links a:hover { color: var(--fg); }
+
+        .nav-github {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-github svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
+
+        /* --- Hero --- */
+        .hero {
+            padding: 80px 0 60px;
+            text-align: center;
+        }
+
+        .hero-badge {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(63, 185, 80, 0.12);
+            color: var(--fg-success);
+            border: 1px solid rgba(63, 185, 80, 0.2);
+            margin-bottom: 24px;
+        }
+
+        .hero h1 {
+            font-size: clamp(32px, 5vw, 52px);
+            font-weight: 800;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+            margin-bottom: 16px;
+        }
+
+        .hero h1 span {
+            background: linear-gradient(135deg, var(--fg-accent), var(--fg-done));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: clamp(16px, 2.5vw, 20px);
+            color: var(--fg-muted);
+            max-width: 600px;
+            margin: 0 auto 40px;
+            line-height: 1.5;
+        }
+
+        /* --- Install block --- */
+        .install-block {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 48px;
+        }
+
+        .install-cmd {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 20px;
+            font-family: var(--font-mono);
+            font-size: 15px;
+            max-width: 100%;
+        }
+
+        .install-cmd .prompt { color: var(--fg-muted); user-select: none; }
+        .install-cmd code { color: var(--fg-success); white-space: nowrap; }
+
+        .install-cmd button {
+            background: none;
+            border: none;
+            color: var(--fg-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: color 0.15s;
+            display: flex;
+            align-items: center;
+        }
+
+        .install-cmd button:hover { color: var(--fg); }
+
+        .install-alt {
+            font-size: 13px;
+            color: var(--fg-muted);
+        }
+
+        .install-alt code {
+            font-family: var(--font-mono);
+            background: var(--bg-surface);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* --- Demo --- */
+        .demo {
+            margin-bottom: 80px;
+        }
+
+        .demo img {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        @media (prefers-color-scheme: light) {
+            .demo img {
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            }
+        }
+
+        /* --- Features --- */
+        .features {
+            padding: 60px 0;
+        }
+
+        .features-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .features-header h2 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .features-header p {
+            color: var(--fg-muted);
+            font-size: 16px;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+
+        .feature-card {
+            padding: 24px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-muted);
+            border-radius: 10px;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border);
+            background: var(--bg-hover);
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        .feature-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .feature-card p {
+            font-size: 14px;
+            color: var(--fg-muted);
+            line-height: 1.5;
+        }
+
+        /* --- Comparison --- */
+        .comparison {
+            padding: 60px 0;
+        }
+
+        .comparison h2 {
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .comparison-table-wrapper {
+            overflow-x: auto;
+            border: 1px solid var(--border-muted);
+            border-radius: 10px;
+        }
+
+        .comparison table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .comparison th,
+        .comparison td {
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-muted);
+            white-space: nowrap;
+        }
+
+        .comparison th {
+            background: var(--bg-surface);
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--fg-muted);
+        }
+
+        .comparison th:last-child {
+            color: var(--fg-accent);
+        }
+
+        .comparison tr:last-child td { border-bottom: none; }
+
+        .comparison td:first-child {
+            font-weight: 500;
+        }
+
+        .comparison td:last-child {
+            color: var(--fg-success);
+            font-weight: 500;
+        }
+
+        .cell-empty { color: var(--fg-muted); opacity: 0.4; }
+
+        /* --- Install --- */
+        .install-section {
+            padding: 60px 0;
+        }
+
+        .install-section h2 {
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .install-methods {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .install-method {
+            padding: 20px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-muted);
+            border-radius: 10px;
+        }
+
+        .install-method h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--fg-muted);
+        }
+
+        .install-method pre {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--fg);
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+
+        /* --- CTA --- */
+        .cta {
+            padding: 80px 0;
+            text-align: center;
+        }
+
+        .cta h2 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .cta p {
+            color: var(--fg-muted);
+            font-size: 16px;
+            margin-bottom: 32px;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+
+        .btn-primary {
+            background: var(--fg-accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover { filter: brightness(1.15); }
+
+        .btn-secondary {
+            background: var(--bg-surface);
+            color: var(--fg);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover { background: var(--bg-hover); }
+
+        .btn svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        /* --- Footer --- */
+        footer {
+            padding: 32px 0;
+            border-top: 1px solid var(--border-muted);
+            text-align: center;
+            font-size: 13px;
+            color: var(--fg-muted);
+        }
+
+        footer a {
+            color: var(--fg-muted);
+            text-decoration: none;
+        }
+
+        footer a:hover { color: var(--fg); }
+
+        .footer-links {
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+
+        /* --- Responsive --- */
+        @media (max-width: 640px) {
+            .hero { padding: 48px 0 40px; }
+            .nav-links a:not(.nav-github) { display: none; }
+            .install-cmd { font-size: 13px; padding: 10px 14px; }
+            .comparison th, .comparison td { padding: 8px 10px; font-size: 13px; }
+            .features-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="container">
+        <a href="/" class="nav-brand">peekm</a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#comparison">Compare</a>
+            <a href="#install">Install</a>
+            <a href="https://github.com/razvandimescu/peekm" class="nav-github" target="_blank" rel="noopener">
+                <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            </a>
+        </div>
+    </div>
+</nav>
+
+<section class="hero">
+    <div class="container">
+        <div class="hero-badge">Works with Claude Code</div>
+        <h1>See what AI agents do<br><span>across all your projects</span></h1>
+        <p class="hero-subtitle">
+            AI coding agents run dozens of operations per session — but you only see the final diff.
+            peekm shows you every session, every file change, every conversation. In real time.
+        </p>
+
+        <div class="install-block">
+            <div class="install-cmd">
+                <span class="prompt">$</span>
+                <code>npx @peekm/peekm .</code>
+                <button onclick="copyInstall()" title="Copy" aria-label="Copy install command">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25zM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>
+                </button>
+            </div>
+            <div class="install-alt">
+                Or install globally: <code>npm i -g @peekm/peekm</code> &middot; <code>brew install razvandimescu/tap/peekm</code>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="demo">
+    <div class="container">
+        <img src="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif" alt="peekm demo — AI session timeline, transcript viewer, and markdown browsing" loading="lazy">
+    </div>
+</section>
+
+<section class="features" id="features">
+    <div class="container">
+        <div class="features-header">
+            <h2>What it does</h2>
+            <p>One binary. No config. AI tracking starts automatically.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <span class="feature-icon">&#x23F1;&#xFE0F;</span>
+                <h3>Timeline</h3>
+                <p>Every AI session across all projects — file edits, tool calls, duration. Grouped by day with All / Edits-only filter.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">&#x1F4AC;</span>
+                <h3>Transcripts</h3>
+                <p>Read the full AI conversation for any session. Tool calls, diffs, thinking — all rendered inline.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">&#x1F9E0;</span>
+                <h3>Memory browser</h3>
+                <p>Cross-project dashboard of Claude Code's learned context. See what the AI remembers about each project.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">&#x1F514;</span>
+                <h3>Real-time notifications</h3>
+                <p>Toast the instant AI modifies a file. Click to navigate. Live reload via Server-Sent Events.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">&#x1F517;</span>
+                <h3>Sharing</h3>
+                <p>Share rendered markdown with one click. LAN by default, or public via <code>share.peekm.dev</code> — no account needed.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">&#x1F4DD;</span>
+                <h3>Markdown viewer</h3>
+                <p>VS Code-style sidebar, fuzzy search, in-browser editing, syntax highlighting, light/dark themes.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="comparison" id="comparison">
+    <div class="container">
+        <h2>How it compares</h2>
+        <div class="comparison-table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>git diff</th>
+                        <th>Git AI</th>
+                        <th>Gryph</th>
+                        <th>claude-code-transcripts</th>
+                        <th>peekm</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Real-time notifications</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>Toast + live reload</td>
+                    </tr>
+                    <tr>
+                        <td>Visual UI</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>VS Code ext.</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>Static HTML</td>
+                        <td>Web UI + tree view</td>
+                    </tr>
+                    <tr>
+                        <td>Session correlation</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>Git notes</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>File-based</td>
+                        <td>Per-file session panel</td>
+                    </tr>
+                    <tr>
+                        <td>Persistent history</td>
+                        <td>Git log</td>
+                        <td>Git notes</td>
+                        <td>Audit log</td>
+                        <td>JSON files</td>
+                        <td>JSONL timeline</td>
+                    </tr>
+                    <tr>
+                        <td>Sharing</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td class="cell-empty">&mdash;</td>
+                        <td>LAN + public tunnel</td>
+                    </tr>
+                    <tr>
+                        <td>Zero config</td>
+                        <td>Yes</td>
+                        <td>Extension install</td>
+                        <td>CLI setup</td>
+                        <td>Post-hoc script</td>
+                        <td>Yes (auto-detects)</td>
+                    </tr>
+                    <tr>
+                        <td>Free / OSS</td>
+                        <td>Yes</td>
+                        <td>Freemium</td>
+                        <td>Free</td>
+                        <td>Free</td>
+                        <td>Free / MIT</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="install-section" id="install">
+    <div class="container">
+        <h2>Install</h2>
+        <div class="install-methods">
+            <div class="install-method">
+                <h3>npm (recommended)</h3>
+                <pre>npm i -g @peekm/peekm</pre>
+            </div>
+            <div class="install-method">
+                <h3>Homebrew</h3>
+                <pre>brew install razvandimescu/tap/peekm</pre>
+            </div>
+            <div class="install-method">
+                <h3>curl</h3>
+                <pre>curl -L https://github.com/razvandimescu/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz</pre>
+            </div>
+            <div class="install-method">
+                <h3>Go</h3>
+                <pre>go install github.com/razvandimescu/peekm@latest</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="cta">
+    <div class="container">
+        <h2>One command. Full visibility.</h2>
+        <p>All data stays local by default. Public sharing is opt-in.<br>No accounts. No sign-up.</p>
+        <div class="cta-buttons">
+            <a href="https://github.com/razvandimescu/peekm" class="btn btn-primary">
+                <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                View on GitHub
+            </a>
+            <a href="https://github.com/razvandimescu/peekm/releases" class="btn btn-secondary">
+                All releases
+            </a>
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class="container">
+        <div class="footer-links">
+            <a href="https://github.com/razvandimescu/peekm">GitHub</a>
+            <a href="https://github.com/razvandimescu/peekm/issues">Issues</a>
+            <a href="https://github.com/razvandimescu/peekm/releases">Releases</a>
+            <a href="https://www.npmjs.com/package/@peekm/peekm">npm</a>
+        </div>
+        <p>MIT License &middot; Built by <a href="https://github.com/razvandimescu">razvandimescu</a></p>
+    </div>
+</footer>
+
+<script>
+function copyInstall() {
+    navigator.clipboard.writeText('npx @peekm/peekm .').then(() => {
+        const btn = document.querySelector('.install-cmd button');
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
+        setTimeout(() => {
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25zM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
+        }, 2000);
+    });
+}
+</script>
+
+</body>
+</html>
