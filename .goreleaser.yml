@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: peekm
-    main: ./main.go
+    main: .
     binary: peekm
     env:
       - CGO_ENABLED=0
@@ -79,7 +79,7 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     homepage: "https://github.com/razvandimescu/peekm"
-    description: "Zen-like markdown viewer with live reload"
+    description: "Track every AI coding session across all your projects in real time"
     license: "MIT"
     install: |
       bin.install "peekm"
@@ -96,6 +96,6 @@ release:
   header: |
     ## peekm {{ .Tag }}
 
-    Zen-like markdown viewer with live reload.
+    Track every AI coding session across all your projects in real time.
   footer: |
     **Full Changelog**: https://github.com/razvandimescu/peekm/compare/{{ .PreviousTag }}...{{ .Tag }}
