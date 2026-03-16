@@ -4,54 +4,47 @@
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**[peekm.dev](https://peekm.dev)** — See what AI coding agents do across all your projects.
+**[peekm.dev](https://peekm.dev)** — Track every AI coding session across all your projects in real time.
 
 ![peekm demo](assets/hero-demo.gif)
 
-AI coding agents run dozens of operations per session — but you only see the final diff. peekm watches all your projects in real time and shows you every session, every file change, and every conversation. It runs as a local web UI backed by a single binary, with a markdown viewer built in for reading docs along the way.
+Claude Code can edit 50+ files in a single session. You see a git diff at the end. peekm gives you a real-time timeline of every session, every file edit, and every AI conversation — across all your projects, from a single local UI.
 
-**All data stays local by default.** Public sharing is opt-in and tunnels through a relay — no accounts, no sign-up.
+**All data stays local. No accounts. No telemetry. Open source (MIT).**
 
 ```bash
-npm i -g @peekm/peekm               # install
-peekm .                              # start — Claude Code auto-detected
+npx @peekm/peekm .
 ```
 
-One command. No configuration. AI tracking starts automatically when Claude Code is detected.
+Or install globally: `npm i -g @peekm/peekm` | `brew install razvandimescu/tap/peekm`
 
-Or try without installing: `npx @peekm/peekm .`
+Works with Claude Code today. More agents coming.
 
-## What It Does
+## What You Get
 
-**AI session tracking** (works with Claude Code today):
-- **Timeline** — every AI session across all projects: file edits, conversations, research, debugging. Grouped by day with session duration, tool breakdown, and All/Edits-only filter
-- **Transcript viewer** — read the full AI conversation for any session
-- **Memory browser** — cross-project dashboard of Claude Code's learned context (`~/.claude/projects/*/memory/`)
-- **Sharing** — share a rendered markdown file with one click. LAN by default (token-scoped URL on your local network) or public via `share.peekm.dev` (opt-in, HTTPS, 1-hour TTL, auto-expires)
+**AI session observability:**
+
+- **Timeline** — every AI session across all projects, grouped by day. Duration, file counts, tool breakdown, All/Edits-only filter
+- **Transcript viewer** — read the full AI conversation for any session. Tool calls, code diffs, and reasoning rendered inline
+- **Memory browser** — cross-project dashboard of what Claude Code has learned about each project (`~/.claude/projects/*/memory/`)
+- **Real-time notifications** — toast the instant AI modifies a file, with live reload via SSE
+
+**Also included:**
+
+- **Sharing** — share a rendered markdown file via LAN (default) or public URL via `share.peekm.dev` (opt-in, 1-hour TTL, no account)
+- **Markdown viewer** — VS Code-style sidebar, fuzzy search (Cmd/Ctrl+P), in-browser editing, syntax highlighting, light/dark/auto themes
 - **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
-- **Toast notifications** — appear the instant AI modifies a file, click to navigate
-- **Session info panel** — per-file dropdown showing session ID, tool, permission mode, timestamp
-- **Persistent history** — events survive restarts (`~/.peekm/events.jsonl`)
+- **Persistent history** — events survive restarts via `~/.peekm/events.jsonl`
 
-**Also a markdown viewer:**
-- VS Code-style sidebar with tree view and fuzzy search (Cmd/Ctrl+P)
-- Live reload via Server-Sent Events with event replay
-- Light/Dark/Auto themes, persisted
-- In-browser editing with auto-save
-- HTML export
-- Single binary, cross-platform, < 100ms startup
+## How It Compares
 
-## Comparison
+Most alternatives focus on post-hoc analysis: Git AI annotates commits after the fact, transcript viewers render completed sessions as static HTML. peekm is real-time — you see AI activity as it happens, across all projects simultaneously, with session-level grouping and conversation replay.
 
-| | `git diff` | [Git AI](https://usegitai.com) | [Gryph](https://github.com/gryph-sh/gryph) | [claude-code-transcripts](https://github.com/nicobailey/claude-code-transcripts) | peekm |
-|---|---|---|---|---|---|
-| **Real-time notifications** | — | — | — | — | Toast + live reload |
-| **Visual UI** | — | VS Code extension | — | Static HTML | Web UI with tree view |
-| **Session correlation** | — | Git notes | — | File-based | Per-file session panel |
-| **Persistent history** | Git log | Git notes | Audit log | JSON files | JSONL timeline |
-| **Sharing** | — | — | — | — | LAN + public tunnel (opt-in) |
-| **Zero config** | Yes | Extension install | CLI setup | Post-hoc script | Yes (auto-detects Claude Code) |
-| **Free / OSS** | Yes | Freemium | Free | Free | Free / MIT |
+## How It Works
+
+peekm installs a PostToolUse hook into Claude Code that reports session metadata to a local HTTP server. File changes are detected via [fsnotify](https://github.com/fsnotify/fsnotify) and correlated with session data. Everything is served through a local web UI with SSE for live updates. No data leaves your machine unless you opt into public sharing.
+
+Setup is automatic — peekm detects `~/.claude` on first run and configures hooks. Run `peekm setup claude-code --remove` to undo.
 
 ## Installation
 
@@ -60,9 +53,7 @@ Or try without installing: `npx @peekm/peekm .`
 npm i -g @peekm/peekm
 ```
 
-Upgrade: `npm update -g @peekm/peekm`
-
-Try without installing: `npx @peekm/peekm .`
+Upgrade: `npm update -g @peekm/peekm` | Try without installing: `npx @peekm/peekm .`
 
 **Homebrew**
 ```bash
@@ -84,33 +75,23 @@ go install github.com/razvandimescu/peekm@latest
 ## Usage
 
 ```bash
-peekm README.md         # view a file
-peekm .                 # browse a directory
+peekm .                 # browse current directory — AI tracking auto-starts
+peekm README.md         # view a single file
 peekm -port 8080 .      # custom port
-peekm -browser=false .  # don't open browser
 ```
+
+AI tracking is on by default when `~/.claude` exists. Disable with `-no-ai-tracking`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-port` | `6419` | Port to serve on |
 | `-browser` | `true` | Auto-open browser |
-| `-version` | `false` | Show version |
 | `-no-ai-tracking` | `false` | Disable AI tracking |
 
-**Claude Code integration** — peekm automatically configures Claude Code hooks on first run when `~/.claude` is detected. No manual setup needed.
+**Sharing** — click the share button in the top bar.
 
-| Subcommand | Description |
-|------------|-------------|
-| `peekm setup claude-code` | Manually install hooks (auto-setup does this for you) |
-| `peekm setup claude-code --port 8080` | Custom port |
-| `peekm setup claude-code --remove` | Remove hooks |
-
-Setup is idempotent and non-destructive. Creates `~/.claude/peekm-hook.sh` and adds PostToolUse hooks to `~/.claude/settings.json`.
-
-**Sharing** — when viewing a file, click the share button in the top bar.
-
-- **LAN** (default): a token-scoped URL on your local network is generated and copied to your clipboard. Recipients see a read-only rendered view with live reload.
-- **Public** (opt-in): click "Make public" to tunnel through `share.peekm.dev`. This gives you an HTTPS URL anyone can open. The link expires after 1 hour. No account or sign-up required. Content transits through the relay while the tunnel is active.
+- **LAN** (default): token-scoped URL on your local network. Recipients see a read-only rendered view with live reload.
+- **Public** (opt-in): click "Make public" to tunnel through `share.peekm.dev`. HTTPS URL, expires after 1 hour, no account needed.
 
 ## Ignoring Directories
 
@@ -124,18 +105,17 @@ _site
 
 `peekm --show-ignored` to see all active exclusions.
 
-<details>
-<summary><strong>How It Works</strong></summary>
+## Requirements
 
-1. **Track** — auto-detects Claude Code and installs PostToolUse hooks to correlate AI session metadata with file changes
-2. **Discover** — scans transcript files to find all sessions, including conversation-only
-3. **Watch** — file changes via [fsnotify](https://github.com/fsnotify/fsnotify)
-4. **Notify** — SSE with event replay pushes changes to the browser
-5. **Share** — token-scoped URLs expose a single file on the LAN (read-only), with optional public tunneling via relay
-6. **Parse** — markdown to HTML via [goldmark](https://github.com/yuin/goldmark)
-7. **Serve** — local HTTP server with graceful shutdown
+Claude Code (for AI tracking). macOS, Linux, or Windows. No runtime dependencies — peekm is a single static binary.
 
-</details>
+## FAQ
+
+**Does peekm send my code anywhere?**
+No. Everything stays on your machine. Public sharing is opt-in and only shares a single rendered markdown file through a relay — your codebase is never exposed.
+
+**Why not just read the JSONL or git log?**
+You can. peekm adds session correlation (which changes belong to which AI conversation), real-time notifications, and a visual timeline that makes it practical to monitor multiple projects simultaneously.
 
 ## Development
 
@@ -148,17 +128,3 @@ PRs welcome. [Open an issue](https://github.com/razvandimescu/peekm/issues) if s
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Acknowledgments
-
-- [goldmark](https://github.com/yuin/goldmark) — Markdown parser
-- [fsnotify](https://github.com/fsnotify/fsnotify) — File watching
-- [chroma](https://github.com/alecthomas/chroma) — Syntax highlighting
-- [remotedialer](https://github.com/rancher/remotedialer) — WebSocket tunneling (public sharing)
-
-## Related
-
-- [Git AI](https://usegitai.com) — Line-level AI attribution via Git notes
-- [Gryph](https://github.com/gryph-sh/gryph) — CLI audit logger for AI agents
-- [claude-code-transcripts](https://github.com/nicobailey/claude-code-transcripts) — Post-hoc HTML transcript viewer
-- [Vigilo](https://github.com/pchaganti/gx-vigilo) — AI code review guardian
