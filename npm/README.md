@@ -1,57 +1,60 @@
 # peekm
 
-> See what AI coding agents change across all your projects.
+**[peekm.dev](https://peekm.dev)** — Real-time observability for AI coding sessions.
 
-AI coding agents modify dozens of files per session — but you only see the final diff. peekm watches all your projects in real time and shows you exactly which files changed, when, and what the agent was doing. Single binary, local web UI, all data stays on your machine.
+![peekm — watching a live Claude Code session across multiple projects](https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif)
 
-## AI Session Tracking
+> Claude Code edits 50+ files in a single session. All you get is a git diff.
+>
+> peekm gives you a live timeline of every session, every file edit, and every AI conversation — across all your projects, from one local UI.
 
-Works with Claude Code today (connect once with `peekm setup claude-code`):
+**All data stays local. No accounts. No telemetry. Open source (Apache 2.0).**
 
-- **Timeline** — chronological view of every AI file modification, grouped by day
-- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24h
-- **Toast notifications** — instant alerts when AI modifies a file
-- **Session info panel** — per-file session ID, tool, permission mode, timestamp
-- **Transcript viewer** — read the full AI conversation for any session
-- **Persistent history** — events survive restarts
-
-## Also a Markdown Viewer
-
-- VS Code-style sidebar with tree view and fuzzy search
-- Live reload via Server-Sent Events
-- Light/Dark/Auto themes
-- In-browser editing with auto-save
-- GitHub-Flavored Markdown with syntax highlighting
-
-## Installation
-
-```bash
-npm install -g @peekm/peekm
-```
-
-Or use with `npx` (no installation required):
+## Getting Started
 
 ```bash
 npx @peekm/peekm .
 ```
 
+Or install globally:
+
+```bash
+npm install -g @peekm/peekm
+```
+
+Requires [Claude Code](https://claude.ai/download) for AI tracking. Setup is automatic on first run.
+
+Start a Claude Code session in any project and watch the timeline update in real time.
+
+## AI Session Tracking
+
+Works with Claude Code today (connects automatically on first run):
+
+- **Timeline** — every AI session across all projects, grouped by day. Duration, file counts, tool breakdown, All/Edits-only filter
+- **Transcript viewer** — read the full AI conversation for any session. Tool calls, code diffs, and reasoning rendered inline
+- **Memory browser** — see what Claude remembers about each of your projects
+- **Real-time notifications** — instant toast the moment AI modifies a file
+- **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
+
+## Markdown Viewer
+
+VS Code-style sidebar, live reload, fuzzy search (Cmd/Ctrl+P), in-browser editing, syntax highlighting, light/dark/auto themes. Supports Markdown, HTML, SVG, and TXT.
+
+## Sharing
+
+Share any file via LAN or public URL (`share.peekm.dev`). One click, 1-hour TTL, no account needed.
+
 ## Usage
 
 ```bash
-peekm .                 # browse a directory
+peekm .                 # browse a directory — AI tracking auto-starts
 peekm README.md         # view a single file
 peekm -port 8080 .      # custom port
-peekm -browser=false .  # don't auto-open browser
-peekm setup claude-code # connect Claude Code (one time)
 ```
 
-## Platform Support
+Supports macOS, Linux, and Windows (ARM64 and x64).
 
-This package automatically downloads the correct binary for your platform:
-
-- macOS (ARM64, x64)
-- Linux (ARM64, x64)
-- Windows (x64)
+Works with Claude Code today. More agents coming — [open an issue](https://github.com/razvandimescu/peekm/issues) to request yours.
 
 ## License
 
@@ -59,4 +62,8 @@ Apache 2.0
 
 ## More Information
 
-Visit [github.com/razvandimescu/peekm](https://github.com/razvandimescu/peekm) for full documentation.
+Visit [peekm.dev](https://peekm.dev) or [github.com/razvandimescu/peekm](https://github.com/razvandimescu/peekm) for full documentation.
+
+---
+
+Try it now: `npx @peekm/peekm .`
