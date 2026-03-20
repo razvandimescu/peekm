@@ -350,6 +350,17 @@ a.timeline-session-id:hover {
     text-decoration: underline;
 }
 
+.timeline-project-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fgColor-done);
+    background: var(--bgColor-done-muted, rgba(163, 113, 247, 0.1));
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+}
+
 .timeline-active-badge {
     font-size: 10px;
     font-weight: 600;

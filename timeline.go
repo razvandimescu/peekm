@@ -59,6 +59,7 @@ type timelineSession struct {
 	SessionID     string // truncated 8 chars
 	FullSessionID string
 	Summary       string // first user prompt (truncated)
+	Project       string // project name from CWD (e.g. "peekm")
 	Duration      string // e.g. "12m", "< 1s"
 	FileCount     int
 	EditCount     int
@@ -189,6 +190,7 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 			SessionID:     truncateSessionID(sessionID),
 			FullSessionID: sessionID,
 			Summary:       summary,
+			Project:       filepath.Base(baseDir),
 			HasTranscript: true,
 			SessionType:   "conversation",
 			newestTime:    newest,
@@ -314,6 +316,9 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 			}
 			sessionMap[sid] = sb
 			sessionOrder = append(sessionOrder, sid)
+		}
+		if sb.session.Project == "" && evt.CWD != "" {
+			sb.session.Project = filepath.Base(evt.CWD)
 		}
 		appendOrMergeEntry(sb, evt, baseDir)
 	}
