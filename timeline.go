@@ -356,6 +356,9 @@ func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	for _, label := range bucketOrder {
 		groups = append(groups, *bucketMap[label])
 	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Sessions[0].newestTime.After(groups[j].Sessions[0].newestTime)
+	})
 	return groups
 }
 

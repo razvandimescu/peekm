@@ -49,7 +49,7 @@ Works with Claude Code today. More agents coming.
 
 ## Why This Exists
 
-There's no tool that shows you what AI coding agents are doing *while they're doing it*. Git diffs show results. Transcript viewers show history. peekm shows the live session — across all your projects simultaneously, with session-level grouping and conversation replay.
+Most tools show you what AI coding agents *did*. peekm shows you what they're doing *right now* — across all your projects simultaneously, with session-level grouping and conversation replay.
 
 ## How It Works
 
@@ -107,7 +107,7 @@ AI tracking is on by default when `~/.claude` exists. Disable with `-no-ai-track
 <details>
 <summary><strong>Ignoring Directories</strong></summary>
 
-peekm excludes `.*`, `node_modules`, `vendor`, `dist`, `venv` by default. Custom exclusions go in `.peekmignore`:
+peekm excludes `.*`, `node_modules`, `vendor`, `dist`, `venv`, `target`, `__pycache__` by default. Custom exclusions go in `.peekmignore`:
 
 ```
 target
