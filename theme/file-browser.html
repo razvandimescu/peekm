@@ -149,9 +149,12 @@
         }
 
         .delete-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             padding: 8px 16px;
-            background-color: #d73a49;
-            border: 1px solid #cb2431;
+            background-color: var(--fgColor-danger);
+            border: 1px solid var(--fgColor-danger);
             border-radius: 6px;
             color: white;
             font-size: 14px;
@@ -160,8 +163,7 @@
         }
 
         .delete-button:hover {
-            background-color: #cb2431;
-            border-color: #b92833;
+            opacity: 0.9;
         }
 
         /* Unified Top Bar */
@@ -193,6 +195,12 @@
             flex: 1;
             justify-content: center;
             max-width: 400px;
+        }
+
+        .top-bar-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--borderColor-muted);
         }
 
         .top-bar button {
@@ -337,7 +345,7 @@
         .search-result-path {
             font-size: 11px;
             color: var(--fgColor-muted);
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
         }
 
         .search-no-results {
@@ -403,7 +411,7 @@
             border-radius: 6px;
             background: var(--bgColor-default);
             color: var(--fgColor-default);
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
             font-size: 14px;
         }
 
@@ -450,7 +458,7 @@
             color: var(--fgColor-muted);
             font-size: 0.85em;
             margin-top: 8px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
         }
 
         /* Toast notification */
@@ -458,21 +466,12 @@
             position: fixed;
             top: 76px;
             right: 20px;
-            /* Ensure solid, opaque backgrounds */
-            background: rgb(255, 255, 255) !important;
-            /* Add backdrop blur for additional isolation */
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            background: var(--bgColor-default);
             border: 1px solid var(--borderColor-emphasis);
             border-left: 4px solid var(--fgColor-accent);
             border-radius: 6px;
             padding: 16px 20px;
-            /* Enhanced shadow for better depth perception */
-            box-shadow:
-                0 4px 6px rgba(0, 0, 0, 0.1),
-                0 8px 24px rgba(0, 0, 0, 0.2),
-                0 12px 48px rgba(0, 0, 0, 0.15);
-            /* Ensure toast is above everything */
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             z-index: 10000;
             isolation: isolate;
             opacity: 0;
@@ -482,20 +481,8 @@
             max-width: 400px;
             cursor: pointer;
             text-decoration: none;
-            color: rgb(36, 41, 47) !important;
-            /* Force hardware acceleration */
+            color: var(--fgColor-default);
             will-change: transform, opacity;
-        }
-
-        [data-theme="dark"] .toast {
-            color: rgb(230, 237, 243) !important;
-            /* Solid dark background */
-            background: rgb(28, 33, 40) !important;
-            /* Stronger shadow for dark theme */
-            box-shadow:
-                0 4px 6px rgba(0, 0, 0, 0.3),
-                0 8px 24px rgba(0, 0, 0, 0.5),
-                0 12px 48px rgba(0, 0, 0, 0.4);
         }
 
         .toast.show {
@@ -505,19 +492,8 @@
         }
 
         .toast:hover {
-            /* Use solid colors for hover state */
             transform: translateY(-2px);
-            box-shadow:
-                0 6px 8px rgba(0, 0, 0, 0.15),
-                0 10px 32px rgba(0, 0, 0, 0.25),
-                0 16px 56px rgba(0, 0, 0, 0.2);
-        }
-
-        [data-theme="dark"] .toast:hover {
-            box-shadow:
-                0 6px 8px rgba(0, 0, 0, 0.4),
-                0 10px 32px rgba(0, 0, 0, 0.6),
-                0 16px 56px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
         }
 
         .toast-content {
@@ -540,27 +516,19 @@
         }
 
         .toast-message {
-            color: rgb(36, 41, 47) !important;
+            color: var(--fgColor-default);
             font-size: 14px;
             line-height: 1.4;
             font-weight: 500;
         }
 
-        [data-theme="dark"] .toast-message {
-            color: rgb(230, 237, 243) !important;
-        }
-
         .toast-detail {
-            color: rgb(87, 96, 106) !important;
+            color: var(--fgColor-muted);
             font-size: 12px;
             line-height: 1.3;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-        }
-
-        [data-theme="dark"] .toast-detail {
-            color: rgb(139, 148, 158) !important;
         }
 
         .toast-badge {
@@ -584,7 +552,7 @@
             right: 20px;
             background: var(--bgColor-default);
             border: 1px solid var(--borderColor-emphasis);
-            border-left: 4px solid #d73a49;
+            border-left: 4px solid var(--fgColor-danger);
             border-radius: 6px;
             padding: 12px 16px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -606,13 +574,13 @@
 
         /* Delete modal danger button */
         .modal-footer button.danger {
-            background: #d73a49;
+            background: var(--fgColor-danger);
             color: white;
-            border-color: #cb2431;
+            border-color: var(--fgColor-danger);
         }
 
         .modal-footer button.danger:hover {
-            background: #cb2431;
+            opacity: 0.9;
         }
 
         .toast-close {
@@ -760,12 +728,6 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            opacity: 0.8;
-            transition: opacity 0.2s ease-out;
-        }
-
-        .breadcrumb:hover {
-            opacity: 1;
         }
 
         .breadcrumb a {
@@ -827,7 +789,7 @@
         }
 
         .content-area.loading {
-            opacity: 0.5;
+            opacity: 0.7;
             pointer-events: none;
         }
 
@@ -894,15 +856,13 @@
             padding: 60px 20px;
             color: var(--fgColor-muted);
             font-size: 12px;
-            opacity: 0.7;
         }
 
-        .empty-sidebar::before {
-            content: "📂";
+        .empty-sidebar svg {
             display: block;
-            font-size: 32px;
-            margin-bottom: 12px;
+            margin: 0 auto 12px;
             opacity: 0.3;
+            color: var(--fgColor-muted);
         }
 
         /* Responsive: Overlay sidebar on small screens */
@@ -975,7 +935,7 @@
         }
 
         .connection-count {
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
             font-weight: 600;
             display: none;
         }
@@ -991,6 +951,9 @@
 
         /* Edit button (now in header-actions) */
         .edit-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             padding: 8px 16px;
             background-color: var(--bgColor-default);
             border: 1px solid var(--borderColor-default);
@@ -1060,19 +1023,19 @@
         }
 
         .editor-actions .save-button {
-            background: #2ea44f;
+            background: var(--fgColor-success);
             color: white;
-            border-color: #2ea44f;
+            border-color: var(--fgColor-success);
         }
 
         .editor-actions .save-button:hover {
-            background: #2c974b;
+            opacity: 0.9;
         }
 
         #markdown-editor {
             flex: 1;
             padding: 20px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
             font-size: 14px;
             line-height: 1.6;
             border: none;
@@ -1130,14 +1093,14 @@
 
         /* Session Info Panel */
         .session-info-panel {
-            margin: 20px 0;
-            padding: 16px;
+            margin: 0;
+            padding: 0 16px;
             background: var(--bgColor-muted);
             border: 1px solid var(--borderColor-default);
             border-top: 3px solid var(--fgColor-accent);
             border-radius: 6px;
             overflow: hidden;
-            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out, margin 0.3s ease-out, padding 0.3s ease-out;
             max-height: 0;
             opacity: 0;
         }
@@ -1145,6 +1108,8 @@
         .session-info-panel[aria-hidden="false"] {
             max-height: 800px;
             opacity: 1;
+            margin: 20px 0;
+            padding: 16px;
         }
 
         .session-info-content {
@@ -1189,7 +1154,7 @@
         }
 
         .session-info-value code {
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
             font-size: 12px;
             background: var(--bgColor-default);
             padding: 2px 6px;
@@ -1234,9 +1199,9 @@
         }
 
         .session-copy-button.copied {
-            background: #2ea44f;
+            background: var(--fgColor-success);
             color: white;
-            border-color: #2ea44f;
+            border-color: var(--fgColor-success);
         }
 
         /* Badge styles now in theme-overrides.css */
@@ -1287,7 +1252,7 @@
         /* Timestamp styling */
         .session-timestamp {
             font-style: normal;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: var(--font-mono);
         }
 
         /* Responsive: Hide technical details on mobile */
@@ -1405,9 +1370,8 @@
 
         .smart-folder-sid {
             font-size: 9px;
-            font-family: "SFMono-Regular", Consolas, monospace;
+            font-family: var(--font-mono);
             color: var(--fgColor-muted);
-            opacity: 0.6;
         }
 
         .smart-folders-separator {
@@ -1422,17 +1386,17 @@
             align-items: center;
             text-decoration: none;
             background: transparent;
-            border: 1px solid var(--borderColor-default);
+            border: 1px solid transparent;
             border-radius: 6px;
             padding: 8px 12px;
             cursor: pointer;
             font-size: 16px;
             transition: all 0.2s;
-            color: var(--fgColor-default);
+            color: var(--fgColor-muted);
         }
         .nav-btn:hover {
             background: var(--bgColor-muted);
-            border-color: var(--borderColor-emphasis);
+            color: var(--fgColor-default);
         }
         .nav-btn.active {
             background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
@@ -1560,10 +1524,10 @@
     <div class="error-toast" id="error-toast" role="alert"></div>
 
     <!-- Delete Confirmation Modal -->
-    <div class="modal-overlay" id="delete-confirm-modal" onclick="closeDeleteModal(event)">
+    <div class="modal-overlay" id="delete-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title" onclick="closeDeleteModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <span>Delete File</span>
+                <span id="delete-modal-title">Delete File</span>
             </div>
             <div class="modal-body">
                 <p id="delete-confirm-message"></p>
@@ -1578,8 +1542,8 @@
     <!-- Unified Top Bar -->
     <header class="top-bar" role="banner">
         <div class="top-bar-left">
-            <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;">☰</button>
-            <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory">λ</button>
+            <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg></button>
+            <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.75C0 1.784.784 1 1.75 1H5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1h6.75c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm9.42 9.36 2.883-2.677a.25.25 0 0 0 0-.366L9.42 6.39a.249.249 0 0 0-.42.183V8.5H4.75a.75.75 0 0 0 0 1.5H9v1.927c0 .218.26.331.42.183Z"/></svg></button>
             <div class="connection-status" id="connection-status" role="status" aria-live="polite" title="Live reload active">
                 <span class="connection-dot" id="connection-dot"></span>
                 <span class="connection-count" id="connection-count">0</span>
@@ -1589,7 +1553,7 @@
 
         <div class="top-bar-middle">
             <div class="search-container">
-                <span class="search-icon">🔍</span>
+                <span class="search-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"/></svg></span>
                 <input
                     type="text"
                     id="file-search"
@@ -1616,7 +1580,9 @@
         </div>
 
         <div class="top-bar-right">
-            <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">⬇️</button>
+            <button onclick="downloadHTML()" id="download-btn" aria-label="Download as HTML" title="Download as HTML" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></svg>
+            </button>
             <div class="share-container" style="position: relative; display: inline-block;">
                 <button onclick="toggleShare()" id="share-btn" aria-label="Share file" title="Share file" aria-haspopup="true" aria-expanded="false" style="display: none;">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5Z"/></svg>
@@ -1644,6 +1610,7 @@
                     <button class="share-stop-btn" onclick="stopSharing()">Stop Sharing</button>
                 </div>
             </div>
+            <span class="top-bar-divider"></span>
             <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
             </a>
@@ -1663,23 +1630,23 @@
                     aria-haspopup="true"
                     title="Change theme"
                 >
-                    <span class="theme-icon" id="theme-current-icon">☀️</span>
+                    <span class="theme-icon" id="theme-current-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8ZM2.343 13.657a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 0 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0Zm9.193-9.193a.75.75 0 0 1 0-1.06l1.061-1.061a.75.75 0 0 1 1.06 1.06l-1.06 1.061a.75.75 0 0 1-1.06 0Z"/></svg></span>
                     <span class="theme-label" id="theme-current-label">Light</span>
                     <span class="dropdown-arrow">▾</span>
                 </button>
                 <div class="theme-dropdown-menu" id="theme-dropdown" role="listbox" aria-label="Theme selection" style="display: none;">
-                    <button onclick="selectTheme('light')" class="theme-option" role="option" aria-selected="true">
-                        <span class="theme-icon">☀️</span>
+                    <button onclick="selectTheme('light')" class="theme-option" data-theme-value="light" role="option" aria-selected="true">
+                        <span class="theme-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8ZM2.343 13.657a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 0 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0Zm9.193-9.193a.75.75 0 0 1 0-1.06l1.061-1.061a.75.75 0 0 1 1.06 1.06l-1.06 1.061a.75.75 0 0 1-1.06 0Z"/></svg></span>
                         <span>Light</span>
                         <span class="theme-checkmark" id="checkmark-light">✓</span>
                     </button>
-                    <button onclick="selectTheme('dark')" class="theme-option" role="option" aria-selected="false">
-                        <span class="theme-icon">🌙</span>
+                    <button onclick="selectTheme('dark')" class="theme-option" data-theme-value="dark" role="option" aria-selected="false">
+                        <span class="theme-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.221-7.832.749.749 0 0 1 0-.785v-.215Z"/></svg></span>
                         <span>Dark</span>
                         <span class="theme-checkmark" id="checkmark-dark" style="display: none;">✓</span>
                     </button>
-                    <button onclick="selectTheme('auto')" class="theme-option" role="option" aria-selected="false">
-                        <span class="theme-icon">💻</span>
+                    <button onclick="selectTheme('auto')" class="theme-option" data-theme-value="auto" role="option" aria-selected="false">
+                        <span class="theme-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 1h-13a.5.5 0 0 0-.5.5v10a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-10a.5.5 0 0 0-.5-.5ZM14 11H2V2h12v9ZM5 14.25a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z"/></svg></span>
                         <span>Auto</span>
                         <span class="theme-checkmark" id="checkmark-auto" style="display: none;">✓</span>
                     </button>
@@ -1689,10 +1656,10 @@
     </header>
 
     <!-- Navigation Modal -->
-    <div class="modal-overlay" id="nav-modal" onclick="closeNavModal(event)">
+    <div class="modal-overlay" id="nav-modal" role="dialog" aria-modal="true" aria-labelledby="nav-modal-title" onclick="closeNavModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <span>λ</span>
+            <div class="modal-header" id="nav-modal-title">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.75C0 1.784.784 1 1.75 1H5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1h6.75c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm9.42 9.36 2.883-2.677a.25.25 0 0 0 0-.366L9.42 6.39a.249.249 0 0 0-.42.183V8.5H4.75a.75.75 0 0 0 0 1.5H9v1.927c0 .218.26.331.42.183Z"/></svg>
                 <span>Navigate to Directory</span>
             </div>
             <div class="modal-body">
@@ -1733,6 +1700,7 @@
                     <div class="tree sidebar-tree">{{.TreeHTML}}</div>
                 {{else}}
                     <div class="empty-sidebar">
+                        <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
                         <p>No markdown files found</p>
                     </div>
                 {{end}}
@@ -1885,7 +1853,7 @@
         }
 
         function closeDeleteModal(event) {
-            if (event && event.target !== event.currentTarget) return;
+            if (event && event.target && event.target !== event.currentTarget) return;
             const modal = document.getElementById('delete-confirm-modal');
             if (modal) {
                 modal.classList.remove('active');
@@ -1928,6 +1896,22 @@
                 showErrorToast('Delete error: ' + error.message);
             });
         }
+
+        // Escape key closes active modals
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const deleteModal = document.getElementById('delete-confirm-modal');
+                if (deleteModal && deleteModal.classList.contains('active')) {
+                    closeDeleteModal();
+                    return;
+                }
+                const navModal = document.getElementById('nav-modal');
+                if (navModal && navModal.classList.contains('active')) {
+                    closeNavModal();
+                    return;
+                }
+            }
+        });
 
         // Handle Enter key in navigation input
         document.addEventListener('DOMContentLoaded', function() {
@@ -2002,17 +1986,15 @@
                 // Collapse
                 button.setAttribute('aria-expanded', 'false');
                 panel.setAttribute('aria-hidden', 'true');
-                panel.style.display = 'none';
             } else {
                 // Expand
                 button.setAttribute('aria-expanded', 'true');
                 panel.setAttribute('aria-hidden', 'false');
-                panel.style.display = 'block';
 
-                // Smooth scroll into view
+                // Smooth scroll into view after transition
                 setTimeout(() => {
                     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 100);
+                }, 350);
             }
         }
 

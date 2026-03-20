@@ -10,26 +10,10 @@
         </div>
         {{end}}
 
-        {{if .SessionStats}}
-        <div class="session-filter-banner">
-            <div class="session-filter-stats">
-                <code>{{.SessionStats.FullID}}</code>
-                <span class="session-filter-stat">{{.SessionStats.FileCount}} file{{if ne .SessionStats.FileCount 1}}s{{end}}</span>
-                <span class="session-filter-stat">{{.SessionStats.EditCount}} edit{{if ne .SessionStats.EditCount 1}}s{{end}}</span>
-                <span class="session-filter-stat">{{.SessionStats.Duration}}</span>
-                {{if .SessionStats.Tools}}<span class="session-filter-stat">{{.SessionStats.Tools}}</span>{{end}}
-            </div>
-            {{if .SessionStats.HasTranscript}}<a href="/transcript?session={{.SessionStats.FullID}}" class="session-filter-transcript">View transcript</a>{{end}}
-            <a href="/timeline" class="session-filter-clear">Show all sessions</a>
-        </div>
-        {{end}}
-
-        {{if not .FilterSession}}
         <div class="timeline-filter-toggle">
             <button class="timeline-filter-btn active" data-filter="all" onclick="setTimelineFilter('all')">All</button>
             <button class="timeline-filter-btn" data-filter="edits" onclick="setTimelineFilter('edits')">Edits only</button>
         </div>
-        {{end}}
 
         {{if .Groups}}
         {{range .Groups}}
@@ -42,7 +26,8 @@
                     <svg class="timeline-conversation-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Z"/></svg>
                     <div class="timeline-session-info">
                         <div class="timeline-session-title">
-                            {{if .FullSessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-session-id">{{.SessionID}}</a>{{end}}
+                            {{if .FullSessionID}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-session-id">{{.SessionID}}</a>{{end}}
+                            {{if .Project}}<span class="timeline-project-badge">{{.Project}}</span>{{end}}
                             {{if .IsActive}}<span class="timeline-active-badge">Active</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
@@ -61,15 +46,16 @@
                     <svg class="timeline-session-chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>
                     <div class="timeline-session-info">
                         <div class="timeline-session-title">
-                            {{if .FullSessionID}}<a href="/timeline?session={{.FullSessionID}}" class="timeline-session-id" onclick="event.stopPropagation()">{{.SessionID}}</a>{{else}}<span class="timeline-session-id">unknown</span>{{end}}
+                            {{if .FullSessionID}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-session-id" onclick="event.stopPropagation()">{{.SessionID}}</a>{{else}}<span class="timeline-session-id">unknown</span>{{end}}
+                            {{if .Project}}<span class="timeline-project-badge">{{.Project}}</span>{{end}}
                             {{if .IsActive}}<span class="timeline-active-badge">Active</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
                         <div class="timeline-session-stats">
                             <span>{{.Duration}}</span>
-                            <span class="timeline-stat-sep">&middot;</span>
+                            <span class="stat-sep">&middot;</span>
                             <span>{{.FileCount}} file{{if ne .FileCount 1}}s{{end}}</span>
-                            <span class="timeline-stat-sep">&middot;</span>
+                            <span class="stat-sep">&middot;</span>
                             <span>{{.EditCount}} edit{{if ne .EditCount 1}}s{{end}}</span>
                         </div>
                     </div>
@@ -106,13 +92,8 @@
         {{else}}
         <div class="timeline-empty">
             <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
-            {{if .FilterSession}}
-            <p>No events found for this session.</p>
-            <p><a href="/timeline">Show all sessions</a></p>
-            {{else}}
             <p>No AI sessions found.</p>
             <p>Sessions will appear here as you use Claude Code in this directory.</p>
-            {{end}}
         </div>
         {{end}}
     </div>

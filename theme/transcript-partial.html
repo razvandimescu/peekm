@@ -5,10 +5,20 @@
             {{if .Subtitle}}<p class="subtitle">{{.Subtitle}}</p>{{end}}
             <div class="transcript-nav">
                 <a href="/">Files</a>
-                <a href="/timeline?session={{.SessionID}}">Timeline</a>
-                <a href="/timeline">All sessions</a>
+                <a href="/timeline">Timeline</a>
                 <a href="#transcript-bottom">Jump to end</a>
             </div>
+            {{if .SessionStats}}
+            <div class="transcript-stats">
+                <span>{{.SessionStats.FileCount}} file{{if ne .SessionStats.FileCount 1}}s{{end}}</span>
+                <span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.EditCount}} edit{{if ne .SessionStats.EditCount 1}}s{{end}}</span>
+                <span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.Duration}}</span>
+                {{if .SessionStats.Tools}}<span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.Tools}}</span>{{end}}
+            </div>
+            {{end}}
         </div>
 
         {{if .NotFound}}
@@ -80,20 +90,6 @@
         </div>
         <div id="transcript-bottom"></div>
         <div id="transcript-lightbox" class="transcript-lightbox" hidden><img src="" alt=""></div>
-        <script>
-        (function() {
-            var lb = document.getElementById('transcript-lightbox');
-            if (!lb) return;
-            document.addEventListener('click', function(e) {
-                var img = e.target.closest('.transcript-image img');
-                if (img) { lb.querySelector('img').src = img.src; lb.hidden = false; }
-            });
-            lb.addEventListener('click', function() { lb.hidden = true; });
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape' && !lb.hidden) lb.hidden = true;
-            });
-        })();
-        </script>
         {{else}}
         <div class="transcript-empty">
             <p>This transcript is empty.</p>
