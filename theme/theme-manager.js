@@ -20,18 +20,22 @@ function setTheme(mode) {
 }
 
 function updateThemeButton(mode) {
-    const icons = { light: '☀️', dark: '🌙', auto: '💻' };
+    const icons = {
+        light: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8ZM2.343 13.657a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 0 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0Zm9.193-9.193a.75.75 0 0 1 0-1.06l1.061-1.061a.75.75 0 0 1 1.06 1.06l-1.06 1.061a.75.75 0 0 1-1.06 0Z"/></svg>',
+        dark: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.221-7.832.749.749 0 0 1 0-.785v-.215Z"/></svg>',
+        auto: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 1h-13a.5.5 0 0 0-.5.5v10a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-10a.5.5 0 0 0-.5-.5ZM14 11H2V2h12v9ZM5 14.25a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z"/></svg>'
+    };
     const labels = { light: 'Light', dark: 'Dark', auto: 'Auto' };
 
     // Update toggle button display
     const currentIcon = document.getElementById('theme-current-icon');
     const currentLabel = document.getElementById('theme-current-label');
-    if (currentIcon) currentIcon.textContent = icons[mode];
+    if (currentIcon) currentIcon.innerHTML = icons[mode];
     if (currentLabel) currentLabel.textContent = labels[mode];
 
     // Update checkmarks and aria-selected in dropdown
     document.querySelectorAll('.theme-option').forEach(opt => {
-        const isSelected = opt.dataset.theme === mode;
+        const isSelected = opt.dataset.themeValue === mode;
         opt.setAttribute('aria-selected', isSelected);
         const checkmark = opt.querySelector('.theme-checkmark');
         if (checkmark) checkmark.style.display = isSelected ? 'inline' : 'none';
