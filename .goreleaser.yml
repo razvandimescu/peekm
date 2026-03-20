@@ -80,7 +80,7 @@ brews:
       email: bot@goreleaser.com
     homepage: "https://github.com/razvandimescu/peekm"
     description: "Track every AI coding session across all your projects in real time"
-    license: "MIT"
+    license: "Apache-2.0"
     install: |
       bin.install "peekm"
     test: |

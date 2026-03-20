@@ -20,7 +20,7 @@
   "bugs": {
     "url": "https://github.com/razvandimescu/peekm/issues"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "rd",
   "bin": {
     "peekm": "bin/peekm.js"

@@ -55,7 +55,7 @@ This package automatically downloads the correct binary for your platform:
 
 ## License
 
-MIT
+Apache 2.0
 
 ## More Information
 

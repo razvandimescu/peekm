@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/razvandimescu/peekm?v=2)](https://goreportcard.com/report/github.com/razvandimescu/peekm)
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **[peekm.dev](https://peekm.dev)** — Track every AI coding session across all your projects in real time.
 
@@ -10,7 +10,7 @@
 
 Claude Code can edit 50+ files in a single session. You see a git diff at the end. peekm gives you a real-time timeline of every session, every file edit, and every AI conversation — across all your projects, from a single local UI.
 
-**All data stays local. No accounts. No telemetry. Open source (MIT).**
+**All data stays local. No accounts. No telemetry. Open source (Apache 2.0).**
 
 ```bash
 npx @peekm/peekm .
@@ -127,4 +127,4 @@ PRs welcome. [Open an issue](https://github.com/razvandimescu/peekm/issues) if s
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).
