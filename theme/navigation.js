@@ -26,6 +26,30 @@ function setTimelineFilter(filter) {
     sessionStorage.setItem('peekm_timeline_filter', filter);
 }
 
+// Transcript image lightbox (event delegation — safe to call multiple times)
+var _lightboxInitialized = false;
+function initTranscriptLightbox() {
+    if (_lightboxInitialized) return;
+    _lightboxInitialized = true;
+    document.addEventListener('click', function(e) {
+        var img = e.target.closest('.transcript-image img');
+        if (img) {
+            var lb = document.getElementById('transcript-lightbox');
+            if (lb) { lb.querySelector('img').src = img.src; lb.hidden = false; }
+        }
+    });
+    document.addEventListener('click', function(e) {
+        var lb = e.target.closest('.transcript-lightbox');
+        if (lb) lb.hidden = true;
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var lb = document.getElementById('transcript-lightbox');
+            if (lb && !lb.hidden) lb.hidden = true;
+        }
+    });
+}
+
 // Restore timeline filter from sessionStorage on page load
 function restoreTimelineFilter() {
     var filter = sessionStorage.getItem('peekm_timeline_filter');
@@ -306,6 +330,11 @@ function reinitializeScripts() {
             restoreTimelineFilter();
         }
 
+        // Initialize transcript lightbox on SPA navigation
+        if (viewType === 'transcript') {
+            initTranscriptLightbox();
+        }
+
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
     } catch (error) {
         console.error('[Reinit] Error during script initialization:', error);
@@ -492,7 +521,7 @@ function formatBatchMessage(files) {
         return {
             primary: primary,
             secondary: null,
-            icon: '📄',
+            icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/></svg>',
             href: file.path ? `/view/${encodeURIComponent(file.path)}` : '#',
             clickAction: null
         };
@@ -500,7 +529,7 @@ function formatBatchMessage(files) {
 
     // Batch formatting
     const names = files.map(f => f.name);
-    const icon = '📚';
+    const icon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4.25A2.25 2.25 0 0 1 4.25 2h.5a.75.75 0 0 1 0 1.5h-.5a.75.75 0 0 0-.75.75v.5a.75.75 0 0 1-1.5 0Zm9 0A2.25 2.25 0 0 0 8.75 2h-.5a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 1 .75.75v.5a.75.75 0 0 0 1.5 0ZM2 8.75A2.25 2.25 0 0 0 4.25 11h.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 1-.75-.75v-.5a.75.75 0 0 0-1.5 0Zm9 0A2.25 2.25 0 0 1 8.75 11h-.5a.75.75 0 0 1 0-1.5h.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 1 1.5 0ZM5.75 6a.75.75 0 0 0-.75.75v3.5c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-3.5a.75.75 0 0 0-.75-.75Z"/></svg>';
     const href = '#';
     const clickAction = function(e) {
         if (e.target.classList.contains('toast-close')) return;
@@ -558,7 +587,7 @@ function updateToastDOM(config) {
 
     // Set icon
     if (elements.icon) {
-        elements.icon.textContent = config.icon;
+        elements.icon.innerHTML = config.icon;
     }
 
     // Set badge for batches
@@ -987,11 +1016,7 @@ function downloadHTML() {
 }
 
 // ===== LAN Share =====
-
-function getCurrentFilePath() {
-    var match = window.location.pathname.match(/\/view\/(.+)/);
-    return match ? '/' + decodeURIComponent(match[1]) : '';
-}
+// getCurrentFilePath() is defined in editor.js (handles both /view/ routes and data-file attribute)
 
 function setSharePanelOpen(open) {
     var panel = document.getElementById('share-panel');
@@ -1594,8 +1619,8 @@ function highlightCurrentFile() {
 document.addEventListener('keydown', function(e) {
     // Cmd+B (Mac) or Ctrl+B (Windows/Linux)
     if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-        const content = document.getElementById('content');
-        if (content && content.dataset.view === 'file') {
+        const toggleBtn = document.getElementById('sidebar-toggle');
+        if (toggleBtn && toggleBtn.style.display !== 'none') {
             e.preventDefault();
             toggleSidebar();
         }
