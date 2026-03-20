@@ -5,10 +5,20 @@
             {{if .Subtitle}}<p class="subtitle">{{.Subtitle}}</p>{{end}}
             <div class="transcript-nav">
                 <a href="/">Files</a>
-                <a href="/timeline?session={{.SessionID}}">Timeline</a>
-                <a href="/timeline">All sessions</a>
+                <a href="/timeline">Timeline</a>
                 <a href="#transcript-bottom">Jump to end</a>
             </div>
+            {{if .SessionStats}}
+            <div class="transcript-stats">
+                <span>{{.SessionStats.FileCount}} file{{if ne .SessionStats.FileCount 1}}s{{end}}</span>
+                <span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.EditCount}} edit{{if ne .SessionStats.EditCount 1}}s{{end}}</span>
+                <span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.Duration}}</span>
+                {{if .SessionStats.Tools}}<span class="stat-sep">&middot;</span>
+                <span>{{.SessionStats.Tools}}</span>{{end}}
+            </div>
+            {{end}}
         </div>
 
         {{if .NotFound}}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,14 +31,12 @@ func findGitRoot(startDir string) (string, error) {
 
 type timelineTemplateData struct {
 	baseTemplateData
-	TreeHTML      template.HTML
-	Title         string
-	Subtitle      string
-	BrowsePath    string
-	Groups        []timelineDayGroup
-	FilterSession string // non-empty when filtered by session ID
-	SessionStats  *sessionFilterStats
-	RepoInfo      *repoInfo
+	TreeHTML   template.HTML
+	Title      string
+	Subtitle   string
+	BrowsePath string
+	Groups     []timelineDayGroup
+	RepoInfo   *repoInfo
 }
 
 type repoInfo struct {
@@ -46,13 +45,11 @@ type repoInfo struct {
 	Remote string // e.g. "github.com/razvandimescu/peekm"
 }
 
-type sessionFilterStats struct {
-	FullID        string
-	FileCount     int
-	EditCount     int
-	Duration      string
-	Tools         string // e.g. "Edit: 14, Write: 3"
-	HasTranscript bool
+type sessionStats struct {
+	FileCount int
+	EditCount int
+	Duration  string
+	Tools     string // e.g. "Edit: 14, Write: 3"
 }
 
 type timelineSession struct {
@@ -414,104 +411,40 @@ func mergeSessionsByTime(a, b []timelineSession) []timelineSession {
 	return merged
 }
 
-func filterTimelineBySession(filteredEvents []SessionEvent, filterSession string, groups []timelineDayGroup) *sessionFilterStats {
-	stats := computeSessionStats(filteredEvents, filterSession)
-
-	// For conversation-only sessions (0 events), populate stats from discovered session
-	if stats.EditCount == 0 {
-		for _, g := range groups {
-			for _, s := range g.Sessions {
-				if s.FullSessionID == filterSession {
-					stats.HasTranscript = s.HasTranscript
-					stats.Duration = s.Duration
-				}
-			}
-		}
-	}
-	return stats
-}
-
 func serveTimeline(w http.ResponseWriter, r *http.Request) {
+	// Redirect legacy /timeline?session=X to /transcript?session=X
+	if sessionID := r.URL.Query().Get("session"); sessionID != "" {
+		http.Redirect(w, r, "/transcript?session="+url.QueryEscape(sessionID), http.StatusFound)
+		return
+	}
+
 	fileMutex.RLock()
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
-
-	filterSession := r.URL.Query().Get("session")
 
 	var events []SessionEvent
 	if globalEventLog != nil {
 		events = globalEventLog.eventsForDir(currentBrowseDir)
 	}
 
-	var filteredEvents []SessionEvent
-	if filterSession != "" {
-		for _, evt := range events {
-			if evt.SessionID == filterSession {
-				filteredEvents = append(filteredEvents, evt)
-			}
-		}
-	} else {
-		filteredEvents = events
-	}
-
-	// Skip full transcript scanning when filtering by session
-	groups := buildSessionTimeline(filteredEvents, currentBrowseDir, filterSession == "")
-
-	var stats *sessionFilterStats
-	if filterSession != "" {
-		// If no edit sessions found, check if it's a conversation-only session
-		if len(filteredEvents) == 0 {
-			if path := resolveTranscriptPath(filterSession); path != "" {
-				summary, firstTS, lastTS := extractTranscriptMeta(path)
-				oldest, newest := firstTS, lastTS
-				if oldest.IsZero() {
-					oldest = time.Now()
-					newest = oldest
-				}
-				s := timelineSession{
-					SessionID:     truncateSessionID(filterSession),
-					FullSessionID: filterSession,
-					Summary:       summary,
-					HasTranscript: true,
-					SessionType:   "conversation",
-					newestTime:    newest,
-					oldestTime:    oldest,
-					Duration:      formatSessionDuration(newest.Sub(oldest)),
-				}
-				groups = []timelineDayGroup{{
-					Label:    dayLabel(newest),
-					Sessions: []timelineSession{s},
-				}}
-			}
-		}
-		stats = filterTimelineBySession(filteredEvents, filterSession, groups)
-	}
-
-	title := "AI Timeline"
-	subtitle := fmt.Sprintf("Session history for %s", currentBrowseDir)
-	if filterSession != "" {
-		title = fmt.Sprintf("Session %s", truncateSessionID(filterSession))
-		subtitle = ""
-	}
+	groups := buildSessionTimeline(events, currentBrowseDir, true)
 
 	data := timelineTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		TreeHTML:         template.HTML(generateTreeHTML()),
-		Title:            title,
-		Subtitle:         subtitle,
+		Title:            "AI Timeline",
+		Subtitle:         fmt.Sprintf("Session history for %s", currentBrowseDir),
 		BrowsePath:       currentBrowseDir,
 		Groups:           groups,
-		FilterSession:    filterSession,
-		SessionStats:     stats,
 		RepoInfo:         detectRepoInfo(currentBrowseDir),
 	}
 
 	renderTemplatePair(w, r, timelineTmpl, timelinePartialTmpl, data)
 }
 
-func computeSessionStats(events []SessionEvent, sessionID string) *sessionFilterStats {
+func computeSessionStats(events []SessionEvent) *sessionStats {
 	if len(events) == 0 {
-		return &sessionFilterStats{FullID: sessionID}
+		return nil
 	}
 	files := make(map[string]bool)
 	tools := make(map[string]int)
@@ -540,13 +473,11 @@ func computeSessionStats(events []SessionEvent, sessionID string) *sessionFilter
 		toolParts = append(toolParts, fmt.Sprintf("%s: %d", t, tools[t]))
 	}
 
-	return &sessionFilterStats{
-		FullID:        sessionID,
-		FileCount:     len(files),
-		EditCount:     len(events),
-		Duration:      durStr,
-		Tools:         strings.Join(toolParts, ", "),
-		HasTranscript: resolveTranscriptPath(sessionID) != "",
+	return &sessionStats{
+		FileCount: len(files),
+		EditCount: len(events),
+		Duration:  durStr,
+		Tools:     strings.Join(toolParts, ", "),
 	}
 }
 

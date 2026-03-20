@@ -18,13 +18,14 @@ import (
 // transcriptTemplateData is used for rendering the transcript viewer
 type transcriptTemplateData struct {
 	baseTemplateData
-	TreeHTML   template.HTML
-	Title      string
-	Subtitle   string
-	BrowsePath string
-	SessionID  string
-	Turns      []transcriptTurn
-	NotFound   bool
+	TreeHTML     template.HTML
+	Title        string
+	Subtitle     string
+	BrowsePath   string
+	SessionID    string
+	Turns        []transcriptTurn
+	NotFound     bool
+	SessionStats *sessionStats
 }
 
 // transcriptTurn represents a single user or assistant turn in the conversation
@@ -837,6 +838,17 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		} else {
 			data.Subtitle = fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
 		}
+	}
+
+	// Compute edit stats from event log (skip for not-found transcripts)
+	if !data.NotFound && globalEventLog != nil {
+		var sessionEvents []SessionEvent
+		for _, evt := range globalEventLog.eventsForDir(currentBrowseDir) {
+			if evt.SessionID == sessionID {
+				sessionEvents = append(sessionEvents, evt)
+			}
+		}
+		data.SessionStats = computeSessionStats(sessionEvents)
 	}
 
 	renderTemplatePair(w, r, transcriptTmpl, transcriptPartialTmpl, data)

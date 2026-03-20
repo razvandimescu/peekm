@@ -392,9 +392,9 @@ a.timeline-session-id:hover {
     color: var(--fgColor-muted);
     margin-top: 2px;
 }
-.timeline-stat-sep {
+.stat-sep {
     margin: 0 2px;
-    opacity: 0.5;
+    opacity: 0.4;
 }
 
 .timeline-session-tools {
@@ -598,58 +598,6 @@ a.timeline-session-id:hover {
     margin-right: 8px;
 }
 
-.session-filter-banner {
-    background: var(--bgColor-muted);
-    border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
-    padding: 12px 16px;
-    margin-bottom: 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-.session-filter-stats {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    font-size: 0.85em;
-}
-.session-filter-stats code {
-    font-size: 0.85em;
-    background: var(--bgColor-default);
-    padding: 2px 6px;
-    border-radius: 4px;
-}
-.session-filter-stat {
-    color: var(--fgColor-muted);
-}
-.session-filter-stat::before {
-    content: "\00B7";
-    margin-right: 12px;
-    color: var(--borderColor-default);
-}
-.session-filter-clear,
-a.session-filter-transcript {
-    font-size: 0.85em;
-    color: var(--fgColor-accent);
-    text-decoration: none;
-    white-space: nowrap;
-}
-.session-filter-clear:hover { text-decoration: underline; }
-a.session-filter-transcript {
-    background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
-    padding: 4px 12px;
-    border-radius: 16px;
-    font-weight: 500;
-}
-a.session-filter-transcript:hover {
-    background: var(--bgColor-accent-emphasis, #388bfd);
-    color: #fff;
-}
-
 .timeline-file-path {
     color: var(--fgColor-default);
     font-family: var(--font-mono);
@@ -693,6 +641,19 @@ a.session-filter-transcript:hover {
 }
 .transcript-nav a:hover { text-decoration: underline; }
 
+.transcript-stats {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--fgColor-muted);
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--bgColor-muted);
+    border-radius: 6px;
+    border: 1px solid var(--borderColor-muted);
+}
 .transcript-conversation {
     display: flex;
     flex-direction: column;
