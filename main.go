@@ -1087,11 +1087,11 @@ func scanUntrackedPlans(tracked map[string]*SessionMetadata, plansDir, cacheDir 
 		if _, exists := tracked[absPath]; exists {
 			continue
 		}
-		content, err := os.ReadFile(absPath)
-		if err != nil {
-			continue
-		}
 		if cacheDir != "" {
+			content, err := os.ReadFile(absPath)
+			if err != nil {
+				continue
+			}
 			_ = atomicWriteFile(filepath.Join(cacheDir, entry.Name()), string(content))
 		}
 		if !isWhitelistedFile(absPath) {

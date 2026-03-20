@@ -341,20 +341,18 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 
 func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	bucketMap := make(map[string]*timelineDayGroup)
-	var bucketOrder []string
 
 	for i := range sessions {
 		label := dayLabel(sessions[i].newestTime)
 		if _, exists := bucketMap[label]; !exists {
 			bucketMap[label] = &timelineDayGroup{Label: label}
-			bucketOrder = append(bucketOrder, label)
 		}
 		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
 	}
 
-	groups := make([]timelineDayGroup, 0, len(bucketOrder))
-	for _, label := range bucketOrder {
-		groups = append(groups, *bucketMap[label])
+	groups := make([]timelineDayGroup, 0, len(bucketMap))
+	for _, g := range bucketMap {
+		groups = append(groups, *g)
 	}
 	sort.Slice(groups, func(i, j int) bool {
 		return groups[i].Sessions[0].newestTime.After(groups[j].Sessions[0].newestTime)
