@@ -1925,14 +1925,22 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	filePath = filepath.Clean(filePath)
 	absFilePath := resolveFilePath(filePath)
 
-	if !isWhitelistedFile(absFilePath) {
-		http.NotFound(w, r)
-		return
-	}
-
 	fileMutex.RLock()
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
+
+	if !isWhitelistedFile(absFilePath) {
+		// Serve co-located assets (images, CSS, JS) referenced by markdown files
+		ext := strings.ToLower(filepath.Ext(absFilePath))
+		if _, ok := allowedAssetExts[ext]; ok {
+			if validated, err := validateAndResolvePath(absFilePath); err == nil && isWithinDir(validated, currentBrowseDir) {
+				http.ServeFile(w, r, validated)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
 
 	ext := strings.ToLower(filepath.Ext(absFilePath))
 	isPreview := shareableRawExts[ext]
