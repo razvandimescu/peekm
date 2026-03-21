@@ -62,7 +62,8 @@ type timelineSession struct {
 	EditCount     int
 	Tools         []string // unique tool names
 	HasTranscript bool
-	IsActive      bool   // newest event < 5min ago
+	IsActive      bool   // newest event or heartbeat < 5min ago
+	LastTool      string // most recent tool call (from heartbeat)
 	SessionType   string // "edit" or "conversation"
 	Events        []timelineEntry
 	newestTime    time.Time
@@ -364,8 +365,17 @@ func markActiveSessions(groups []timelineDayGroup) {
 	now := time.Now()
 	for i := range groups {
 		for j := range groups[i].Sessions {
-			if now.Sub(groups[i].Sessions[j].newestTime) < 5*time.Minute {
-				groups[i].Sessions[j].IsActive = true
+			s := &groups[i].Sessions[j]
+			if now.Sub(s.newestTime) < 5*time.Minute {
+				s.IsActive = true
+			}
+			if s.FullSessionID != "" {
+				if hb, ok := globalHeartbeats.get(s.FullSessionID); ok {
+					if now.Sub(hb.Timestamp) < 5*time.Minute {
+						s.IsActive = true
+						s.LastTool = hb.ToolName
+					}
+				}
 			}
 		}
 	}

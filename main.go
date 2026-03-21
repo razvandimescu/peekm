@@ -119,6 +119,9 @@ var (
 	// Persistent event log (JSONL file for session history)
 	globalEventLog *eventLog
 
+	// Heartbeat tracker (last tool call per session, in-memory only)
+	globalHeartbeats = newHeartbeatStore()
+
 	// LAN share store (in-memory, dies on restart)
 	globalShareStore *shareStore
 )
@@ -191,6 +194,43 @@ func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
 	defer ss.mu.RUnlock()
 	metadata, exists := ss.mappings[filePath]
 	return metadata, exists
+}
+
+// heartbeatStore tracks the last tool call per session (in-memory, not persisted)
+type heartbeatStore struct {
+	mu    sync.RWMutex
+	beats map[string]heartbeat // session ID → last heartbeat
+}
+
+type heartbeat struct {
+	ToolName  string
+	Timestamp time.Time
+}
+
+func newHeartbeatStore() *heartbeatStore {
+	return &heartbeatStore{beats: make(map[string]heartbeat)}
+}
+
+func (hs *heartbeatStore) update(sessionID, toolName string) {
+	now := time.Now()
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.beats[sessionID] = heartbeat{ToolName: toolName, Timestamp: now}
+	// Lazy eviction: reap stale entries when map grows
+	if len(hs.beats) > 50 {
+		for id, hb := range hs.beats {
+			if now.Sub(hb.Timestamp) > 10*time.Minute {
+				delete(hs.beats, id)
+			}
+		}
+	}
+}
+
+func (hs *heartbeatStore) get(sessionID string) (heartbeat, bool) {
+	hs.mu.RLock()
+	defer hs.mu.RUnlock()
+	hb, ok := hs.beats[sessionID]
+	return hb, ok
 }
 
 // SessionEvent is a single AI session event persisted to disk
@@ -1762,8 +1802,15 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	coalesce(&req.ToolUseID, req.TUID)
 
 	// Validate required fields
-	if req.SessionID == "" || req.FilePath == "" {
-		http.Error(w, "Missing required fields: session_id/sid and file_path/path", http.StatusBadRequest)
+	if req.SessionID == "" {
+		http.Error(w, "Missing required field: session_id/sid", http.StatusBadRequest)
+		return
+	}
+
+	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
+	globalHeartbeats.update(req.SessionID, req.ToolName)
+	if req.FilePath == "" {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 

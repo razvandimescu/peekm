@@ -77,42 +77,48 @@ func installClaudeHooks(claudeDir string, hookPort int) (int, error) {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 
 	hookScript := fmt.Sprintf(`#!/bin/bash
-# peekm hook: Persist session events to JSONL, then notify running instance
+# peekm hook: Persist edit events to JSONL, heartbeat all tool calls
 json=$(cat)
 session_id=$(echo "$json" | jq -r '.session_id // empty')
 tool_name=$(echo "$json" | jq -r '.tool_name // empty')
+
+[ -z "$session_id" ] || [ -z "$tool_name" ] && exit 0
+
+notify() {
+    for port in %d 6419 8080 3000; do
+        curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "$1" --max-time 0.05 \
+            "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && return
+    done
+}
+
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
-
-[ -z "$session_id" ] || [ -z "$tool_name" ] || [ -z "$file_path" ] && exit 0
-
-perm_mode=$(echo "$json" | jq -r '.permission_mode // empty')
-tool_use_id=$(echo "$json" | jq -r '.tool_use_id // empty')
-cwd=$(echo "$json" | jq -r '.cwd // empty')
-content=$(echo "$json" | jq -r '.tool_input.content // empty')
 ts=$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")
 
-event=$(jq -nc --arg sid "$session_id" --arg path "$file_path" \
-    --arg tool "$tool_name" --arg perm "$perm_mode" \
-    --arg tuid "$tool_use_id" --arg cwd "$cwd" --arg ts "$ts" \
-    '{sid:$sid,path:$path,tool:$tool,perm:$perm,tuid:$tuid,cwd:$cwd,ts:$ts}|with_entries(select(.value!=""))')
+if [ -n "$file_path" ]; then
+    # Edit event: persist to JSONL + notify
+    perm_mode=$(echo "$json" | jq -r '.permission_mode // empty')
+    tool_use_id=$(echo "$json" | jq -r '.tool_use_id // empty')
+    cwd=$(echo "$json" | jq -r '.cwd // empty')
+    content=$(echo "$json" | jq -r '.tool_input.content // empty')
 
-# 1. Persist to event log (atomic append, works even if peekm not running)
-mkdir -p ~/.peekm
-echo "$event" >> ~/.peekm/events.jsonl 2>/dev/null
+    event=$(jq -nc --arg sid "$session_id" --arg path "$file_path" \
+        --arg tool "$tool_name" --arg perm "$perm_mode" \
+        --arg tuid "$tool_use_id" --arg cwd "$cwd" --arg ts "$ts" \
+        '{sid:$sid,path:$path,tool:$tool,perm:$perm,tuid:$tuid,cwd:$cwd,ts:$ts}|with_entries(select(.value!=""))')
 
-# 2. Best-effort notification to running peekm (scan common ports)
-for port in %d 6419 8080 3000; do
+    mkdir -p ~/.peekm
+    echo "$event" >> ~/.peekm/events.jsonl 2>/dev/null
+
     if echo "$file_path" | grep -q '\.claude/plans/.*\.md$' && [ -n "$content" ]; then
-        payload=$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content, ts: "'"$ts"'"}')
-        curl -sf -X POST -H 'Content-Type: application/json' \
-            -d "$payload" \
-            --max-time 0.05 "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && break
+        notify "$(echo "$json" | jq -c '{session_id, tool_name, file_path: .tool_input.file_path, content: .tool_input.content, ts: "'"$ts"'"}')"
     else
-        curl -sf -X POST -H 'Content-Type: application/json' \
-            -d "$event" \
-            --max-time 0.05 "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && break
+        notify "$event"
     fi
-done
+else
+    # Heartbeat: non-edit tool call, just notify (no JSONL)
+    notify "$(jq -nc --arg sid "$session_id" --arg tool "$tool_name" '{sid:$sid,tool:$tool}')"
+fi
 `, hookPort)
 
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
@@ -217,7 +223,12 @@ func autoSetupClaudeHooks() {
 }
 
 // peekmHookMatchers defines the PostToolUse tool names that peekm hooks into.
-var peekmHookMatchers = []string{"Write", "Edit", "NotebookEdit"}
+// Edit tools (Write, Edit, NotebookEdit) get full JSONL persistence.
+// Other tools send heartbeats only (active badge + last tool display).
+var peekmHookMatchers = []string{
+	"Write", "Edit", "NotebookEdit",
+	"Read", "Bash", "Grep", "Glob", "Agent",
+}
 
 // loadPostToolUseHooks reads settings.json and extracts the PostToolUse entries.
 // Returns (settings, postToolUse, error). Missing file returns empty structures, nil error.
