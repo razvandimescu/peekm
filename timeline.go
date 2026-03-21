@@ -53,21 +53,23 @@ type sessionStats struct {
 }
 
 type timelineSession struct {
-	SessionID     string // truncated 8 chars
-	FullSessionID string
-	Summary       string // first user prompt (truncated)
-	Project       string // project name from CWD (e.g. "peekm")
-	Duration      string // e.g. "12m", "< 1s"
-	FileCount     int
-	EditCount     int
-	Tools         []string // unique tool names
-	HasTranscript bool
-	IsActive      bool   // newest event or heartbeat < 5min ago
-	LastTool      string // most recent tool call (from heartbeat)
-	SessionType   string // "edit" or "conversation"
-	Events        []timelineEntry
-	newestTime    time.Time
-	oldestTime    time.Time
+	SessionID      string // truncated 8 chars
+	FullSessionID  string
+	Summary        string // first user prompt (truncated)
+	Project        string // project name from CWD (e.g. "peekm")
+	Duration       string // e.g. "12m", "< 1s"
+	FileCount      int
+	EditCount      int
+	Tools          []string // unique tool names
+	HasTranscript  bool
+	IsActive       bool   // newest event or heartbeat < 5min ago
+	LastTool       string // most recent tool call (from heartbeat)
+	LastToolAgo    string // relative time of last tool call (for tooltip)
+	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
+	SessionType    string // "edit" or "conversation"
+	Events         []timelineEntry
+	newestTime     time.Time
+	oldestTime     time.Time
 }
 
 type timelineDayGroup struct {
@@ -374,6 +376,8 @@ func markActiveSessions(groups []timelineDayGroup) {
 					if now.Sub(hb.Timestamp) < 5*time.Minute {
 						s.IsActive = true
 						s.LastTool = hb.ToolName
+						s.LastToolAgo = formatTimeAgo(hb.Timestamp)
+						s.LastToolDetail = hb.Detail
 					}
 				}
 			}

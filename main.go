@@ -204,6 +204,7 @@ type heartbeatStore struct {
 
 type heartbeat struct {
 	ToolName  string
+	Detail    string
 	Timestamp time.Time
 }
 
@@ -211,11 +212,11 @@ func newHeartbeatStore() *heartbeatStore {
 	return &heartbeatStore{beats: make(map[string]heartbeat)}
 }
 
-func (hs *heartbeatStore) update(sessionID, toolName string) {
+func (hs *heartbeatStore) update(sessionID, toolName, detail string) {
 	now := time.Now()
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
-	hs.beats[sessionID] = heartbeat{ToolName: toolName, Timestamp: now}
+	hs.beats[sessionID] = heartbeat{ToolName: toolName, Detail: detail, Timestamp: now}
 	// Lazy eviction: reap stale entries when map grows
 	if len(hs.beats) > 50 {
 		for id, hb := range hs.beats {
@@ -1781,12 +1782,13 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		CWD            string `json:"cwd"`
 		TranscriptPath string `json:"transcript_path"`
 		// Short-form field names (new hook writes SessionEvent JSON)
-		SID  string `json:"sid"`
-		Path string `json:"path"`
-		Tool string `json:"tool"`
-		Perm string `json:"perm"`
-		TUID string `json:"tuid"`
-		TS   string `json:"ts"`
+		SID    string `json:"sid"`
+		Path   string `json:"path"`
+		Tool   string `json:"tool"`
+		Perm   string `json:"perm"`
+		TUID   string `json:"tuid"`
+		TS     string `json:"ts"`
+		Detail string `json:"detail"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1808,7 +1810,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
-	globalHeartbeats.update(req.SessionID, req.ToolName)
+	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
 	if req.FilePath == "" {
 		w.WriteHeader(http.StatusOK)
 		return
