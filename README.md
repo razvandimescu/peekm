@@ -151,7 +151,7 @@ Not yet. Claude Code exposes PostToolUse hooks that make real-time tracking poss
 
 ## Development
 
-Go 1.23+. `go build -o peekm && go test -race ./...`
+Go 1.24+. `make all` runs build, test (-race), and lint.
 
 ## Contributing
 
