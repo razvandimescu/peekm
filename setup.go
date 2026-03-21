@@ -175,28 +175,7 @@ fi
 	return added, nil
 }
 
-// isClaudeHooksInstalled checks if peekm hooks are fully configured.
-func isClaudeHooksInstalled(claudeDir string) bool {
-	hookScriptPath := filepath.Join(claudeDir, "peekm-hook.sh")
-	if _, err := os.Stat(hookScriptPath); err != nil {
-		return false
-	}
-
-	settingsPath := filepath.Join(claudeDir, "settings.json")
-	_, postToolUse, err := loadPostToolUseHooks(settingsPath)
-	if err != nil || postToolUse == nil {
-		return false
-	}
-
-	for _, matcher := range peekmHookMatchers {
-		if !hasPeekmHook(postToolUse, matcher, hookScriptPath) {
-			return false
-		}
-	}
-	return true
-}
-
-// autoSetupClaudeHooks silently configures Claude Code hooks on first run.
+// autoSetupClaudeHooks keeps the hook script up-to-date and adds any missing matchers.
 func autoSetupClaudeHooks() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -206,10 +185,6 @@ func autoSetupClaudeHooks() {
 	claudeDir := filepath.Join(homeDir, ".claude")
 	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
 		log.Printf("Tip: install Claude Code for AI session tracking (https://claude.ai/code)")
-		return
-	}
-
-	if isClaudeHooksInstalled(claudeDir) {
 		return
 	}
 

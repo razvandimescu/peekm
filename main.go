@@ -1812,6 +1812,15 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
 	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
 	if req.FilePath == "" {
+		detail := req.Detail
+		if len(detail) > 80 {
+			detail = detail[:80] + "..."
+		}
+		if detail != "" {
+			log.Printf("Heartbeat %s: %s — %s", truncateSessionID(req.SessionID), req.ToolName, detail)
+		} else {
+			log.Printf("Heartbeat %s: %s (no detail)", truncateSessionID(req.SessionID), req.ToolName)
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
