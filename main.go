@@ -672,12 +672,18 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 	allowedLocal := fmt.Sprintf("http://localhost:%d", *port)
 	allowedLoopback := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" && origin != allowedLocal && origin != allowedLoopback {
-			log.Printf("CSRF: rejected cross-origin POST from %s", origin)
-			http.Error(w, "Forbidden: cross-origin request", http.StatusForbidden)
+		origin := r.Header.Get("Origin")
+		if origin == "" || origin == allowedLocal || origin == allowedLoopback {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		// Allow requests where Origin matches the Host (local DNS aliases like Numa)
+		if host := r.Host; host != "" && (origin == "http://"+host || origin == "https://"+host) {
+			next(w, r)
+			return
+		}
+		log.Printf("CSRF: rejected cross-origin POST from %s", origin)
+		http.Error(w, "Forbidden: cross-origin request", http.StatusForbidden)
 	}
 }
 
