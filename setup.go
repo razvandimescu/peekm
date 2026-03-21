@@ -6,24 +6,30 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // runSetup handles the "peekm setup" subcommand
 func runSetup(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: peekm setup claude-code [--remove] [--port PORT]")
-		fmt.Println("\nConfigures Claude Code to send file modification events to peekm.")
+		fmt.Println("Usage: peekm setup <target> [options]")
+		fmt.Println("\nTargets:")
+		fmt.Println("  claude-code  Configure Claude Code hooks [--remove] [--port PORT]")
+		fmt.Println("  autostart    Install as background service [--remove]")
 		os.Exit(1)
 	}
 
 	switch args[0] {
 	case "claude-code":
 		setupClaudeCode(args[1:])
+	case "autostart":
+		setupAutostart(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown setup target: %s\n", args[0])
-		fmt.Println("Available: claude-code")
+		fmt.Println("Available: claude-code, autostart")
 		os.Exit(1)
 	}
 }
@@ -315,4 +321,279 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	}
 
 	fmt.Print("\n  Done.\n\n")
+}
+
+func setupAutostart(args []string) {
+	setupFlags := flag.NewFlagSet("setup autostart", flag.ExitOnError)
+	remove := setupFlags.Bool("remove", false, "Remove autostart service")
+	setupFlags.Parse(args)
+
+	if *remove {
+		removeAutostart()
+	} else {
+		installAutostart()
+	}
+}
+
+func installAutostart() {
+	binPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine peekm binary path: %v\n", err)
+		os.Exit(1)
+	}
+	binPath, err = filepath.EvalSymlinks(binPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot resolve binary path: %v\n", err)
+		os.Exit(1)
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch detectServiceManager() {
+	case "launchd":
+		installLaunchd(binPath, homeDir)
+	case "systemd":
+		installSystemd(binPath, homeDir)
+	case "startup-folder":
+		installStartupFolder(binPath, homeDir)
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unsupported platform (need launchd on macOS, systemd on Linux, or Windows)\n")
+		os.Exit(1)
+	}
+}
+
+func removeAutostart() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch detectServiceManager() {
+	case "launchd":
+		removeLaunchd(homeDir)
+	case "systemd":
+		removeSystemd(homeDir)
+	case "startup-folder":
+		removeStartupFolder(homeDir)
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unsupported platform\n")
+		os.Exit(1)
+	}
+}
+
+func detectServiceManager() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "launchd"
+	case "windows":
+		return "startup-folder"
+	default:
+		if fileExists("/run/systemd/system") {
+			return "systemd"
+		}
+		return ""
+	}
+}
+
+const launchdLabel = "dev.peekm.agent"
+
+func installLaunchd(binPath, homeDir string) {
+	plistDir := filepath.Join(homeDir, "Library", "LaunchAgents")
+	plistPath := filepath.Join(plistDir, launchdLabel+".plist")
+	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>-browser=false</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>%s</string>
+    <key>StandardErrorPath</key>
+    <string>%s</string>
+    <key>WorkingDirectory</key>
+    <string>%s</string>
+</dict>
+</plist>
+`, launchdLabel, binPath, logPath, logPath, homeDir)
+
+	fmt.Println("\n  peekm autostart (launchd)")
+	fmt.Println("  ========================")
+
+	os.MkdirAll(plistDir, 0755)
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+
+	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error writing plist: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("    Created %s\n", plistPath)
+
+	// Unload first (ignore errors if not loaded)
+	domain := fmt.Sprintf("gui/%d", os.Getuid())
+	runCommand("launchctl", "bootout", domain+"/"+launchdLabel)
+	if err := runCommand("launchctl", "bootstrap", domain, plistPath); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error loading service: %v\n", err)
+		fmt.Println("    Try: launchctl bootstrap gui/$(id -u) " + plistPath)
+		os.Exit(1)
+	}
+	fmt.Println("    Service loaded and started")
+	fmt.Printf("    Logs: %s\n", logPath)
+	printAutostartSuccess()
+}
+
+func removeLaunchd(homeDir string) {
+	plistPath := filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
+
+	fmt.Println("\n  Removing peekm autostart (launchd)")
+	fmt.Println("  ===================================")
+
+	if err := runCommand("launchctl", "bootout", fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel)); err != nil {
+		fmt.Println("    Service was not running")
+	} else {
+		fmt.Println("    Service stopped")
+	}
+
+	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "    Error removing plist: %v\n", err)
+	} else {
+		fmt.Printf("    Removed %s\n", plistPath)
+	}
+
+	fmt.Print("\n  Done.\n\n")
+}
+
+const systemdUnit = "peekm"
+
+func installSystemd(binPath, homeDir string) {
+	unitDir := filepath.Join(homeDir, ".config", "systemd", "user")
+	unitPath := filepath.Join(unitDir, systemdUnit+".service")
+
+	unit := fmt.Sprintf(`[Unit]
+Description=peekm markdown viewer with AI session tracking
+After=network.target
+
+[Service]
+ExecStart=%s -browser=false
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=%s
+
+[Install]
+WantedBy=default.target
+`, binPath, homeDir)
+
+	fmt.Println("\n  peekm autostart (systemd)")
+	fmt.Println("  =========================")
+
+	os.MkdirAll(unitDir, 0755)
+
+	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error writing unit file: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("    Created %s\n", unitPath)
+
+	if err := runCommand("systemctl", "--user", "daemon-reload"); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error reloading systemd: %v\n", err)
+		os.Exit(1)
+	}
+	if err := runCommand("systemctl", "--user", "enable", "--now", systemdUnit); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error enabling service: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("    Service enabled and started")
+	fmt.Println("    Logs: journalctl --user -u peekm -f")
+	printAutostartSuccess()
+}
+
+func removeSystemd(homeDir string) {
+	unitPath := filepath.Join(homeDir, ".config", "systemd", "user", systemdUnit+".service")
+
+	fmt.Println("\n  Removing peekm autostart (systemd)")
+	fmt.Println("  ===================================")
+
+	if err := runCommand("systemctl", "--user", "disable", "--now", systemdUnit); err != nil {
+		fmt.Println("    Service was not running")
+	} else {
+		fmt.Println("    Service stopped and disabled")
+	}
+
+	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "    Error removing unit file: %v\n", err)
+	} else {
+		fmt.Printf("    Removed %s\n", unitPath)
+	}
+
+	runCommand("systemctl", "--user", "daemon-reload")
+	fmt.Print("\n  Done.\n\n")
+}
+
+func startupFolderPath(homeDir string) string {
+	return filepath.Join(homeDir, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "peekm.vbs")
+}
+
+func installStartupFolder(binPath, homeDir string) {
+	vbsPath := startupFolderPath(homeDir)
+	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
+
+	// VBScript wrapper runs peekm hidden (no console window)
+	vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """%s"" -browser=false > ""%s"" 2>&1", 0, False
+`, binPath, logPath)
+
+	fmt.Println("\n  peekm autostart (Windows Startup folder)")
+	fmt.Println("  =========================================")
+
+	os.MkdirAll(filepath.Join(homeDir, ".peekm"), 0755)
+
+	if err := os.WriteFile(vbsPath, []byte(vbs), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error writing startup script: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("    Created %s\n", vbsPath)
+	fmt.Printf("    Logs: %s\n", logPath)
+	printAutostartSuccess()
+}
+
+func removeStartupFolder(homeDir string) {
+	vbsPath := startupFolderPath(homeDir)
+
+	fmt.Println("\n  Removing peekm autostart (Windows)")
+	fmt.Println("  ====================================")
+
+	if err := os.Remove(vbsPath); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "    Error removing startup script: %v\n", err)
+	} else {
+		fmt.Printf("    Removed %s\n", vbsPath)
+	}
+
+	fmt.Print("\n  Done.\n\n")
+}
+
+func printAutostartSuccess() {
+	fmt.Print("\n  peekm will now start automatically on login.\n")
+	fmt.Print("  Remove with: peekm setup autostart --remove\n\n")
+}
+
+func runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

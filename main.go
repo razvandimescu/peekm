@@ -1193,9 +1193,10 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
+		fmt.Fprintf(os.Stderr, "       peekm setup autostart [--remove]\n")
 		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
-		fmt.Fprintf(os.Stderr, "  setup     Configure integrations (e.g. Claude Code hooks)\n")
+		fmt.Fprintf(os.Stderr, "  setup     Configure integrations and system service\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
 	}
