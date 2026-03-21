@@ -117,7 +117,7 @@ if [ -n "$file_path" ]; then
     fi
 else
     # Heartbeat: non-edit tool call, just notify (no JSONL)
-    detail=$(echo "$json" | jq -r '.tool_input | .description // .command // .file_path // .pattern // .prompt // empty' | head -c 120)
+    detail=$(echo "$json" | jq -r '.tool_input | .description // .command // .file_path // .pattern // .prompt // empty' | head -c 300)
     notify "$(jq -nc --arg sid "$session_id" --arg tool "$tool_name" --arg d "$detail" \
         '{sid:$sid,tool:$tool,detail:$d}|with_entries(select(.value!=""))')"
 fi
