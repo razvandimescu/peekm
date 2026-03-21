@@ -53,20 +53,23 @@ type sessionStats struct {
 }
 
 type timelineSession struct {
-	SessionID     string // truncated 8 chars
-	FullSessionID string
-	Summary       string // first user prompt (truncated)
-	Project       string // project name from CWD (e.g. "peekm")
-	Duration      string // e.g. "12m", "< 1s"
-	FileCount     int
-	EditCount     int
-	Tools         []string // unique tool names
-	HasTranscript bool
-	IsActive      bool   // newest event < 5min ago
-	SessionType   string // "edit" or "conversation"
-	Events        []timelineEntry
-	newestTime    time.Time
-	oldestTime    time.Time
+	SessionID      string // truncated 8 chars
+	FullSessionID  string
+	Summary        string // first user prompt (truncated)
+	Project        string // project name from CWD (e.g. "peekm")
+	Duration       string // e.g. "12m", "< 1s"
+	FileCount      int
+	EditCount      int
+	Tools          []string // unique tool names
+	HasTranscript  bool
+	IsActive       bool   // newest event or heartbeat < 5min ago
+	LastTool       string // most recent tool call (from heartbeat)
+	LastToolAgo    string // relative time of last tool call (for tooltip)
+	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
+	SessionType    string // "edit" or "conversation"
+	Events         []timelineEntry
+	newestTime     time.Time
+	oldestTime     time.Time
 }
 
 type timelineDayGroup struct {
@@ -341,21 +344,22 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 
 func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	bucketMap := make(map[string]*timelineDayGroup)
-	var bucketOrder []string
 
 	for i := range sessions {
 		label := dayLabel(sessions[i].newestTime)
 		if _, exists := bucketMap[label]; !exists {
 			bucketMap[label] = &timelineDayGroup{Label: label}
-			bucketOrder = append(bucketOrder, label)
 		}
 		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
 	}
 
-	groups := make([]timelineDayGroup, 0, len(bucketOrder))
-	for _, label := range bucketOrder {
-		groups = append(groups, *bucketMap[label])
+	groups := make([]timelineDayGroup, 0, len(bucketMap))
+	for _, g := range bucketMap {
+		groups = append(groups, *g)
 	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Sessions[0].newestTime.After(groups[j].Sessions[0].newestTime)
+	})
 	return groups
 }
 
@@ -363,8 +367,19 @@ func markActiveSessions(groups []timelineDayGroup) {
 	now := time.Now()
 	for i := range groups {
 		for j := range groups[i].Sessions {
-			if now.Sub(groups[i].Sessions[j].newestTime) < 5*time.Minute {
-				groups[i].Sessions[j].IsActive = true
+			s := &groups[i].Sessions[j]
+			if now.Sub(s.newestTime) < 5*time.Minute {
+				s.IsActive = true
+			}
+			if s.FullSessionID != "" {
+				if hb, ok := globalHeartbeats.get(s.FullSessionID); ok {
+					if now.Sub(hb.Timestamp) < 5*time.Minute {
+						s.IsActive = true
+						s.LastTool = hb.ToolName
+						s.LastToolAgo = formatTimeAgo(hb.Timestamp)
+						s.LastToolDetail = hb.Detail
+					}
+				}
 			}
 		}
 	}

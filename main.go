@@ -63,6 +63,8 @@ var (
 		"venv":         true,
 		"env":          true,
 		"virtualenv":   true,
+		"target":       true,
+		"__pycache__":  true,
 	}
 
 	// Flags
@@ -116,6 +118,9 @@ var (
 
 	// Persistent event log (JSONL file for session history)
 	globalEventLog *eventLog
+
+	// Heartbeat tracker (last tool call per session, in-memory only)
+	globalHeartbeats = newHeartbeatStore()
 
 	// LAN share store (in-memory, dies on restart)
 	globalShareStore *shareStore
@@ -189,6 +194,44 @@ func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
 	defer ss.mu.RUnlock()
 	metadata, exists := ss.mappings[filePath]
 	return metadata, exists
+}
+
+// heartbeatStore tracks the last tool call per session (in-memory, not persisted)
+type heartbeatStore struct {
+	mu    sync.RWMutex
+	beats map[string]heartbeat // session ID → last heartbeat
+}
+
+type heartbeat struct {
+	ToolName  string
+	Detail    string
+	Timestamp time.Time
+}
+
+func newHeartbeatStore() *heartbeatStore {
+	return &heartbeatStore{beats: make(map[string]heartbeat)}
+}
+
+func (hs *heartbeatStore) update(sessionID, toolName, detail string) {
+	now := time.Now()
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	hs.beats[sessionID] = heartbeat{ToolName: toolName, Detail: detail, Timestamp: now}
+	// Lazy eviction: reap stale entries when map grows
+	if len(hs.beats) > 50 {
+		for id, hb := range hs.beats {
+			if now.Sub(hb.Timestamp) > 10*time.Minute {
+				delete(hs.beats, id)
+			}
+		}
+	}
+}
+
+func (hs *heartbeatStore) get(sessionID string) (heartbeat, bool) {
+	hs.mu.RLock()
+	defer hs.mu.RUnlock()
+	hb, ok := hs.beats[sessionID]
+	return hb, ok
 }
 
 // SessionEvent is a single AI session event persisted to disk
@@ -1028,14 +1071,16 @@ func initSessionTracking() {
 	}
 	globalEventLog = el
 
+	plansDir := claudePlansDir()
 	plansDirPrefix := ""
-	if plansDir := claudePlansDir(); plansDir != "" {
+	if plansDir != "" {
 		plansDirPrefix = plansDir + string(os.PathSeparator)
 	}
 
 	cacheDir := plansCacheDir()
 
-	for path, meta := range el.latestPerFile() {
+	tracked := el.latestPerFile()
+	for path, meta := range tracked {
 		globalSessionStore.register(path, meta)
 		// Whitelist plan files if original or cached copy exists
 		if plansDirPrefix != "" && strings.HasPrefix(path, plansDirPrefix) && strings.HasSuffix(path, ".md") && !isWhitelistedFile(path) {
@@ -1051,10 +1096,55 @@ func initSessionTracking() {
 		}
 	}
 
+	scanUntrackedPlans(tracked, plansDir, cacheDir)
+
 	el.mu.RLock()
 	n := len(el.events)
 	el.mu.RUnlock()
 	log.Printf("Loaded %d persisted session events", n)
+}
+
+// scanUntrackedPlans discovers plan files in ~/.claude/plans/ that have no
+// corresponding event in events.jsonl, whitelists them for viewing, and caches
+// them for durability. No timeline events are created — the owning session's
+// transcript already provides timeline visibility.
+func scanUntrackedPlans(tracked map[string]*SessionMetadata, plansDir, cacheDir string) {
+	if plansDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(plansDir)
+	if err != nil {
+		return
+	}
+	if cacheDir != "" {
+		os.MkdirAll(cacheDir, 0755)
+	}
+	var count int
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		absPath := filepath.Join(plansDir, entry.Name())
+		if _, exists := tracked[absPath]; exists {
+			continue
+		}
+		if cacheDir != "" {
+			content, err := os.ReadFile(absPath)
+			if err != nil {
+				continue
+			}
+			_ = atomicWriteFile(filepath.Join(cacheDir, entry.Name()), string(content))
+		}
+		if !isWhitelistedFile(absPath) {
+			fileMutex.Lock()
+			markdownFiles = append(markdownFiles, absPath)
+			fileMutex.Unlock()
+		}
+		count++
+	}
+	if count > 0 {
+		log.Printf("Discovered %d untracked plan file(s)", count)
+	}
 }
 
 // serveAndWait starts the HTTP server, handles graceful shutdown, and blocks until exit.
@@ -1103,9 +1193,10 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
+		fmt.Fprintf(os.Stderr, "       peekm setup autostart [--remove]\n")
 		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
-		fmt.Fprintf(os.Stderr, "  setup     Configure integrations (e.g. Claude Code hooks)\n")
+		fmt.Fprintf(os.Stderr, "  setup     Configure integrations and system service\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
 	}
@@ -1692,12 +1783,13 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		CWD            string `json:"cwd"`
 		TranscriptPath string `json:"transcript_path"`
 		// Short-form field names (new hook writes SessionEvent JSON)
-		SID  string `json:"sid"`
-		Path string `json:"path"`
-		Tool string `json:"tool"`
-		Perm string `json:"perm"`
-		TUID string `json:"tuid"`
-		TS   string `json:"ts"`
+		SID    string `json:"sid"`
+		Path   string `json:"path"`
+		Tool   string `json:"tool"`
+		Perm   string `json:"perm"`
+		TUID   string `json:"tuid"`
+		TS     string `json:"ts"`
+		Detail string `json:"detail"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1713,8 +1805,24 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	coalesce(&req.ToolUseID, req.TUID)
 
 	// Validate required fields
-	if req.SessionID == "" || req.FilePath == "" {
-		http.Error(w, "Missing required fields: session_id/sid and file_path/path", http.StatusBadRequest)
+	if req.SessionID == "" {
+		http.Error(w, "Missing required field: session_id/sid", http.StatusBadRequest)
+		return
+	}
+
+	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
+	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
+	if req.FilePath == "" {
+		detail := req.Detail
+		if len(detail) > 80 {
+			detail = detail[:80] + "..."
+		}
+		if detail != "" {
+			log.Printf("Heartbeat %s: %s — %s", truncateSessionID(req.SessionID), req.ToolName, detail)
+		} else {
+			log.Printf("Heartbeat %s: %s (no detail)", truncateSessionID(req.SessionID), req.ToolName)
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -2653,10 +2761,18 @@ func generateTreeHTML() string {
 	// Generate HTML
 	var buf bytes.Buffer
 
-	// Prepend smart folders (if AI tracking is active)
+	// Prepend smart folders or tracking hint (if AI tracking is active)
 	if globalEventLog != nil {
 		folders := generateSmartFolders()
-		buf.WriteString(generateSmartFolderHTML(folders))
+		if html := generateSmartFolderHTML(folders); html != "" {
+			buf.WriteString(html)
+		} else {
+			buf.WriteString(`<div class="ai-tracking-hint">` +
+				`<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">` +
+				`<path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/>` +
+				`</svg> AI edits will appear here` +
+				`</div><div class="smart-folders-separator"></div>`)
+		}
 	}
 
 	generateTreeHTMLRecursive(root, "", true, true, 0, false, &buf)

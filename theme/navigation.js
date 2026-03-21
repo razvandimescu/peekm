@@ -672,7 +672,9 @@ function updateConnectionStatus(count) {
     }
 
     if (statusEl) {
-        statusEl.title = count > 0 ? 'Live reload active' : 'Disconnected — will retry';
+        const hasAI = !!document.querySelector('.connection-ai-label');
+        const connectedTitle = hasAI ? 'Live reload + AI tracking active' : 'Live reload active';
+        statusEl.title = count > 0 ? connectedTitle : 'Disconnected — will retry';
         statusEl.classList.toggle('disconnected', count === 0);
     }
 }

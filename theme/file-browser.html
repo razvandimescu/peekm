@@ -987,6 +987,14 @@
             display: inline;
         }
 
+        .connection-ai-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--fgColor-muted);
+        }
+
         /* Edit button (now in header-actions) */
         .edit-button {
             display: inline-flex;
@@ -1418,6 +1426,18 @@
             margin: 8px 8px 12px;
         }
 
+        .ai-tracking-hint {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--fgColor-muted);
+        }
+
         /* Navigation buttons (Files, Timeline, Memory) */
         .nav-btn {
             display: inline-flex;
@@ -1582,8 +1602,9 @@
         <div class="top-bar-left">
             <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg></button>
             <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.75C0 1.784.784 1 1.75 1H5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1h6.75c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm9.42 9.36 2.883-2.677a.25.25 0 0 0 0-.366L9.42 6.39a.249.249 0 0 0-.42.183V8.5H4.75a.75.75 0 0 0 0 1.5H9v1.927c0 .218.26.331.42.183Z"/></svg></button>
-            <div class="connection-status" id="connection-status" role="status" aria-live="polite" title="Live reload active">
+            <div class="connection-status" id="connection-status" role="status" aria-live="polite" title="{{if .AITrackingEnabled}}Live reload + AI tracking active{{else}}Live reload active{{end}}">
                 <span class="connection-dot" id="connection-dot"></span>
+                {{if .AITrackingEnabled}}<span class="connection-ai-label">AI</span>{{end}}
                 <span class="connection-count" id="connection-count">0</span>
                 <span class="connection-label" id="connection-label">Reconnecting...</span>
             </div>
@@ -1652,7 +1673,7 @@
             <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
             </a>
-            {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline">
+            {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline — tracks Claude Code sessions">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg>
             </a>{{end}}
             <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
