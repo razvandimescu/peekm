@@ -12,6 +12,9 @@
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #0d1117;
@@ -25,8 +28,9 @@
             --fg-done: #ab7df8;
             --border: #3d444d;
             --border-muted: #3d444db3;
-            --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            --font-heading: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+            --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+            --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             --max-width: 880px;
         }
 
@@ -54,7 +58,31 @@
             color: var(--fg);
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
+            background-image: radial-gradient(circle at 1px 1px, var(--border-muted) 0.5px, transparent 0);
+            background-size: 32px 32px;
         }
+
+        /* --- Animations --- */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes glowPulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.7; }
+        }
+
+        .animate {
+            opacity: 0;
+            animation: fadeUp 0.6s ease-out forwards;
+        }
+
+        .animate-d1 { animation-delay: 0.1s; }
+        .animate-d2 { animation-delay: 0.2s; }
+        .animate-d3 { animation-delay: 0.3s; }
+        .animate-d4 { animation-delay: 0.4s; }
+        .animate-d5 { animation-delay: 0.5s; }
 
         /* --- Layout --- */
         .container {
@@ -82,7 +110,7 @@
         }
 
         .nav-brand {
-            font-family: var(--font-mono);
+            font-family: var(--font-heading);
             font-size: 18px;
             font-weight: 700;
             color: var(--fg);
@@ -120,6 +148,27 @@
         .hero {
             padding: 80px 0 60px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -120px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 400px;
+            background: radial-gradient(ellipse, rgba(68, 147, 248, 0.12) 0%, rgba(171, 125, 248, 0.06) 40%, transparent 70%);
+            pointer-events: none;
+            animation: glowPulse 6s ease-in-out infinite;
+        }
+
+        @media (prefers-color-scheme: light) {
+            .hero::before {
+                background: radial-gradient(ellipse, rgba(9, 105, 218, 0.08) 0%, rgba(130, 80, 223, 0.04) 40%, transparent 70%);
+            }
         }
 
         .hero-badge {
@@ -137,11 +186,13 @@
         }
 
         .hero h1 {
-            font-size: clamp(32px, 5vw, 52px);
+            font-family: var(--font-heading);
+            font-size: clamp(30px, 5vw, 48px);
             font-weight: 800;
-            line-height: 1.15;
-            letter-spacing: -0.02em;
+            line-height: 1.2;
+            letter-spacing: -0.03em;
             margin-bottom: 16px;
+            position: relative;
         }
 
         .hero h1 span {
@@ -220,12 +271,12 @@
             width: 100%;
             border-radius: 12px;
             border: 1px solid var(--border);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(68, 147, 248, 0.1);
         }
 
         @media (prefers-color-scheme: light) {
             .demo img {
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(9, 105, 218, 0.08);
             }
         }
 
@@ -240,7 +291,8 @@
         }
 
         .features-header h2 {
-            font-size: 28px;
+            font-family: var(--font-heading);
+            font-size: 26px;
             font-weight: 700;
             margin-bottom: 8px;
         }
@@ -261,24 +313,39 @@
             background: var(--bg-surface);
             border: 1px solid var(--border-muted);
             border-radius: 10px;
-            transition: border-color 0.15s, background 0.15s;
+            transition: border-color 0.2s, background 0.2s, transform 0.2s;
         }
 
         .feature-card:hover {
             border-color: var(--border);
             background: var(--bg-hover);
+            transform: translateY(-2px);
         }
 
         .feature-icon {
-            font-size: 24px;
-            margin-bottom: 12px;
-            display: block;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            margin-bottom: 14px;
+            background: rgba(68, 147, 248, 0.1);
+            color: var(--fg-accent);
+        }
+
+        .feature-icon svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
         }
 
         .feature-card h3 {
-            font-size: 16px;
-            font-weight: 600;
+            font-family: var(--font-heading);
+            font-size: 14px;
+            font-weight: 700;
             margin-bottom: 6px;
+            letter-spacing: -0.01em;
         }
 
         .feature-card p {
@@ -293,7 +360,8 @@
         }
 
         .comparison h2 {
-            font-size: 28px;
+            font-family: var(--font-heading);
+            font-size: 26px;
             font-weight: 700;
             text-align: center;
             margin-bottom: 32px;
@@ -349,7 +417,8 @@
         }
 
         .install-section h2 {
-            font-size: 28px;
+            font-family: var(--font-heading);
+            font-size: 26px;
             font-weight: 700;
             text-align: center;
             margin-bottom: 32px;
@@ -391,7 +460,8 @@
         }
 
         .cta h2 {
-            font-size: 28px;
+            font-family: var(--font-heading);
+            font-size: 26px;
             font-weight: 700;
             margin-bottom: 12px;
         }
@@ -493,14 +563,14 @@
 
 <section class="hero">
     <div class="container">
-        <div class="hero-badge">Works with Claude Code</div>
-        <h1>See what AI agents do<br><span>across all your projects</span></h1>
-        <p class="hero-subtitle">
+        <div class="hero-badge animate">Works with Claude Code</div>
+        <h1 class="animate animate-d1">See what AI agents do<br><span>across all your projects</span></h1>
+        <p class="hero-subtitle animate animate-d2">
             AI coding agents run dozens of operations per session — but you only see the final diff.
             peekm shows you every session, every file change, every conversation. In real time.
         </p>
 
-        <div class="install-block">
+        <div class="install-block animate animate-d3">
             <div class="install-cmd">
                 <span class="prompt">$</span>
                 <code>npx @peekm/peekm .</code>
@@ -515,7 +585,7 @@
     </div>
 </section>
 
-<section class="demo">
+<section class="demo animate animate-d4">
     <div class="container">
         <img src="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif" alt="peekm demo — AI session timeline, transcript viewer, and markdown browsing" loading="lazy">
     </div>
@@ -529,32 +599,32 @@
         </div>
         <div class="features-grid">
             <div class="feature-card">
-                <span class="feature-icon">&#x23F1;&#xFE0F;</span>
+                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg></div>
                 <h3>Timeline</h3>
-                <p>Every AI session across all projects — file edits, tool calls, duration. Grouped by day with All / Edits-only filter.</p>
+                <p>Every AI session across all projects — file edits, tool calls, duration. Live status shows which tool the AI is using right now.</p>
             </div>
             <div class="feature-card">
-                <span class="feature-icon">&#x1F4AC;</span>
+                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Z"/></svg></div>
                 <h3>Transcripts</h3>
                 <p>Read the full AI conversation for any session. Tool calls, diffs, thinking — all rendered inline.</p>
             </div>
             <div class="feature-card">
-                <span class="feature-icon">&#x1F9E0;</span>
+                <div class="feature-icon" style="background: rgba(171, 125, 248, 0.1); color: var(--fg-done);"><svg viewBox="0 0 16 16"><path d="M5.433 2.304A4.492 4.492 0 0 0 3.5 6c0 1.598.564 3.05 1.5 4.189v.811c0 .74.607 1.349 1.351 1.449a.5.5 0 0 0 .298.051h2.702a.5.5 0 0 0 .298-.051c.744-.1 1.351-.71 1.351-1.449v-.811A6.975 6.975 0 0 0 12.5 6a4.492 4.492 0 0 0-1.933-3.696A4.478 4.478 0 0 0 8 1.5a4.478 4.478 0 0 0-2.567.804ZM6 14.25v.25a2 2 0 1 0 4 0v-.25H6Z"/></svg></div>
                 <h3>Memory browser</h3>
                 <p>Cross-project dashboard of Claude Code's learned context. See what the AI remembers about each project.</p>
             </div>
             <div class="feature-card">
-                <span class="feature-icon">&#x1F514;</span>
+                <div class="feature-icon" style="background: rgba(63, 185, 80, 0.1); color: var(--fg-success);"><svg viewBox="0 0 16 16"><path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Z"/></svg></div>
                 <h3>Real-time notifications</h3>
                 <p>Toast the instant AI modifies a file. Click to navigate. Live reload via Server-Sent Events.</p>
             </div>
             <div class="feature-card">
-                <span class="feature-icon">&#x1F517;</span>
+                <div class="feature-icon" style="background: rgba(210, 153, 34, 0.1); color: var(--fg-attention);"><svg viewBox="0 0 16 16"><path d="M4.72.22a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06Zm5.5 0a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06ZM.22 4.72a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06Zm14.56 0a.75.75 0 0 1 0 1.06l-1 1a.75.75 0 1 1-1.06-1.06l1-1a.75.75 0 0 1 1.06 0ZM8 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12Z"/></svg></div>
                 <h3>Sharing</h3>
                 <p>Share rendered markdown with one click. LAN by default, or public via <code>share.peekm.dev</code> — no account needed.</p>
             </div>
             <div class="feature-card">
-                <span class="feature-icon">&#x1F4DD;</span>
+                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 1 1 1.06-1.06l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></div>
                 <h3>Markdown viewer</h3>
                 <p>VS Code-style sidebar, fuzzy search, in-browser editing, syntax highlighting, light/dark themes.</p>
             </div>

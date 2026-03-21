@@ -7,11 +7,11 @@
 [![GitHub Release](https://img.shields.io/github/v/release/razvandimescu/peekm)](https://github.com/razvandimescu/peekm/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**[peekm.dev](https://peekm.dev)** — Track every AI coding session across all your projects in real time.
+A local dashboard that tracks every file edit, tool call, and conversation from Claude Code — across all your projects at once. **[peekm.dev](https://peekm.dev)**
 
 ![peekm — watching a live Claude Code session across multiple projects](assets/hero-demo.gif)
 
-> Claude Code edits 50+ files in a single session. All you get is a git diff.
+> AI coding agents edit dozens of files per session. You get a git diff and a JSONL log. Neither tells you what's happening *right now*, which session changed which file, or what the AI was thinking.
 >
 > peekm gives you a live timeline of every session, every file edit, and every AI conversation — across all your projects, from one local UI.
 
@@ -27,6 +27,8 @@ Requires [Claude Code](https://claude.ai/download) for AI tracking. Setup is aut
 
 Start a Claude Code session in any project. Watch the timeline update in real time.
 
+Run `peekm setup autostart` to launch peekm automatically on login.
+
 Or install globally: `npm i -g @peekm/peekm` | `brew install razvandimescu/tap/peekm`
 
 Works with Claude Code today. More agents coming.
@@ -35,7 +37,7 @@ Works with Claude Code today. More agents coming.
 
 **AI session observability:**
 
-- **Timeline** — every AI session across all projects, grouped by day. Duration, file counts, tool breakdown, All/Edits-only filter
+- **Timeline** — every AI session across all projects, grouped by day. Live status shows which tool the AI is using right now. Duration, file counts, tool breakdown, All/Edits-only filter
 - **Transcript viewer** — read the full AI conversation for any session. Tool calls, code diffs, and reasoning rendered inline
 - **Memory browser** — see what Claude remembers about each of your projects
 - **Real-time notifications** — toast the instant AI modifies a file, with live reload via SSE
@@ -49,7 +51,9 @@ Works with Claude Code today. More agents coming.
 
 ## Why This Exists
 
-Most tools show you what AI coding agents *did*. peekm shows you what they're doing *right now* — across all your projects simultaneously, with session-level grouping and conversation replay.
+Git diffs show results. Transcript viewers show history. Neither tells you what's happening *right now* or connects changes to the AI's reasoning. When you're running multiple agents across projects, you need one place to see all of it — live.
+
+peekm correlates file edits with session metadata and conversations, giving you a unified timeline that updates as the AI works.
 
 ## How It Works
 
@@ -59,7 +63,7 @@ Setup is automatic — peekm detects `~/.claude` on first run and configures hoo
 
 ## Installation
 
-**npm** (recommended — manages updates automatically)
+**npm** (recommended)
 ```bash
 npm i -g @peekm/peekm
 ```
@@ -103,6 +107,17 @@ AI tracking is on by default when `~/.claude` exists. Disable with `-no-ai-track
 
 - **LAN** (default): token-scoped URL on your local network. Recipients see a read-only rendered view with live reload.
 - **Public** (opt-in): click "Make public" to tunnel through `share.peekm.dev`. HTTPS URL, expires after 1 hour, no account needed.
+
+## Background Service
+
+Run peekm automatically on login:
+
+```bash
+peekm setup autostart          # install (launchd / systemd / Windows)
+peekm setup autostart --remove # uninstall
+```
+
+This ensures the timeline captures every AI session without manual launch.
 
 <details>
 <summary><strong>Ignoring Directories</strong></summary>
