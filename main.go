@@ -1348,20 +1348,55 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 	}
 }
 
-// handleDirCreated adds a newly created directory to the watcher if it's within $HOME.
 func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 	homeDir, _ := os.UserHomeDir()
 	if homeDir == "" {
 		return
 	}
-	resolved, err := filepath.EvalSymlinks(dirPath)
-	if err != nil || !strings.HasPrefix(resolved, homeDir) {
+	if resolved, err := filepath.EvalSymlinks(dirPath); err != nil || !strings.HasPrefix(resolved, homeDir) {
 		return
 	}
-	if err := watcher.Add(dirPath); err != nil {
-		log.Printf("Warning: Cannot watch new directory %s: %v", dirPath, err)
-	} else {
-		log.Printf("Now watching new directory: %s", dirPath)
+
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+	customPatterns := getIgnorePatterns(root)
+	var newFiles []string
+
+	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		resolvedInfo, _, resolveErr := validateSymlinkSecurity(path, info, homeDir)
+		if resolveErr != nil {
+			return nil
+		}
+		if resolvedInfo != nil {
+			info = resolvedInfo
+		}
+		if info.IsDir() {
+			if path != dirPath && isExcludedDir(info.Name(), customPatterns) {
+				return filepath.SkipDir
+			}
+			if err := watcher.Add(path); err != nil {
+				log.Printf("Warning: Cannot watch new directory %s: %v", path, err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(path), ".md") {
+			newFiles = append(newFiles, path)
+		}
+		return nil
+	})
+
+	if len(newFiles) > 0 {
+		fileMutex.Lock()
+		markdownFiles = append(markdownFiles, newFiles...)
+		fileMutex.Unlock()
+
+		for _, f := range newFiles {
+			sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(f)})
+		}
 	}
 }
 
@@ -1422,7 +1457,7 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					handleDirCreated(watcher, event.Name)
+					go handleDirCreated(watcher, event.Name)
 				}
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					handleMarkdownCreated(event.Name)
