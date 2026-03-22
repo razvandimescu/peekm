@@ -705,6 +705,7 @@ func registerRoutes() {
 	http.HandleFunc("/", localOnly(withRecovery(serveBrowser)))
 	http.HandleFunc("/view/", localOnly(withRecovery(serveFile)))
 	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
+	http.HandleFunc("/folder", localOnly(withRecovery(withCSRFCheck(handleCreateFolder))))
 	http.HandleFunc("/delete", localOnly(withRecovery(withCSRFCheck(handleDelete))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
@@ -1860,6 +1861,52 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("AI session %s tracked for: %s (mode: %s)", truncateSessionID(req.SessionID), req.FilePath, req.PermissionMode)
 
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "Folder name cannot be empty", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") || strings.ContainsRune(name, 0) {
+		http.Error(w, "Invalid folder name", http.StatusBadRequest)
+		return
+	}
+
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+
+	validatedRoot, err := validateAndResolvePath(root)
+	if err != nil {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	absPath := filepath.Join(validatedRoot, name)
+
+	if err := os.Mkdir(absPath, 0755); err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "Folder already exists", http.StatusConflict)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to create folder: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	log.Printf("Created folder: %s", absPath)
 	w.WriteHeader(http.StatusOK)
 }
 
