@@ -100,8 +100,10 @@ notify() {
 
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 ts=$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")
+is_edit=false
+case "$tool_name" in Write|Edit|NotebookEdit) is_edit=true;; esac
 
-if [ -n "$file_path" ]; then
+if [ -n "$file_path" ] && [ "$is_edit" = true ]; then
     # Edit event: persist to JSONL + notify
     perm_mode=$(echo "$json" | jq -r '.permission_mode // empty')
     tool_use_id=$(echo "$json" | jq -r '.tool_use_id // empty')
