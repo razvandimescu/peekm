@@ -759,22 +759,6 @@
             align-items: center;
         }
 
-        .sidebar-action-btn {
-            background: transparent;
-            border: none;
-            color: var(--fgColor-muted);
-            cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            flex-shrink: 0;
-            margin-left: auto;
-        }
-        .sidebar-action-btn:hover {
-            background: rgba(128, 128, 128, 0.12);
-            color: var(--fgColor-default);
-        }
         .tree-folder-action {
             background: transparent;
             border: none;
@@ -1822,9 +1806,6 @@
                 <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">
                     <!-- Breadcrumb populated by JavaScript -->
                 </nav>
-                <button class="sidebar-action-btn" id="new-folder-btn" onclick="startNewFolder('')" aria-label="New Folder" title="New Folder">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/><path d="M8 6.5a.5.5 0 0 1 .5.5v1.5H10a.5.5 0 0 1 0 1H8.5V11a.5.5 0 0 1-1 0V9.5H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 .5-.5Z" fill="var(--bgColor-default)"/></svg>
-                </button>
             </div>
             <div class="sidebar-content" id="sidebar-tree">
                 {{if .TreeHTML}}
