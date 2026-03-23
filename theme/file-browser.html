@@ -798,6 +798,16 @@
             color: var(--fgColor-default);
         }
 
+        .tree-node.drag-over {
+            background: rgba(56, 139, 253, 0.1);
+            outline: 1px dashed var(--fgColor-accent);
+            outline-offset: -1px;
+            border-radius: 3px;
+        }
+        .tree-file.dragging {
+            opacity: 0.4;
+        }
+
         .new-folder-input-container .tree-node {
             padding-left: 8px;
         }
@@ -2171,6 +2181,111 @@
                 saveTreeState();
             }
         }
+
+        // Drag-and-drop file moving (event delegation on sidebar-tree)
+        (function() {
+            var draggedPath = null;
+            var expandTimer = null;
+            var currentDragOver = null;
+            var dragSource = null;
+
+            var sidebar = document.getElementById('sidebar-tree');
+            if (!sidebar) return;
+
+            function setDragOver(target) {
+                if (target === currentDragOver) return;
+                if (currentDragOver) currentDragOver.classList.remove('drag-over');
+                currentDragOver = target;
+                if (currentDragOver) currentDragOver.classList.add('drag-over');
+            }
+
+            function cleanupDrag() {
+                draggedPath = null;
+                clearTimeout(expandTimer);
+                setDragOver(null);
+                if (dragSource) { dragSource.classList.remove('dragging'); dragSource = null; }
+            }
+
+            sidebar.addEventListener('dragstart', function(e) {
+                var node = e.target.closest('.tree-node[data-file-path]');
+                if (!node) { e.preventDefault(); return; }
+                draggedPath = node.dataset.filePath;
+                dragSource = node.querySelector('.tree-file');
+                if (dragSource) dragSource.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', draggedPath);
+            });
+
+            sidebar.addEventListener('dragend', cleanupDrag);
+
+            sidebar.addEventListener('dragover', function(e) {
+                if (!draggedPath) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDragOver(findDropTarget(e.target));
+            });
+
+            sidebar.addEventListener('dragenter', function(e) {
+                if (!draggedPath) return;
+                clearTimeout(expandTimer);
+                var dirSpan = e.target.closest('.tree-directory');
+                if (!dirSpan) return;
+                var children = dirSpan.closest('.tree-item').querySelector('.tree-children');
+                if (children && children.style.display === 'none') {
+                    expandTimer = setTimeout(function() { toggleDir(dirSpan); }, 700);
+                }
+            });
+
+            sidebar.addEventListener('drop', function(e) {
+                e.preventDefault();
+                cleanupDrag();
+
+                var destDir = '';
+                var dirSpan = e.target.closest('.tree-directory');
+                if (dirSpan) destDir = dirSpan.dataset.path;
+
+                var source = e.dataTransfer.getData('text/plain');
+                if (!source) return;
+
+                var parts = source.split('/');
+                var sourceDir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+                if (sourceDir === destDir) return;
+
+                moveFile(source, destDir);
+            });
+
+            function findDropTarget(el) {
+                var dirSpan = el.closest('.tree-directory');
+                if (dirSpan) return dirSpan.closest('.tree-node');
+                return null;
+            }
+
+            function moveFile(source, dest) {
+                fetch('/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: source, dest: dest })
+                })
+                .then(function(response) {
+                    if (response.ok) return response.json();
+                    return response.text().then(function(t) { throw new Error(t); });
+                })
+                .then(function(data) {
+                    showToast('Moved: ' + source.split('/').pop(), null, null);
+                    removeFileFromTree(source);
+                    insertFileIntoTree(data.newPath);
+                    scheduleTreeRefresh();
+                    // Redirect if moved file is currently viewed
+                    var current = decodeURIComponent(window.location.pathname.replace('/view/', ''));
+                    if (current === source && typeof navigate === 'function') {
+                        navigate('/view/' + data.newPath);
+                    }
+                })
+                .catch(function(error) {
+                    showErrorToast('Move failed: ' + error.message);
+                });
+            }
+        })();
 
         // Smart Folder toggle
         function toggleSmartFolder(header) {

@@ -707,6 +707,7 @@ func registerRoutes() {
 	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
 	http.HandleFunc("/folder", localOnly(withRecovery(withCSRFCheck(handleCreateFolder))))
 	http.HandleFunc("/delete", localOnly(withRecovery(withCSRFCheck(handleDelete))))
+	http.HandleFunc("/move", localOnly(withRecovery(withCSRFCheck(handleMove))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
 	http.HandleFunc("/download", localOnly(withRecovery(withCSRFCheck(handleDownload))))
@@ -2088,6 +2089,85 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleMove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Source string `json:"source"`
+		Dest   string `json:"dest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+
+	validatedRoot, err := validateAndResolvePath(root)
+	if err != nil {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	validatedSource, err := validateAndResolvePath(filepath.Join(root, req.Source))
+	if err != nil {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if !isWhitelistedFile(validatedSource) {
+		http.Error(w, "File not found or access denied", http.StatusForbidden)
+		return
+	}
+
+	validatedDest, err := validateAndResolvePath(filepath.Join(root, req.Dest))
+	if err != nil {
+		http.Error(w, "Invalid destination", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(validatedDest, validatedRoot) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if info, err := os.Stat(validatedDest); err != nil || !info.IsDir() {
+		http.Error(w, "Destination is not a directory", http.StatusBadRequest)
+		return
+	}
+
+	destFile := filepath.Join(validatedDest, filepath.Base(validatedSource))
+	if filepath.Dir(validatedSource) == validatedDest {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"newPath": req.Source})
+		return
+	}
+	if _, err := os.Stat(destFile); err == nil {
+		http.Error(w, "File already exists at destination", http.StatusConflict)
+		return
+	}
+
+	if err := os.Rename(validatedSource, destFile); err != nil {
+		http.Error(w, fmt.Sprintf("Move failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Recollect whitelist
+	fileMutex.Lock()
+	markdownFiles = collectMarkdownFiles(browseDir)
+	if currentFile == validatedSource {
+		currentFile = destFile
+	}
+	fileMutex.Unlock()
+
+	newRelPath := getRelativePath(destFile)
+	log.Printf("Moved file: %s → %s", req.Source, newRelPath)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
+}
+
 func serveFile(w http.ResponseWriter, r *http.Request) {
 	filePath := strings.TrimPrefix(r.URL.Path, "/view/")
 	filePath = strings.TrimPrefix(filePath, "/")
@@ -2855,8 +2935,9 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			}
 		} else {
 			// File node (leaf)
-			buf.WriteString(`<div class="tree-node"><span class="tree-file">`)
-			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
+			buf.WriteString(fmt.Sprintf(`<div class="tree-node" draggable="true" data-file-path="%s"><span class="tree-file">`,
+				template.HTMLEscapeString(node.path)))
+			buf.WriteString(fmt.Sprintf(`<a href="/view/%s" draggable="false">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
 			buf.WriteString(`</span></div>`)
 		}
 
