@@ -804,7 +804,8 @@
             outline-offset: -1px;
             border-radius: 3px;
         }
-        .tree-file.dragging {
+        .tree-file.dragging,
+        .tree-directory.dragging {
             opacity: 0.4;
         }
 
@@ -2185,6 +2186,7 @@
         // Drag-and-drop file moving (event delegation on sidebar-tree)
         (function() {
             var draggedPath = null;
+            var draggedIsDir = false;
             var expandTimer = null;
             var currentDragOver = null;
             var dragSource = null;
@@ -2201,19 +2203,22 @@
 
             function cleanupDrag() {
                 draggedPath = null;
+                draggedIsDir = false;
                 clearTimeout(expandTimer);
                 setDragOver(null);
                 if (dragSource) { dragSource.classList.remove('dragging'); dragSource = null; }
             }
 
             sidebar.addEventListener('dragstart', function(e) {
-                var node = e.target.closest('.tree-node[data-file-path]');
+                var node = e.target.closest('.tree-node[data-file-path], .tree-node[data-dir-path]');
                 if (!node) { e.preventDefault(); return; }
-                draggedPath = node.dataset.filePath;
-                dragSource = node.querySelector('.tree-file');
+                draggedIsDir = !!node.dataset.dirPath;
+                draggedPath = node.dataset.filePath || node.dataset.dirPath;
+                dragSource = node.querySelector('.tree-file') || node.querySelector('.tree-directory');
                 if (dragSource) dragSource.classList.add('dragging');
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', draggedPath);
+                e.dataTransfer.setData('application/x-peekm-dir', draggedIsDir ? '1' : '0');
             });
 
             sidebar.addEventListener('dragend', cleanupDrag);
@@ -2222,7 +2227,19 @@
                 if (!draggedPath) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
-                setDragOver(findDropTarget(e.target));
+                var target = findDropTarget(e.target);
+                // Prevent dropping a folder onto itself or its children
+                if (draggedIsDir && target) {
+                    var targetPath = target.querySelector('.tree-directory');
+                    if (targetPath) {
+                        var tp = targetPath.dataset.path;
+                        if (tp === draggedPath || tp.startsWith(draggedPath + '/')) {
+                            setDragOver(null);
+                            return;
+                        }
+                    }
+                }
+                setDragOver(target);
             });
 
             sidebar.addEventListener('dragenter', function(e) {
@@ -2246,10 +2263,18 @@
 
                 var source = e.dataTransfer.getData('text/plain');
                 if (!source) return;
+                var isDir = e.dataTransfer.getData('application/x-peekm-dir') === '1';
 
-                var parts = source.split('/');
-                var sourceDir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
-                if (sourceDir === destDir) return;
+                // No-op: same parent (files) or same destination (folders)
+                if (isDir) {
+                    if (source === destDir || destDir.startsWith(source + '/')) return;
+                    var dirParent = source.split('/').slice(0, -1).join('/');
+                    if (dirParent === destDir) return;
+                } else {
+                    var parts = source.split('/');
+                    var sourceDir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+                    if (sourceDir === destDir) return;
+                }
 
                 moveFile(source, destDir);
             });

@@ -2089,6 +2089,35 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// validateMoveSource resolves and validates a move source path.
+// Returns the validated path, file info, and error message (empty on success).
+func validateMoveSource(relPath, root, validatedRoot string) (string, os.FileInfo, string) {
+	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
+	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+		return "", nil, "Access denied"
+	}
+	info, err := os.Stat(validated)
+	if err != nil {
+		return "", nil, "Source not found"
+	}
+	if !info.IsDir() && !isWhitelistedFile(validated) {
+		return "", nil, "File not found or access denied"
+	}
+	return validated, info, ""
+}
+
+// validateMoveDest resolves and validates a move destination directory.
+func validateMoveDest(relPath, root, validatedRoot string) (string, string) {
+	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
+	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+		return "", "Access denied"
+	}
+	if info, err := os.Stat(validated); err != nil || !info.IsDir() {
+		return "", "Destination is not a directory"
+	}
+	return validated, ""
+}
+
 func handleMove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2113,56 +2142,52 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validatedSource, err := validateAndResolvePath(filepath.Join(root, req.Source))
-	if err != nil {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		return
-	}
-	if !isWhitelistedFile(validatedSource) {
-		http.Error(w, "File not found or access denied", http.StatusForbidden)
+	validatedSource, sourceInfo, errMsg := validateMoveSource(req.Source, root, validatedRoot)
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusForbidden)
 		return
 	}
 
-	validatedDest, err := validateAndResolvePath(filepath.Join(root, req.Dest))
-	if err != nil {
-		http.Error(w, "Invalid destination", http.StatusBadRequest)
-		return
-	}
-	if !strings.HasPrefix(validatedDest, validatedRoot) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		return
-	}
-	if info, err := os.Stat(validatedDest); err != nil || !info.IsDir() {
-		http.Error(w, "Destination is not a directory", http.StatusBadRequest)
+	validatedDest, errMsg := validateMoveDest(req.Dest, root, validatedRoot)
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusBadRequest)
 		return
 	}
 
-	destFile := filepath.Join(validatedDest, filepath.Base(validatedSource))
+	// Prevent circular move (directory into itself or its subtree)
+	sep := string(filepath.Separator)
+	if sourceInfo.IsDir() && strings.HasPrefix(validatedDest+sep, validatedSource+sep) {
+		http.Error(w, "Cannot move a folder into itself", http.StatusBadRequest)
+		return
+	}
+
+	destPath := filepath.Join(validatedDest, filepath.Base(validatedSource))
 	if filepath.Dir(validatedSource) == validatedDest {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"newPath": req.Source})
 		return
 	}
-	if _, err := os.Stat(destFile); err == nil {
-		http.Error(w, "File already exists at destination", http.StatusConflict)
+	if _, err := os.Stat(destPath); err == nil {
+		http.Error(w, "Already exists at destination", http.StatusConflict)
 		return
 	}
 
-	if err := os.Rename(validatedSource, destFile); err != nil {
+	if err := os.Rename(validatedSource, destPath); err != nil {
 		http.Error(w, fmt.Sprintf("Move failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Recollect whitelist
 	fileMutex.Lock()
 	markdownFiles = collectMarkdownFiles(browseDir)
 	if currentFile == validatedSource {
-		currentFile = destFile
+		currentFile = destPath
+	} else if sourceInfo.IsDir() && strings.HasPrefix(currentFile, validatedSource+sep) {
+		currentFile = filepath.Join(destPath, currentFile[len(validatedSource):])
 	}
 	fileMutex.Unlock()
 
-	newRelPath := getRelativePath(destFile)
-	log.Printf("Moved file: %s → %s", req.Source, newRelPath)
+	newRelPath := getRelativePath(destPath)
+	log.Printf("Moved: %s → %s", req.Source, newRelPath)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
@@ -2903,8 +2928,8 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			collapsed := depth >= 1
 
 			// Directory node with chevron and name
-			buf.WriteString(fmt.Sprintf(`<div class="tree-node"><span class="tree-directory" onclick="toggleDir(this)" data-path="%s">`,
-				template.HTMLEscapeString(node.path)))
+			buf.WriteString(fmt.Sprintf(`<div class="tree-node" draggable="true" data-dir-path="%s"><span class="tree-directory" onclick="toggleDir(this)" data-path="%s">`,
+				template.HTMLEscapeString(node.path), template.HTMLEscapeString(node.path)))
 
 			// Chevron icon
 			if collapsed {
