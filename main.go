@@ -1870,7 +1870,8 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Parent string `json:"parent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1890,12 +1891,19 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	root := browseDir
 	fileMutex.RUnlock()
 
-	validatedRoot, err := validateAndResolvePath(root)
+	parentDir := filepath.Join(root, req.Parent)
+	validatedParent, err := validateAndResolvePath(parentDir)
 	if err != nil {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
-	absPath := filepath.Join(validatedRoot, name)
+	// Ensure parent is within the browse directory (not just $HOME)
+	validatedRoot, _ := validateAndResolvePath(root)
+	if validatedRoot != "" && !strings.HasPrefix(validatedParent, validatedRoot) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	absPath := filepath.Join(validatedParent, name)
 
 	if err := os.Mkdir(absPath, 0755); err != nil {
 		if os.IsExist(err) {
@@ -2736,10 +2744,6 @@ func generateTreeHTML() string {
 	copy(currentMarkdownFiles, markdownFiles)
 	fileMutex.RUnlock()
 
-	if len(currentMarkdownFiles) == 0 {
-		return ""
-	}
-
 	// Make browse directory absolute for proper relative path calculation
 	absDir, err := filepath.Abs(currentBrowseDir)
 	if err != nil {
@@ -2761,33 +2765,7 @@ func generateTreeHTML() string {
 		// Make path relative to browse directory (~/... for out-of-browseDir files)
 		relPath := tildeRelPath(absPath, absDir)
 
-		parts := strings.Split(filepath.Dir(relPath), string(filepath.Separator))
-
-		currentPath := "."
-		for _, part := range parts {
-			if part == "." {
-				continue
-			}
-
-			parentPath := currentPath
-			if currentPath == "." {
-				currentPath = part
-			} else {
-				currentPath = filepath.Join(currentPath, part)
-			}
-
-			if _, exists := dirNodes[currentPath]; !exists {
-				node := &fileNode{
-					name:  part,
-					path:  currentPath, // Use relative path for directories too
-					isDir: true,
-				}
-				dirNodes[currentPath] = node
-				if parent, ok := dirNodes[parentPath]; ok {
-					parent.children = append(parent.children, node)
-				}
-			}
-		}
+		ensureDirChain(strings.Split(filepath.Dir(relPath), string(filepath.Separator)), dirNodes)
 
 		// Add file
 		info, err := os.Stat(path)
@@ -2807,8 +2785,11 @@ func generateTreeHTML() string {
 		}
 	}
 
-	// Clean and sort tree
-	cleanEmptyDirs(root)
+	// Add real directories that aren't already in the tree (user-created empty folders)
+	addRealDirs(absDir, dirNodes)
+
+	// Clean phantom dirs (intermediate path nodes with no file descendants that don't exist on disk)
+	cleanEmptyDirs(root, absDir)
 	sortTree(root)
 
 	// Generate HTML
@@ -2852,7 +2833,10 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 				buf.WriteString(`<span class="expand-icon">▼</span>`)
 			}
 
-			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span></div>`, template.HTMLEscapeString(node.name)))
+			jsPath := strings.ReplaceAll(template.HTMLEscapeString(node.path), "'", "&#39;")
+			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span>`+
+				`<button class="tree-folder-action" onclick="event.stopPropagation();startNewFolder('%s')" title="New Folder">+</button></div>`,
+				template.HTMLEscapeString(node.name), jsPath))
 
 			// Children container (collapsed by default at depth >= 1)
 			if len(node.children) > 0 {
@@ -2979,7 +2963,56 @@ type fileNode struct {
 	children []*fileNode
 }
 
-func cleanEmptyDirs(node *fileNode) bool {
+func ensureDirChain(parts []string, dirNodes map[string]*fileNode) {
+	currentPath := "."
+	for _, part := range parts {
+		if part == "." {
+			continue
+		}
+		parentPath := currentPath
+		if currentPath == "." {
+			currentPath = part
+		} else {
+			currentPath = filepath.Join(currentPath, part)
+		}
+		if _, exists := dirNodes[currentPath]; !exists {
+			node := &fileNode{name: part, path: currentPath, isDir: true}
+			dirNodes[currentPath] = node
+			if parent, ok := dirNodes[parentPath]; ok {
+				parent.children = append(parent.children, node)
+			}
+		}
+	}
+}
+
+func addRealDirs(absDir string, dirNodes map[string]*fileNode) {
+	customPatterns := getIgnorePatterns(absDir)
+	filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if path == absDir {
+			return nil
+		}
+		if isExcludedDir(info.Name(), customPatterns) {
+			return filepath.SkipDir
+		}
+		relPath, err := filepath.Rel(absDir, path)
+		if err != nil {
+			return nil
+		}
+		if _, exists := dirNodes[relPath]; exists {
+			return nil
+		}
+		ensureDirChain(strings.Split(relPath, string(filepath.Separator)), dirNodes)
+		return nil
+	})
+}
+
+func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
 	if !node.isDir {
 		return true // Keep files
 	}
@@ -2987,14 +3020,23 @@ func cleanEmptyDirs(node *fileNode) bool {
 	// Recursively clean children
 	kept := make([]*fileNode, 0)
 	for _, child := range node.children {
-		if cleanEmptyDirs(child) {
+		if cleanEmptyDirs(child, browseRoot) {
 			kept = append(kept, child)
 		}
 	}
 	node.children = kept
 
-	// Keep directory if it has children or is root
-	return len(node.children) > 0 || node.name == "."
+	if len(node.children) > 0 || node.name == "." {
+		return true
+	}
+	// Keep empty dirs that actually exist on disk (user-created)
+	if browseRoot != "" && node.path != "" {
+		absPath := filepath.Join(browseRoot, node.path)
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func sortTree(node *fileNode) {

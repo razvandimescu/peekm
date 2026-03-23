@@ -775,6 +775,29 @@
             background: rgba(128, 128, 128, 0.12);
             color: var(--fgColor-default);
         }
+        .tree-folder-action {
+            background: transparent;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            line-height: 1;
+            padding: 0 4px;
+            border-radius: 3px;
+            margin-left: auto;
+            opacity: 0;
+            transition: opacity 0.15s;
+            flex-shrink: 0;
+        }
+        .tree-node:hover .tree-folder-action {
+            opacity: 1;
+        }
+        .tree-folder-action:hover {
+            background: rgba(128, 128, 128, 0.15);
+            color: var(--fgColor-default);
+        }
+
         .new-folder-input-container .tree-node {
             padding-left: 8px;
         }
@@ -1788,7 +1811,7 @@
                 <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">
                     <!-- Breadcrumb populated by JavaScript -->
                 </nav>
-                <button class="sidebar-action-btn" id="new-folder-btn" onclick="startNewFolder()" aria-label="New Folder" title="New Folder">
+                <button class="sidebar-action-btn" id="new-folder-btn" onclick="startNewFolder('')" aria-label="New Folder" title="New Folder">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/><path d="M8 6.5a.5.5 0 0 1 .5.5v1.5H10a.5.5 0 0 1 0 1H8.5V11a.5.5 0 0 1-1 0V9.5H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 .5-.5Z" fill="var(--bgColor-default)"/></svg>
                 </button>
             </div>
@@ -1936,33 +1959,64 @@
             });
         }
 
-        function startNewFolder() {
+        function startNewFolder(parentPath) {
             if (document.getElementById('new-folder-input')) return;
-            const tree = document.querySelector('.sidebar-tree');
-            if (!tree) return;
+            parentPath = parentPath || '';
 
             const container = document.createElement('div');
             container.className = 'tree-item new-folder-input-container';
+            container.dataset.parent = parentPath;
             container.innerHTML = '<div class="tree-node">' +
                 '<span class="expand-icon">&#9654;</span>' +
                 '<input type="text" id="new-folder-input" class="new-folder-input" ' +
                 'placeholder="folder name" autocomplete="off" spellcheck="false">' +
                 '</div>';
 
-            const separator = tree.querySelector('.smart-folders-separator');
-            if (separator) {
-                separator.after(container);
+            if (parentPath) {
+                // Find the folder's tree-children container and insert there
+                var dirSpan = document.querySelector('.tree-directory[data-path="' + CSS.escape(parentPath) + '"]');
+                if (dirSpan) {
+                    var treeItem = dirSpan.closest('.tree-item');
+                    var children = treeItem.querySelector('.tree-children');
+                    // Auto-expand if collapsed
+                    if (children && children.style.display === 'none') {
+                        toggleDir(dirSpan);
+                    }
+                    if (children) {
+                        children.prepend(container);
+                    } else {
+                        // No children container yet — create one
+                        children = document.createElement('div');
+                        children.className = 'tree-children';
+                        children.appendChild(container);
+                        treeItem.appendChild(children);
+                    }
+                } else {
+                    // Fallback to root
+                    parentPath = '';
+                    container.dataset.parent = '';
+                    var tree = document.querySelector('.sidebar-tree');
+                    if (!tree) return;
+                    tree.prepend(container);
+                }
             } else {
-                tree.prepend(container);
+                var tree = document.querySelector('.sidebar-tree');
+                if (!tree) return;
+                var separator = tree.querySelector('.smart-folders-separator');
+                if (separator) {
+                    separator.after(container);
+                } else {
+                    tree.prepend(container);
+                }
             }
 
-            const input = container.querySelector('input');
+            var input = container.querySelector('input');
             input.focus();
 
             input.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    createFolder(input.value.trim());
+                    createFolder(input.value.trim(), container.dataset.parent);
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
                     container.remove();
@@ -1973,7 +2027,7 @@
             });
         }
 
-        function createFolder(name) {
+        function createFolder(name, parentPath) {
             var container = document.querySelector('.new-folder-input-container');
             if (container) container.remove();
             if (!name) return;
@@ -1981,11 +2035,12 @@
             fetch('/folder', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name })
+                body: JSON.stringify({ name: name, parent: parentPath || '' })
             })
             .then(function(response) {
                 if (response.ok) {
-                    showToast('Created folder: ' + name, null, null);
+                    var displayPath = parentPath ? parentPath + '/' + name : name;
+                    showToast('Created folder: ' + displayPath, null, null);
                     scheduleTreeRefresh();
                 } else {
                     return response.text().then(function(text) { throw new Error(text); });
