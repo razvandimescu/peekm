@@ -2297,8 +2297,9 @@
                 })
                 .then(function(data) {
                     showToast('Moved: ' + source.split('/').pop(), null, null);
-                    removeFileFromTree(source);
-                    insertFileIntoTree(data.newPath);
+                    // Skip optimistic tree manipulation — scheduleTreeRefresh
+                    // fetches the authoritative tree from the server, preserving
+                    // empty source folders that would otherwise disappear.
                     scheduleTreeRefresh();
                     // Redirect if moved file is currently viewed
                     var current = decodeURIComponent(window.location.pathname.replace('/view/', ''));

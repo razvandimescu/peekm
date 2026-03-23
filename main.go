@@ -2167,9 +2167,13 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"newPath": req.Source})
 		return
 	}
-	if _, err := os.Stat(destPath); err == nil {
-		http.Error(w, "Already exists at destination", http.StatusConflict)
-		return
+	// Pre-check only for files — os.Rename silently overwrites files on POSIX.
+	// For directories, os.Rename fails naturally (ENOTEMPTY/ENOTDIR).
+	if !sourceInfo.IsDir() {
+		if _, err := os.Stat(destPath); err == nil {
+			http.Error(w, "File already exists at destination", http.StatusConflict)
+			return
+		}
 	}
 
 	if err := os.Rename(validatedSource, destPath); err != nil {
