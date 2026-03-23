@@ -897,6 +897,11 @@ func isMemoryFile(absPath string) bool {
 func isWhitelistedFile(path string) bool {
 	fileMutex.RLock()
 	defer fileMutex.RUnlock()
+	return isWhitelistedLocked(path)
+}
+
+// isWhitelistedLocked checks the whitelist without acquiring the lock (caller must hold it).
+func isWhitelistedLocked(path string) bool {
 	for _, f := range markdownFiles {
 		if f == path {
 			return true
@@ -1372,7 +1377,9 @@ func handleMarkdownCreated(filePath string) {
 	log.Printf("New markdown file created: %s", filePath)
 
 	fileMutex.Lock()
-	markdownFiles = append(markdownFiles, filePath)
+	if !isWhitelistedLocked(filePath) {
+		markdownFiles = append(markdownFiles, filePath)
+	}
 	fileMutex.Unlock()
 
 	go func() {
