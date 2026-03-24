@@ -1860,13 +1860,17 @@ function clearSearch() {
 
 // Global keyboard shortcut: Cmd/Ctrl+P (VS Code style)
 document.addEventListener('keydown', function(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'p') {
         e.preventDefault();
         const searchInput = document.getElementById('file-search');
         if (searchInput) {
             searchInput.focus();
             searchInput.select();
         }
+    }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
+        e.preventDefault();
+        toggleFolderFilter();
     }
 });
 
@@ -1895,4 +1899,118 @@ document.addEventListener('DOMContentLoaded', function() {
             dropdown.style.display = 'none';
         }
     });
+
+    // Initialize folder filter (debounced)
+    var folderInput = document.getElementById('folder-filter-input');
+    if (folderInput) {
+        var filterTimer = null;
+        folderInput.addEventListener('input', function(e) {
+            clearTimeout(filterTimer);
+            filterTimer = setTimeout(function() { filterTree(e.target.value); }, 150);
+        });
+        folderInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                clearTimeout(filterTimer);
+                closeFolderFilter();
+            }
+        });
+    }
 });
+
+// ===== Folder Filter Functions =====
+
+function getFolderFilterEls() {
+    return {
+        container: document.getElementById('folder-filter-container'),
+        btn: document.getElementById('folder-filter-toggle'),
+        input: document.getElementById('folder-filter-input')
+    };
+}
+
+function toggleFolderFilter() {
+    var els = getFolderFilterEls();
+    if (!els.container) return;
+    if (els.container.classList.contains('active')) {
+        closeFolderFilter();
+    } else {
+        els.container.classList.add('active');
+        if (els.btn) els.btn.classList.add('active');
+        if (els.input) { els.input.value = ''; els.input.focus(); }
+    }
+}
+
+function closeFolderFilter() {
+    var els = getFolderFilterEls();
+    if (els.container) els.container.classList.remove('active');
+    if (els.btn) els.btn.classList.remove('active');
+    if (els.input) els.input.value = '';
+    clearTreeFilter();
+}
+
+function filterTree(query) {
+    var tree = document.querySelector('#sidebar-tree .tree');
+    if (!tree) return;
+
+    query = (query || '').trim().toLowerCase();
+    if (!query) { clearTreeFilter(); return; }
+
+    // Single pass: collect visible items (matched dirs + their children + ancestors)
+    var visible = new Set();
+    tree.querySelectorAll('.tree-directory .dir-name').forEach(function(dirName) {
+        if (dirName.textContent.toLowerCase().indexOf(query) === -1) return;
+
+        var treeItem = dirName.closest('.tree-item');
+        if (!treeItem) return;
+        visible.add(treeItem);
+        highlightDirMatch(dirName, query);
+
+        // Children
+        treeItem.querySelectorAll('.tree-item').forEach(function(child) { visible.add(child); });
+
+        // Expand matched dir
+        var children = treeItem.querySelector('.tree-children');
+        if (children) children.style.display = '';
+        var chevron = treeItem.querySelector('.expand-icon');
+        if (chevron) chevron.textContent = '\u25BC';
+
+        // Ancestors (skip already-visited via Set)
+        var parent = treeItem.parentElement;
+        while (parent) {
+            if (parent.classList && parent.classList.contains('tree-item')) {
+                if (visible.has(parent)) break;
+                visible.add(parent);
+                var pc = parent.querySelector(':scope > .tree-children');
+                if (pc) pc.style.display = '';
+                var pv = parent.querySelector(':scope > .tree-node .expand-icon');
+                if (pv) pv.textContent = '\u25BC';
+            }
+            parent = parent.parentElement;
+        }
+    });
+
+    // Apply visibility in one pass
+    tree.querySelectorAll('.tree-item').forEach(function(item) {
+        item.classList.toggle('filtered-out', !visible.has(item));
+    });
+}
+
+function highlightDirMatch(dirNameEl, query) {
+    var text = dirNameEl.textContent;
+    var idx = text.toLowerCase().indexOf(query);
+    if (idx === -1) return;
+    dirNameEl.innerHTML =
+        escapeHtml(text.substring(0, idx)) +
+        '<span class="filter-match">' + escapeHtml(text.substring(idx, idx + query.length)) + '</span>' +
+        escapeHtml(text.substring(idx + query.length));
+}
+
+function clearTreeFilter() {
+    var tree = document.querySelector('#sidebar-tree .tree');
+    if (!tree) return;
+    tree.querySelectorAll('.tree-item.filtered-out').forEach(function(item) {
+        item.classList.remove('filtered-out');
+    });
+    tree.querySelectorAll('.dir-name .filter-match').forEach(function(mark) {
+        mark.replaceWith(mark.textContent);
+    });
+}

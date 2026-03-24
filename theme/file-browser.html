@@ -759,6 +759,65 @@
             align-items: center;
         }
 
+        /* Folder filter */
+        .folder-filter-container {
+            display: none;
+            padding: 4px 8px 6px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+            flex-shrink: 0;
+        }
+        .folder-filter-container.active {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .folder-filter-input {
+            flex: 1;
+            border: 1px solid var(--borderColor-muted);
+            border-radius: 3px;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            font-size: 13px;
+            font-family: var(--font-mono);
+            padding: 2px 6px;
+            height: 22px;
+            outline: none;
+        }
+        .folder-filter-input:focus {
+            border-color: var(--fgColor-accent);
+        }
+        .folder-filter-input::placeholder {
+            color: var(--fgColor-muted);
+            opacity: 0.6;
+        }
+        .folder-filter-btn {
+            background: transparent;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            opacity: 0.7;
+            transition: opacity 0.15s;
+        }
+        .folder-filter-btn:hover {
+            opacity: 1;
+            background: rgba(128, 128, 128, 0.1);
+        }
+        .folder-filter-btn.active {
+            color: var(--fgColor-accent);
+            opacity: 1;
+        }
+        .tree-item.filtered-out {
+            display: none;
+        }
+        .dir-name .filter-match {
+            background: rgba(227, 179, 65, 0.3);
+            border-radius: 2px;
+        }
+
         .tree-folder-action {
             background: transparent;
             border: none;
@@ -1806,6 +1865,12 @@
                 <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">
                     <!-- Breadcrumb populated by JavaScript -->
                 </nav>
+                <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.75 3h14.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1 0-1.5ZM3 7.75A.75.75 0 0 1 3.75 7h8.5a.75.75 0 0 1 0 1.5h-8.5A.75.75 0 0 1 3 7.75Zm3 4a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1 0-1.5Z"/></svg>
+                </button>
+            </div>
+            <div class="folder-filter-container" id="folder-filter-container">
+                <input type="text" id="folder-filter-input" class="folder-filter-input" placeholder="Filter folders..." aria-label="Filter folders by name" autocomplete="off" />
             </div>
             <div class="sidebar-content" id="sidebar-tree">
                 {{if .TreeHTML}}
