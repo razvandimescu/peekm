@@ -1903,6 +1903,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize folder filter (debounced)
     var folderInput = document.getElementById('folder-filter-input');
     if (folderInput) {
+        _folderFilterEmptyEl = document.getElementById('folder-filter-empty');
         var filterTimer = null;
         folderInput.addEventListener('input', function(e) {
             clearTimeout(filterTimer);
@@ -1918,6 +1919,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ===== Folder Filter Functions =====
+var _folderFilterEmptyEl = null;
 
 function getFolderFilterEls() {
     return {
@@ -1957,6 +1959,7 @@ function filterTree(query) {
     // Single pass: collect visible items (matched dirs + their children + ancestors)
     var visible = new Set();
     tree.querySelectorAll('.tree-directory .dir-name').forEach(function(dirName) {
+        if (dirName.closest('.smart-folder')) return;
         if (dirName.textContent.toLowerCase().indexOf(query) === -1) return;
 
         var treeItem = dirName.closest('.tree-item');
@@ -1988,10 +1991,14 @@ function filterTree(query) {
         }
     });
 
-    // Apply visibility in one pass
+    // Apply visibility only to file tree items (skip smart folders)
     tree.querySelectorAll('.tree-item').forEach(function(item) {
-        item.classList.toggle('filtered-out', !visible.has(item));
+        if (!item.closest('.smart-folder')) {
+            item.classList.toggle('filtered-out', !visible.has(item));
+        }
     });
+
+    if (_folderFilterEmptyEl) _folderFilterEmptyEl.classList.toggle('active', visible.size === 0);
 }
 
 function highlightDirMatch(dirNameEl, query) {
@@ -2013,4 +2020,5 @@ function clearTreeFilter() {
     tree.querySelectorAll('.dir-name .filter-match').forEach(function(mark) {
         mark.replaceWith(mark.textContent);
     });
+    if (_folderFilterEmptyEl) _folderFilterEmptyEl.classList.remove('active');
 }
