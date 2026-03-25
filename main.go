@@ -1034,15 +1034,12 @@ func resolveTarget() string {
 		targetPath = flag.Arg(0)
 	}
 
-	absPath, err := filepath.Abs(targetPath)
+	absPath, err := validateAndResolvePath(targetPath)
 	if err != nil {
-		log.Fatalf("Error getting absolute path: %v", err)
+		log.Fatalf("Error resolving path: %v", err)
 	}
 
 	info, err := os.Stat(absPath)
-	if os.IsNotExist(err) {
-		log.Fatalf("Path not found: %s", targetPath)
-	}
 	if err != nil {
 		log.Fatalf("Error accessing path: %v", err)
 	}
@@ -1051,27 +1048,32 @@ func resolveTarget() string {
 		browseDir = absPath
 		return ""
 	}
-	browseDir = filepath.Dir(absPath)
-	return filepath.Base(absPath)
+
+	// Scope to git root to avoid scanning all of $HOME for loose files.
+	parentDir := filepath.Dir(absPath)
+	if gitRoot, err := findGitRoot(parentDir); err == nil {
+		browseDir = gitRoot
+	} else {
+		browseDir = parentDir
+	}
+	return absPath
 }
 
-func buildStartupURL(baseURL, targetFile string) string {
-	if targetFile == "" {
+func buildStartupURL(baseURL, targetPath string) string {
+	if targetPath == "" {
 		fmt.Printf("peekm file browser at %s\n", baseURL)
 		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
 		return baseURL
 	}
 	fullURL := baseURL
-	for _, mdFile := range markdownFiles {
-		if filepath.Base(mdFile) == targetFile {
-			if relPath, err := filepath.Rel(browseDir, mdFile); err == nil {
-				fullURL = fmt.Sprintf("%s/view/%s", baseURL, relPath)
-			}
-			break
+	if isWhitelistedFile(targetPath) {
+		if relPath, err := filepath.Rel(browseDir, targetPath); err == nil {
+			fullURL = fmt.Sprintf("%s/view/%s", baseURL, relPath)
 		}
 	}
+	displayName := filepath.Base(targetPath)
 	fmt.Printf("peekm at %s\n", baseURL)
-	fmt.Printf("Opening %s - found %d markdown file(s)\n", targetFile, len(markdownFiles))
+	fmt.Printf("Opening %s - found %d markdown file(s)\n", displayName, len(markdownFiles))
 	return fullURL
 }
 
@@ -1247,10 +1249,8 @@ func main() {
 		}
 	}()
 
-	targetFile := resolveTarget()
-
-	// Collect markdown files
-	markdownFiles = collectMarkdownFiles(browseDir)
+	targetPath := resolveTarget()
+	markdownFiles = collectFiles(browseDir, targetPath != "")
 	if len(markdownFiles) == 0 {
 		fmt.Printf("No markdown files found in: %s\n", browseDir)
 		fmt.Fprintln(os.Stderr)
@@ -1269,7 +1269,7 @@ func main() {
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	url := fmt.Sprintf("http://localhost:%d", *port)
 
-	fullURL := buildStartupURL(url, targetFile)
+	fullURL := buildStartupURL(url, targetPath)
 	fmt.Println("Press Ctrl+C to quit")
 
 	serveAndWait(addr, fullURL)
@@ -2571,6 +2571,35 @@ func collectMarkdownFiles(rootDir string) []string {
 	var files []string
 	collectMarkdownFilesWalk(rootDir, rootDir, homeDir, customPatterns, visited, &files)
 
+	sort.Strings(files)
+	return files
+}
+
+// collectFiles returns collectable files in dir. When targeting a single file
+// and dir is $HOME, only top-level files are collected to avoid a slow recursive scan.
+func collectFiles(dir string, singleFile bool) []string {
+	if singleFile {
+		homeDir, _ := os.UserHomeDir()
+		resolvedHome, _ := filepath.EvalSymlinks(homeDir)
+		if homeDir != "" && dir == resolvedHome {
+			return collectTopLevelFiles(dir)
+		}
+	}
+	return collectMarkdownFiles(dir)
+}
+
+func collectTopLevelFiles(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("Warning: Cannot read directory %s: %v", dir, err)
+		return nil
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && isCollectableFile(e.Name()) {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
 	sort.Strings(files)
 	return files
 }
