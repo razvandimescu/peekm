@@ -759,6 +759,140 @@
             align-items: center;
         }
 
+        /* Folder filter */
+        .folder-filter-container {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.15s ease-out, padding 0.15s ease-out;
+            padding: 0 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .folder-filter-container.active {
+            max-height: 50px;
+            padding: 4px 8px 6px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+        }
+        .folder-filter-input {
+            flex: 1;
+            border: 1px solid var(--borderColor-default);
+            border-radius: 6px;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            font-size: 13px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            padding: 4px 10px;
+            height: 26px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .folder-filter-input:focus {
+            border-color: var(--fgColor-accent);
+            box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.1);
+        }
+        [data-theme="dark"] .folder-filter-input:focus {
+            box-shadow: 0 0 0 2px rgba(68, 147, 248, 0.15);
+        }
+        .folder-filter-input::placeholder {
+            color: var(--fgColor-muted);
+            opacity: 0.6;
+        }
+        .folder-filter-btn {
+            background: transparent;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            opacity: 0.7;
+            transition: opacity 0.15s;
+        }
+        .folder-filter-btn:hover {
+            opacity: 1;
+            background: rgba(128, 128, 128, 0.1);
+        }
+        .folder-filter-btn.active {
+            color: var(--fgColor-accent);
+            opacity: 1;
+        }
+        .tree-item.filtered-out {
+            display: none;
+        }
+        .dir-name .filter-match {
+            background: rgba(9, 105, 218, 0.15);
+            border-radius: 2px;
+        }
+        [data-theme="dark"] .dir-name .filter-match {
+            background: rgba(68, 147, 248, 0.25);
+        }
+        .folder-filter-empty {
+            padding: 12px 16px;
+            color: var(--fgColor-muted);
+            font-size: 12px;
+            text-align: center;
+            display: none;
+        }
+        .folder-filter-empty.active {
+            display: block;
+        }
+
+        .tree-folder-action {
+            background: transparent;
+            border: none;
+            color: var(--fgColor-muted);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            line-height: 1;
+            padding: 0 4px;
+            border-radius: 3px;
+            margin-left: auto;
+            opacity: 0;
+            transition: opacity 0.15s;
+            flex-shrink: 0;
+        }
+        .tree-node:hover .tree-folder-action {
+            opacity: 1;
+        }
+        .tree-folder-action:hover {
+            background: rgba(128, 128, 128, 0.15);
+            color: var(--fgColor-default);
+        }
+
+        .tree-node.drag-over {
+            background: rgba(56, 139, 253, 0.1);
+            outline: 1px dashed var(--fgColor-accent);
+            outline-offset: -1px;
+            border-radius: 3px;
+        }
+        .tree-file.dragging,
+        .tree-directory.dragging {
+            opacity: 0.4;
+        }
+
+        .new-folder-input-container .tree-node {
+            padding-left: 8px;
+        }
+        .new-folder-input-container .expand-icon {
+            opacity: 0.4;
+        }
+        .new-folder-input {
+            flex: 1;
+            border: 1px solid var(--fgColor-accent);
+            border-radius: 3px;
+            background: var(--bgColor-default);
+            color: var(--fgColor-default);
+            font-size: 13px;
+            padding: 0 4px;
+            height: 20px;
+            outline: none;
+            font-family: var(--font-mono);
+        }
+
         .breadcrumb {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             font-size: 11px;
@@ -1753,6 +1887,12 @@
                 <nav class="breadcrumb" aria-label="Breadcrumb" id="breadcrumb">
                     <!-- Breadcrumb populated by JavaScript -->
                 </nav>
+                <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 .8 1.6L10 9.267V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-4.733L1.2 2.6A1 1 0 0 1 1 2Z"/></svg>
+                </button>
+            </div>
+            <div class="folder-filter-container" id="folder-filter-container">
+                <input type="text" id="folder-filter-input" class="folder-filter-input" placeholder="Filter folders..." aria-label="Filter folders by name" autocomplete="off" />
             </div>
             <div class="sidebar-content" id="sidebar-tree">
                 {{if .TreeHTML}}
@@ -1763,6 +1903,7 @@
                         <p>No markdown files found</p>
                     </div>
                 {{end}}
+                <div class="folder-filter-empty" id="folder-filter-empty">No matching folders</div>
             </div>
             <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </aside>
@@ -1898,6 +2039,98 @@
             });
         }
 
+        function startNewFolder(parentPath) {
+            if (document.getElementById('new-folder-input')) return;
+            parentPath = parentPath || '';
+
+            const container = document.createElement('div');
+            container.className = 'tree-item new-folder-input-container';
+            container.dataset.parent = parentPath;
+            container.innerHTML = '<div class="tree-node">' +
+                '<span class="expand-icon">&#9654;</span>' +
+                '<input type="text" id="new-folder-input" class="new-folder-input" ' +
+                'placeholder="folder name" autocomplete="off" spellcheck="false">' +
+                '</div>';
+
+            if (parentPath) {
+                // Find the folder's tree-children container and insert there
+                var dirSpan = document.querySelector('.tree-directory[data-path="' + CSS.escape(parentPath) + '"]');
+                if (dirSpan) {
+                    var treeItem = dirSpan.closest('.tree-item');
+                    var children = treeItem.querySelector('.tree-children');
+                    // Auto-expand if collapsed
+                    if (children && children.style.display === 'none') {
+                        toggleDir(dirSpan);
+                    }
+                    if (children) {
+                        children.prepend(container);
+                    } else {
+                        // No children container yet — create one
+                        children = document.createElement('div');
+                        children.className = 'tree-children';
+                        children.appendChild(container);
+                        treeItem.appendChild(children);
+                    }
+                } else {
+                    // Fallback to root
+                    parentPath = '';
+                    container.dataset.parent = '';
+                    var tree = document.querySelector('.sidebar-tree');
+                    if (!tree) return;
+                    tree.prepend(container);
+                }
+            } else {
+                var tree = document.querySelector('.sidebar-tree');
+                if (!tree) return;
+                var separator = tree.querySelector('.smart-folders-separator');
+                if (separator) {
+                    separator.after(container);
+                } else {
+                    tree.prepend(container);
+                }
+            }
+
+            var input = container.querySelector('input');
+            input.focus();
+
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    createFolder(input.value.trim(), container.dataset.parent);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    container.remove();
+                }
+            });
+            input.addEventListener('blur', function() {
+                setTimeout(function() { container.remove(); }, 150);
+            });
+        }
+
+        function createFolder(name, parentPath) {
+            var container = document.querySelector('.new-folder-input-container');
+            if (container) container.remove();
+            if (!name) return;
+
+            fetch('/folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, parent: parentPath || '' })
+            })
+            .then(function(response) {
+                if (response.ok) {
+                    var displayPath = parentPath ? parentPath + '/' + name : name;
+                    showToast('Created folder: ' + displayPath, null, null);
+                    scheduleTreeRefresh();
+                } else {
+                    return response.text().then(function(text) { throw new Error(text); });
+                }
+            })
+            .catch(function(error) {
+                showErrorToast(error.message);
+            });
+        }
+
         // Delete file confirmation and handling
         function confirmDelete() {
             const filePath = document.querySelector('.subtitle').textContent;
@@ -1956,9 +2189,14 @@
             });
         }
 
-        // Escape key closes active modals
+        // Escape key closes active modals and inputs
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
+                const folderInput = document.getElementById('new-folder-input');
+                if (folderInput) {
+                    folderInput.closest('.new-folder-input-container').remove();
+                    return;
+                }
                 const deleteModal = document.getElementById('delete-confirm-modal');
                 if (deleteModal && deleteModal.classList.contains('active')) {
                     closeDeleteModal();
@@ -2013,6 +2251,136 @@
                 saveTreeState();
             }
         }
+
+        // Drag-and-drop file moving (event delegation on sidebar-tree)
+        (function() {
+            var draggedPath = null;
+            var draggedIsDir = false;
+            var expandTimer = null;
+            var currentDragOver = null;
+            var dragSource = null;
+
+            var sidebar = document.getElementById('sidebar-tree');
+            if (!sidebar) return;
+
+            function setDragOver(target) {
+                if (target === currentDragOver) return;
+                if (currentDragOver) currentDragOver.classList.remove('drag-over');
+                currentDragOver = target;
+                if (currentDragOver) currentDragOver.classList.add('drag-over');
+            }
+
+            function cleanupDrag() {
+                draggedPath = null;
+                draggedIsDir = false;
+                clearTimeout(expandTimer);
+                setDragOver(null);
+                if (dragSource) { dragSource.classList.remove('dragging'); dragSource = null; }
+            }
+
+            sidebar.addEventListener('dragstart', function(e) {
+                var node = e.target.closest('.tree-node[data-file-path], .tree-node[data-dir-path]');
+                if (!node) { e.preventDefault(); return; }
+                draggedIsDir = !!node.dataset.dirPath;
+                draggedPath = node.dataset.filePath || node.dataset.dirPath;
+                dragSource = node.querySelector('.tree-file') || node.querySelector('.tree-directory');
+                if (dragSource) dragSource.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', draggedPath);
+                e.dataTransfer.setData('application/x-peekm-dir', draggedIsDir ? '1' : '0');
+            });
+
+            sidebar.addEventListener('dragend', cleanupDrag);
+
+            sidebar.addEventListener('dragover', function(e) {
+                if (!draggedPath) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                var target = findDropTarget(e.target);
+                // Prevent dropping a folder onto itself or its children
+                if (draggedIsDir && target) {
+                    var targetPath = target.querySelector('.tree-directory');
+                    if (targetPath) {
+                        var tp = targetPath.dataset.path;
+                        if (tp === draggedPath || tp.startsWith(draggedPath + '/')) {
+                            setDragOver(null);
+                            return;
+                        }
+                    }
+                }
+                setDragOver(target);
+            });
+
+            sidebar.addEventListener('dragenter', function(e) {
+                if (!draggedPath) return;
+                clearTimeout(expandTimer);
+                var dirSpan = e.target.closest('.tree-directory');
+                if (!dirSpan) return;
+                var children = dirSpan.closest('.tree-item').querySelector('.tree-children');
+                if (children && children.style.display === 'none') {
+                    expandTimer = setTimeout(function() { toggleDir(dirSpan); }, 700);
+                }
+            });
+
+            sidebar.addEventListener('drop', function(e) {
+                e.preventDefault();
+                cleanupDrag();
+
+                var destDir = '';
+                var dirSpan = e.target.closest('.tree-directory');
+                if (dirSpan) destDir = dirSpan.dataset.path;
+
+                var source = e.dataTransfer.getData('text/plain');
+                if (!source) return;
+                var isDir = e.dataTransfer.getData('application/x-peekm-dir') === '1';
+
+                // No-op: same parent (files) or same destination (folders)
+                if (isDir) {
+                    if (source === destDir || destDir.startsWith(source + '/')) return;
+                    var dirParent = source.split('/').slice(0, -1).join('/');
+                    if (dirParent === destDir) return;
+                } else {
+                    var parts = source.split('/');
+                    var sourceDir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+                    if (sourceDir === destDir) return;
+                }
+
+                moveFile(source, destDir);
+            });
+
+            function findDropTarget(el) {
+                var dirSpan = el.closest('.tree-directory');
+                if (dirSpan) return dirSpan.closest('.tree-node');
+                return null;
+            }
+
+            function moveFile(source, dest) {
+                fetch('/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: source, dest: dest })
+                })
+                .then(function(response) {
+                    if (response.ok) return response.json();
+                    return response.text().then(function(t) { throw new Error(t); });
+                })
+                .then(function(data) {
+                    showToast('Moved: ' + source.split('/').pop(), null, null);
+                    // Skip optimistic tree manipulation — scheduleTreeRefresh
+                    // fetches the authoritative tree from the server, preserving
+                    // empty source folders that would otherwise disappear.
+                    scheduleTreeRefresh();
+                    // Redirect if moved file is currently viewed
+                    var current = decodeURIComponent(window.location.pathname.replace('/view/', ''));
+                    if (current === source && typeof navigate === 'function') {
+                        navigate('/view/' + data.newPath);
+                    }
+                })
+                .catch(function(error) {
+                    showErrorToast('Move failed: ' + error.message);
+                });
+            }
+        })();
 
         // Smart Folder toggle
         function toggleSmartFolder(header) {

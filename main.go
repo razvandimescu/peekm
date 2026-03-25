@@ -705,7 +705,9 @@ func registerRoutes() {
 	http.HandleFunc("/", localOnly(withRecovery(serveBrowser)))
 	http.HandleFunc("/view/", localOnly(withRecovery(serveFile)))
 	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
+	http.HandleFunc("/folder", localOnly(withRecovery(withCSRFCheck(handleCreateFolder))))
 	http.HandleFunc("/delete", localOnly(withRecovery(withCSRFCheck(handleDelete))))
+	http.HandleFunc("/move", localOnly(withRecovery(withCSRFCheck(handleMove))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
 	http.HandleFunc("/download", localOnly(withRecovery(withCSRFCheck(handleDownload))))
@@ -895,6 +897,11 @@ func isMemoryFile(absPath string) bool {
 func isWhitelistedFile(path string) bool {
 	fileMutex.RLock()
 	defer fileMutex.RUnlock()
+	return isWhitelistedLocked(path)
+}
+
+// isWhitelistedLocked checks the whitelist without acquiring the lock (caller must hold it).
+func isWhitelistedLocked(path string) bool {
 	for _, f := range markdownFiles {
 		if f == path {
 			return true
@@ -1370,7 +1377,9 @@ func handleMarkdownCreated(filePath string) {
 	log.Printf("New markdown file created: %s", filePath)
 
 	fileMutex.Lock()
-	markdownFiles = append(markdownFiles, filePath)
+	if !isWhitelistedLocked(filePath) {
+		markdownFiles = append(markdownFiles, filePath)
+	}
 	fileMutex.Unlock()
 
 	go func() {
@@ -1863,6 +1872,60 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name   string `json:"name"`
+		Parent string `json:"parent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "Folder name cannot be empty", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") || strings.ContainsRune(name, 0) {
+		http.Error(w, "Invalid folder name", http.StatusBadRequest)
+		return
+	}
+
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+
+	parentDir := filepath.Join(root, req.Parent)
+	validatedParent, err := validateAndResolvePath(parentDir)
+	if err != nil {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	// Ensure parent is within the browse directory (not just $HOME)
+	validatedRoot, _ := validateAndResolvePath(root)
+	if validatedRoot != "" && !strings.HasPrefix(validatedParent, validatedRoot) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	absPath := filepath.Join(validatedParent, name)
+
+	if err := os.Mkdir(absPath, 0755); err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "Folder already exists", http.StatusConflict)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to create folder: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	log.Printf("Created folder: %s", absPath)
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleNavigate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2031,6 +2094,114 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Deleted file: %s", targetPath)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// validateMoveSource resolves and validates a move source path.
+// Returns the validated path, file info, and error message (empty on success).
+func validateMoveSource(relPath, root, validatedRoot string) (string, os.FileInfo, string) {
+	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
+	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+		return "", nil, "Access denied"
+	}
+	info, err := os.Stat(validated)
+	if err != nil {
+		return "", nil, "Source not found"
+	}
+	if !info.IsDir() && !isWhitelistedFile(validated) {
+		return "", nil, "File not found or access denied"
+	}
+	return validated, info, ""
+}
+
+// validateMoveDest resolves and validates a move destination directory.
+func validateMoveDest(relPath, root, validatedRoot string) (string, string) {
+	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
+	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+		return "", "Access denied"
+	}
+	if info, err := os.Stat(validated); err != nil || !info.IsDir() {
+		return "", "Destination is not a directory"
+	}
+	return validated, ""
+}
+
+func handleMove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Source string `json:"source"`
+		Dest   string `json:"dest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+
+	validatedRoot, err := validateAndResolvePath(root)
+	if err != nil {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	validatedSource, sourceInfo, errMsg := validateMoveSource(req.Source, root, validatedRoot)
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusForbidden)
+		return
+	}
+
+	validatedDest, errMsg := validateMoveDest(req.Dest, root, validatedRoot)
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	// Prevent circular move (directory into itself or its subtree)
+	sep := string(filepath.Separator)
+	if sourceInfo.IsDir() && strings.HasPrefix(validatedDest+sep, validatedSource+sep) {
+		http.Error(w, "Cannot move a folder into itself", http.StatusBadRequest)
+		return
+	}
+
+	destPath := filepath.Join(validatedDest, filepath.Base(validatedSource))
+	if filepath.Dir(validatedSource) == validatedDest {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"newPath": req.Source})
+		return
+	}
+	// Pre-check only for files — os.Rename silently overwrites files on POSIX.
+	// For directories, os.Rename fails naturally (ENOTEMPTY/ENOTDIR).
+	if !sourceInfo.IsDir() {
+		if _, err := os.Stat(destPath); err == nil {
+			http.Error(w, "File already exists at destination", http.StatusConflict)
+			return
+		}
+	}
+
+	if err := os.Rename(validatedSource, destPath); err != nil {
+		http.Error(w, fmt.Sprintf("Move failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fileMutex.Lock()
+	markdownFiles = collectMarkdownFiles(browseDir)
+	if currentFile == validatedSource {
+		currentFile = destPath
+	} else if sourceInfo.IsDir() && strings.HasPrefix(currentFile, validatedSource+sep) {
+		currentFile = filepath.Join(destPath, currentFile[len(validatedSource):])
+	}
+	fileMutex.Unlock()
+
+	newRelPath := getRelativePath(destPath)
+	log.Printf("Moved: %s → %s", req.Source, newRelPath)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request) {
@@ -2689,10 +2860,6 @@ func generateTreeHTML() string {
 	copy(currentMarkdownFiles, markdownFiles)
 	fileMutex.RUnlock()
 
-	if len(currentMarkdownFiles) == 0 {
-		return ""
-	}
-
 	// Make browse directory absolute for proper relative path calculation
 	absDir, err := filepath.Abs(currentBrowseDir)
 	if err != nil {
@@ -2714,33 +2881,7 @@ func generateTreeHTML() string {
 		// Make path relative to browse directory (~/... for out-of-browseDir files)
 		relPath := tildeRelPath(absPath, absDir)
 
-		parts := strings.Split(filepath.Dir(relPath), string(filepath.Separator))
-
-		currentPath := "."
-		for _, part := range parts {
-			if part == "." {
-				continue
-			}
-
-			parentPath := currentPath
-			if currentPath == "." {
-				currentPath = part
-			} else {
-				currentPath = filepath.Join(currentPath, part)
-			}
-
-			if _, exists := dirNodes[currentPath]; !exists {
-				node := &fileNode{
-					name:  part,
-					path:  currentPath, // Use relative path for directories too
-					isDir: true,
-				}
-				dirNodes[currentPath] = node
-				if parent, ok := dirNodes[parentPath]; ok {
-					parent.children = append(parent.children, node)
-				}
-			}
-		}
+		ensureDirChain(strings.Split(filepath.Dir(relPath), string(filepath.Separator)), dirNodes)
 
 		// Add file
 		info, err := os.Stat(path)
@@ -2760,8 +2901,11 @@ func generateTreeHTML() string {
 		}
 	}
 
-	// Clean and sort tree
-	cleanEmptyDirs(root)
+	// Add real directories that aren't already in the tree (user-created empty folders)
+	addRealDirs(absDir, dirNodes)
+
+	// Clean phantom dirs (intermediate path nodes with no file descendants that don't exist on disk)
+	cleanEmptyDirs(root, absDir)
 	sortTree(root)
 
 	// Generate HTML
@@ -2795,8 +2939,8 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			collapsed := depth >= 1
 
 			// Directory node with chevron and name
-			buf.WriteString(fmt.Sprintf(`<div class="tree-node"><span class="tree-directory" onclick="toggleDir(this)" data-path="%s">`,
-				template.HTMLEscapeString(node.path)))
+			buf.WriteString(fmt.Sprintf(`<div class="tree-node" draggable="true" data-dir-path="%s"><span class="tree-directory" onclick="toggleDir(this)" data-path="%s">`,
+				template.HTMLEscapeString(node.path), template.HTMLEscapeString(node.path)))
 
 			// Chevron icon
 			if collapsed {
@@ -2805,7 +2949,10 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 				buf.WriteString(`<span class="expand-icon">▼</span>`)
 			}
 
-			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span></div>`, template.HTMLEscapeString(node.name)))
+			jsPath := strings.ReplaceAll(template.HTMLEscapeString(node.path), "'", "&#39;")
+			buf.WriteString(fmt.Sprintf(`<span class="dir-name">%s</span></span>`+
+				`<button class="tree-folder-action" onclick="event.stopPropagation();startNewFolder('%s')" title="New Folder">+</button></div>`,
+				template.HTMLEscapeString(node.name), jsPath))
 
 			// Children container (collapsed by default at depth >= 1)
 			if len(node.children) > 0 {
@@ -2824,8 +2971,9 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			}
 		} else {
 			// File node (leaf)
-			buf.WriteString(`<div class="tree-node"><span class="tree-file">`)
-			buf.WriteString(fmt.Sprintf(`<a href="/view/%s">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
+			buf.WriteString(fmt.Sprintf(`<div class="tree-node" draggable="true" data-file-path="%s"><span class="tree-file">`,
+				template.HTMLEscapeString(node.path)))
+			buf.WriteString(fmt.Sprintf(`<a href="/view/%s" draggable="false">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
 			buf.WriteString(`</span></div>`)
 		}
 
@@ -2932,7 +3080,56 @@ type fileNode struct {
 	children []*fileNode
 }
 
-func cleanEmptyDirs(node *fileNode) bool {
+func ensureDirChain(parts []string, dirNodes map[string]*fileNode) {
+	currentPath := "."
+	for _, part := range parts {
+		if part == "." {
+			continue
+		}
+		parentPath := currentPath
+		if currentPath == "." {
+			currentPath = part
+		} else {
+			currentPath = filepath.Join(currentPath, part)
+		}
+		if _, exists := dirNodes[currentPath]; !exists {
+			node := &fileNode{name: part, path: currentPath, isDir: true}
+			dirNodes[currentPath] = node
+			if parent, ok := dirNodes[parentPath]; ok {
+				parent.children = append(parent.children, node)
+			}
+		}
+	}
+}
+
+func addRealDirs(absDir string, dirNodes map[string]*fileNode) {
+	customPatterns := getIgnorePatterns(absDir)
+	filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if path == absDir {
+			return nil
+		}
+		if isExcludedDir(info.Name(), customPatterns) {
+			return filepath.SkipDir
+		}
+		relPath, err := filepath.Rel(absDir, path)
+		if err != nil {
+			return nil
+		}
+		if _, exists := dirNodes[relPath]; exists {
+			return nil
+		}
+		ensureDirChain(strings.Split(relPath, string(filepath.Separator)), dirNodes)
+		return nil
+	})
+}
+
+func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
 	if !node.isDir {
 		return true // Keep files
 	}
@@ -2940,14 +3137,23 @@ func cleanEmptyDirs(node *fileNode) bool {
 	// Recursively clean children
 	kept := make([]*fileNode, 0)
 	for _, child := range node.children {
-		if cleanEmptyDirs(child) {
+		if cleanEmptyDirs(child, browseRoot) {
 			kept = append(kept, child)
 		}
 	}
 	node.children = kept
 
-	// Keep directory if it has children or is root
-	return len(node.children) > 0 || node.name == "."
+	if len(node.children) > 0 || node.name == "." {
+		return true
+	}
+	// Keep empty dirs that actually exist on disk (user-created)
+	if browseRoot != "" && node.path != "" {
+		absPath := filepath.Join(browseRoot, node.path)
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func sortTree(node *fileNode) {
