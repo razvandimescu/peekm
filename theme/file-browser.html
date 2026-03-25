@@ -1894,7 +1894,6 @@
             <div class="folder-filter-container" id="folder-filter-container">
                 <input type="text" id="folder-filter-input" class="folder-filter-input" placeholder="Filter folders..." aria-label="Filter folders by name" autocomplete="off" />
             </div>
-            <div class="folder-filter-empty" id="folder-filter-empty">No matching folders</div>
             <div class="sidebar-content" id="sidebar-tree">
                 {{if .TreeHTML}}
                     <div class="tree sidebar-tree">{{.TreeHTML}}</div>
@@ -1904,6 +1903,7 @@
                         <p>No markdown files found</p>
                     </div>
                 {{end}}
+                <div class="folder-filter-empty" id="folder-filter-empty">No matching folders</div>
             </div>
             <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </aside>
