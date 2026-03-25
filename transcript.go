@@ -415,10 +415,7 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 			displayName, server := humanizeToolName(peek.Name)
 			inputMap := parseToolInput(peek.Input)
 			summary := toolSummaryFromMap(peek.Name, inputMap)
-			var structuredHTML template.HTML
-			if summary == "" {
-				structuredHTML = formatStructuredFromMap(peek.Name, inputMap)
-			}
+			structuredHTML := formatStructuredFromMap(peek.Name, inputMap)
 			blocks = append(blocks, contentBlock{
 				Type:            "tool_use",
 				ToolName:        peek.Name,
