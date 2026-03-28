@@ -280,6 +280,127 @@
             }
         }
 
+        /* --- Sharing callout --- */
+        .sharing-callout {
+            padding: 0 0 60px;
+        }
+
+        .sharing-callout-inner {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            align-items: center;
+            padding: 40px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-muted);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sharing-callout-inner::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--fg-accent), var(--fg-done), var(--fg-success));
+        }
+
+        .sharing-callout-text h2 {
+            font-family: var(--font-heading);
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
+        }
+
+        .sharing-callout-text p {
+            color: var(--fg-muted);
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+
+        .sharing-callout-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .sharing-callout-text .highlight {
+            color: var(--fg);
+            font-weight: 500;
+        }
+
+        .sharing-flow {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .sharing-step {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 12px 16px;
+            background: var(--bg);
+            border: 1px solid var(--border-muted);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .sharing-step:hover {
+            border-color: var(--border);
+        }
+
+        .sharing-step-num {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(68, 147, 248, 0.12);
+            color: var(--fg-accent);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .sharing-step code {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--fg-success);
+            background: rgba(63, 185, 80, 0.08);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 640px) {
+            .sharing-callout-inner {
+                grid-template-columns: 1fr;
+                gap: 24px;
+                padding: 24px;
+            }
+        }
+
+        /* --- Comparison row highlight --- */
+        .row-highlight td {
+            background: rgba(68, 147, 248, 0.04);
+        }
+
+        .row-highlight td:last-child {
+            font-weight: 600;
+        }
+
+        @media (prefers-color-scheme: light) {
+            .row-highlight td {
+                background: rgba(9, 105, 218, 0.04);
+            }
+        }
+
         /* --- Features --- */
         .features {
             padding: 60px 0;
@@ -567,7 +688,8 @@
         <h1 class="animate animate-d1">See what AI agents do<br><span>across all your projects</span></h1>
         <p class="hero-subtitle animate animate-d2">
             AI coding agents run dozens of operations per session — but you only see the final diff.
-            peekm shows you every session, every file change, every conversation. In real time.
+            peekm shows you every session, every file change, every conversation.
+            Share any document instantly — LAN or public link, no account needed.
         </p>
 
         <div class="install-block animate animate-d3">
@@ -591,11 +713,39 @@
     </div>
 </section>
 
+<section class="sharing-callout">
+    <div class="container">
+        <div class="sharing-callout-inner">
+            <div class="sharing-callout-text">
+                <h2>Share any document.<br>One click.</h2>
+                <p>
+                    Send a rendered markdown file to anyone on your network — or <span class="highlight">make it public</span> with an HTTPS link through <code>share.peekm.dev</code>.
+                </p>
+                <p>No sign-up. No upload. Expires in 1 hour. Works with Markdown, HTML, SVG, and plain text.</p>
+            </div>
+            <div class="sharing-flow">
+                <div class="sharing-step">
+                    <span class="sharing-step-num">1</span>
+                    Click the share icon on any file
+                </div>
+                <div class="sharing-step">
+                    <span class="sharing-step-num">2</span>
+                    LAN link copied — share with your team
+                </div>
+                <div class="sharing-step">
+                    <span class="sharing-step-num">3</span>
+                    Click "Make public" &rarr; get <code>share.peekm.dev/&lt;token&gt;</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
 <section class="features" id="features">
     <div class="container">
         <div class="features-header">
             <h2>What it does</h2>
-            <p>One binary. No config. AI tracking starts automatically.</p>
+            <p>One binary. No config. AI tracking starts automatically. Sharing works for everyone.</p>
         </div>
         <div class="features-grid">
             <div class="feature-card">
@@ -617,11 +767,6 @@
                 <div class="feature-icon" style="background: rgba(63, 185, 80, 0.1); color: var(--fg-success);"><svg viewBox="0 0 16 16"><path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Z"/></svg></div>
                 <h3>Real-time notifications</h3>
                 <p>Toast the instant AI modifies a file. Click to navigate. Live reload via Server-Sent Events.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(210, 153, 34, 0.1); color: var(--fg-attention);"><svg viewBox="0 0 16 16"><path d="M4.72.22a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06Zm5.5 0a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06ZM.22 4.72a.75.75 0 0 1 1.06 0l1 1a.75.75 0 0 1-1.06 1.06l-1-1a.75.75 0 0 1 0-1.06Zm14.56 0a.75.75 0 0 1 0 1.06l-1 1a.75.75 0 1 1-1.06-1.06l1-1a.75.75 0 0 1 1.06 0ZM8 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12Z"/></svg></div>
-                <h3>Sharing</h3>
-                <p>Share rendered markdown with one click. LAN by default, or public via <code>share.peekm.dev</code> — no account needed.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 1 1 1.06-1.06l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></div>
@@ -680,7 +825,7 @@
                         <td>JSON files</td>
                         <td>JSONL timeline</td>
                     </tr>
-                    <tr>
+                    <tr class="row-highlight">
                         <td>Sharing</td>
                         <td class="cell-empty">&mdash;</td>
                         <td class="cell-empty">&mdash;</td>
