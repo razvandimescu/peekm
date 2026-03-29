@@ -14,7 +14,7 @@
     <div class="container">
         {{if .ShowBackButton}}
         <div class="header-actions">
-            <div style="display: flex; gap: 8px; margin-left: auto;">
+            <div class="file-action-bar">
                 {{if .SessionData}}
                 <button
                     id="sessionInfoButton"
@@ -30,6 +30,32 @@
                     <span class="session-info-ai-badge">AI</span>
                 </button>
                 {{end}}
+                <button class="action-button" onclick="downloadHTML()" aria-label="Download as HTML" title="Download as HTML"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></svg> Download</button>
+                <div class="share-container" style="position: relative; display: inline-block;">
+                    <button class="action-button" onclick="toggleShare()" id="share-btn" aria-label="Share file" title="Share file" aria-haspopup="true" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5Z"/></svg> Share</button>
+                    <div class="share-panel" id="share-panel" role="dialog" aria-label="Share options" style="display: none;">
+                        <div style="font-weight: 600; margin-bottom: 8px;">Share</div>
+                        <div class="share-url-label">Local network</div>
+                        <div class="share-panel-url">
+                            <input type="text" id="share-lan-url" readonly>
+                            <button onclick="copyShareURL('share-lan-url')" class="share-copy-btn" title="Copy LAN URL">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                            </button>
+                        </div>
+                        <div id="share-public-section" style="display: none; margin-top: 8px;">
+                            <div class="share-url-label">Public link</div>
+                            <div class="share-panel-url">
+                                <input type="text" id="share-public-url" readonly>
+                                <button onclick="copyShareURL('share-public-url')" class="share-copy-btn" title="Copy public URL">
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <button class="share-make-public-btn" id="share-make-public-btn" onclick="makeSharePublic()">Make public</button>
+                        <div class="share-expiry-text"><span id="share-expiry"></span></div>
+                        <button class="share-stop-btn" onclick="stopSharing()">Stop Sharing</button>
+                    </div>
+                </div>
                 {{if not .IsPreview}}
                 <button class="edit-button" onclick="toggleEditMode()"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z"/></svg> Edit</button>
                 {{end}}
