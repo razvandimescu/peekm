@@ -1835,38 +1835,31 @@ function handleSearchKeyboard(e) {
 }
 
 // Mobile search: reveal the search bar and focus input
+var _mobileSearchBlurHandler = null;
 function openMobileSearch() {
     var middle = document.querySelector('.top-bar-middle');
     var input = document.getElementById('file-search');
     if (!middle || !input) return;
 
-    middle.style.display = 'flex';
-    middle.style.position = 'absolute';
-    middle.style.left = '12px';
-    middle.style.right = '12px';
-    middle.style.top = '8px';
-    middle.style.maxWidth = 'none';
-    middle.style.zIndex = '1001';
+    // Remove any stale listener
+    if (_mobileSearchBlurHandler) {
+        input.removeEventListener('blur', _mobileSearchBlurHandler);
+    }
+
+    middle.classList.add('mobile-expanded');
     input.focus();
 
-    function closeMobileSearch() {
-        if (!input.value) {
-            middle.style.display = '';
-            middle.style.position = '';
-            middle.style.left = '';
-            middle.style.right = '';
-            middle.style.top = '';
-            middle.style.maxWidth = '';
-            middle.style.zIndex = '';
-        }
-        input.removeEventListener('blur', onBlur);
-    }
+    _mobileSearchBlurHandler = function() {
+        setTimeout(function() {
+            if (!input.value) {
+                middle.classList.remove('mobile-expanded');
+            }
+            input.removeEventListener('blur', _mobileSearchBlurHandler);
+            _mobileSearchBlurHandler = null;
+        }, 200);
+    };
 
-    function onBlur() {
-        setTimeout(closeMobileSearch, 200);
-    }
-
-    input.addEventListener('blur', onBlur);
+    input.addEventListener('blur', _mobileSearchBlurHandler);
 }
 
 // Clear search and hide dropdown

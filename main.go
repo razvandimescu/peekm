@@ -728,7 +728,11 @@ func withGzip(handler http.Handler) http.Handler {
 			handler.ServeHTTP(w, r)
 			return
 		}
-		gz, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		if err != nil {
+			handler.ServeHTTP(w, r)
+			return
+		}
 		defer gz.Close()
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Del("Content-Length")
@@ -3009,10 +3013,10 @@ func generateTreeHTML() string {
 	}
 
 	// Add pinned directories (user-created via UI) that aren't already in the tree
-	addPinnedDirs(absDir, dirNodes)
+	pinned := addPinnedDirs(absDir, dirNodes)
 
 	// Clean phantom dirs (intermediate path nodes with no file descendants that don't exist on disk)
-	cleanEmptyDirs(root, absDir)
+	cleanEmptyDirs(root, absDir, pinned)
 	sortTree(root)
 
 	// Generate HTML
@@ -3209,7 +3213,7 @@ func ensureDirChain(parts []string, dirNodes map[string]*fileNode) {
 	}
 }
 
-func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) {
+func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) map[string]bool {
 	fileMutex.RLock()
 	pinned := make(map[string]bool, len(pinnedDirs))
 	for k, v := range pinnedDirs {
@@ -3222,10 +3226,10 @@ func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) {
 			continue
 		}
 		if _, err := os.Stat(absPath); err != nil {
-			// Folder was deleted — unpin
 			fileMutex.Lock()
 			delete(pinnedDirs, absPath)
 			fileMutex.Unlock()
+			delete(pinned, absPath)
 			continue
 		}
 		relPath, err := filepath.Rel(absDir, absPath)
@@ -3237,16 +3241,17 @@ func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) {
 		}
 		ensureDirChain(strings.Split(relPath, string(filepath.Separator)), dirNodes)
 	}
+	return pinned
 }
 
-func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
+func cleanEmptyDirs(node *fileNode, browseRoot string, pinned map[string]bool) bool {
 	if !node.isDir {
-		return true // Keep files
+		return true
 	}
 
 	kept := make([]*fileNode, 0)
 	for _, child := range node.children {
-		if cleanEmptyDirs(child, browseRoot) {
+		if cleanEmptyDirs(child, browseRoot, pinned) {
 			kept = append(kept, child)
 		}
 	}
@@ -3255,13 +3260,8 @@ func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
 	if len(node.children) > 0 || node.name == "." {
 		return true
 	}
-	// Keep only pinned dirs (user-created via UI)
 	if browseRoot != "" && node.path != "" {
-		absPath := filepath.Join(browseRoot, node.path)
-		fileMutex.RLock()
-		pinned := pinnedDirs[absPath]
-		fileMutex.RUnlock()
-		return pinned
+		return pinned[filepath.Join(browseRoot, node.path)]
 	}
 	return false
 }

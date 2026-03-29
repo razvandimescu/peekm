@@ -156,25 +156,6 @@
             margin-left: auto;
         }
 
-        .action-button {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            background-color: var(--bgColor-default);
-            border: 1px solid var(--borderColor-default);
-            border-radius: 6px;
-            color: var(--fgColor-default);
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .action-button:hover {
-            background-color: var(--bgColor-muted);
-            border-color: var(--borderColor-emphasis);
-        }
-
         .delete-button {
             display: inline-flex;
             align-items: center;
@@ -1288,6 +1269,16 @@
                 color: var(--fgColor-default);
             }
 
+            .top-bar-middle.mobile-expanded {
+                display: flex;
+                position: absolute;
+                left: 12px;
+                right: 12px;
+                top: 8px;
+                max-width: none;
+                z-index: 1001;
+            }
+
             .top-bar-divider {
                 display: none;
             }
@@ -1882,6 +1873,10 @@
             background: var(--bgColor-accent-muted);
             border-color: var(--borderColor-accent-emphasis);
             color: var(--fgColor-accent);
+        }
+        .share-container {
+            position: relative;
+            display: inline-block;
         }
         .share-panel {
             position: absolute;
