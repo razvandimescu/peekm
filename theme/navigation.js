@@ -1834,6 +1834,41 @@ function handleSearchKeyboard(e) {
     }
 }
 
+// Mobile search: reveal the search bar and focus input
+function openMobileSearch() {
+    var middle = document.querySelector('.top-bar-middle');
+    var input = document.getElementById('file-search');
+    if (!middle || !input) return;
+
+    middle.style.display = 'flex';
+    middle.style.position = 'absolute';
+    middle.style.left = '12px';
+    middle.style.right = '12px';
+    middle.style.top = '8px';
+    middle.style.maxWidth = 'none';
+    middle.style.zIndex = '1001';
+    input.focus();
+
+    function closeMobileSearch() {
+        if (!input.value) {
+            middle.style.display = '';
+            middle.style.position = '';
+            middle.style.left = '';
+            middle.style.right = '';
+            middle.style.top = '';
+            middle.style.maxWidth = '';
+            middle.style.zIndex = '';
+        }
+        input.removeEventListener('blur', onBlur);
+    }
+
+    function onBlur() {
+        setTimeout(closeMobileSearch, 200);
+    }
+
+    input.addEventListener('blur', onBlur);
+}
+
 // Clear search and hide dropdown
 function clearSearch() {
     const searchInput = document.getElementById('file-search');
