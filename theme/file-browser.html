@@ -2,7 +2,7 @@
 <html lang="en" data-color-mode="auto" data-light-theme="light" data-dark-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>peekm - Markdown Browser</title>
     <style>
         {{.GitHubCSS}}
@@ -14,6 +14,7 @@
             color: var(--fgColor-default);
             background-color: var(--bgColor-muted);
             min-height: 100vh;
+            min-height: 100dvh;
             margin: 0;
             padding: 0;
             overflow: hidden;
@@ -178,7 +179,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 20px;
+            padding: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
             z-index: 1000;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
         }
@@ -1069,6 +1070,198 @@
                 background: rgba(0, 0, 0, 0.3);
                 z-index: 998;
             }
+
+            /* Toast: fit within viewport */
+            .toast {
+                left: 16px;
+                right: 16px;
+                max-width: none;
+            }
+
+            /* Content area: reduce padding */
+            .content-area .container {
+                max-width: 100%;
+                padding: 24px 20px;
+            }
+
+            /* Code blocks: fit viewport, not the desktop calc */
+            .content-area .container pre {
+                max-width: 100%;
+                margin-left: 0;
+                margin-right: 0;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Top bar: tighter padding */
+            .top-bar {
+                padding: 0 12px;
+                gap: 8px;
+            }
+
+            .top-bar-left,
+            .top-bar-right {
+                gap: 6px;
+            }
+
+            /* Search: full-width dropdown */
+            .top-bar-middle {
+                max-width: none;
+            }
+
+            /* Hamburger: 44px minimum touch target */
+            .top-bar button {
+                min-width: 44px;
+                min-height: 44px;
+                padding: 8px;
+            }
+
+            /* Inputs: 16px to prevent iOS auto-zoom */
+            .file-search-input,
+            .folder-filter-input {
+                font-size: 16px;
+            }
+
+            /* Modal: safe on all screen sizes */
+            .modal-content {
+                max-width: calc(100vw - 32px);
+                width: calc(100vw - 32px);
+            }
+
+            .modal-body input {
+                font-size: 16px;
+            }
+
+            /* Empty state: less padding */
+            .empty-content {
+                padding: 40px 16px;
+            }
+
+            /* Editor: account for mobile keyboard */
+            #markdown-editor {
+                font-size: 16px;
+            }
+
+            /* Sidebar resize: hide on mobile (use toggle instead) */
+            .sidebar-resize-handle {
+                display: none;
+            }
+
+            /* Sidebar tree: momentum scrolling */
+            .sidebar-content {
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Tree nodes: larger touch targets */
+            .tree-node {
+                height: 36px;
+                padding: 0 12px;
+            }
+
+            /* Session info panel: cap height on mobile */
+            .session-info-panel[aria-hidden="false"] {
+                max-height: 50vh;
+            }
+
+            /* Top bar: tighten nav buttons */
+            .nav-btn {
+                padding: 6px 8px;
+            }
+
+            /* Theme: icon-only on tablet */
+            .theme-toggle-btn .theme-label,
+            .theme-toggle-btn .dropdown-arrow {
+                display: none;
+            }
+
+            .theme-toggle-btn {
+                padding: 8px;
+            }
+
+            /* Action buttons: borderless on mobile for less visual noise */
+            #download-btn,
+            #share-btn {
+                border-color: transparent;
+            }
+
+            /* Share panel: full-width on mobile */
+            .share-panel {
+                position: fixed !important;
+                left: 12px !important;
+                right: 12px !important;
+                top: 64px !important;
+                width: auto !important;
+                min-width: 0 !important;
+            }
+        }
+
+        /* Touch device adjustments */
+        @media (hover: none) and (pointer: coarse) {
+            .tree-node {
+                height: 36px;
+            }
+
+            .folder-filter-btn {
+                padding: 6px 8px;
+            }
+
+            .search-result-item {
+                padding: 14px;
+            }
+        }
+
+        /* Small phones */
+        @media (max-width: 480px) {
+            .top-bar-middle {
+                display: none;
+            }
+
+            .top-bar-divider {
+                display: none;
+            }
+
+            /* Hide connection label, keep dot + AI badge */
+            .connection-label,
+            .connection-count {
+                display: none;
+            }
+
+            .layout-container[data-sidebar="expanded"] .file-sidebar {
+                width: 100%;
+            }
+
+            /* Nav buttons: compact */
+            .nav-btn {
+                padding: 4px 6px;
+                min-width: 36px;
+                min-height: 36px;
+            }
+
+            .top-bar button {
+                min-width: 36px;
+                min-height: 36px;
+                padding: 6px;
+            }
+
+            .top-bar {
+                padding: 0 8px;
+            }
+
+            .editor-toolbar {
+                padding: 10px 12px;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .editor-toolbar h2 {
+                font-size: 14px;
+                width: 100%;
+            }
+
+            .editor-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
         }
 
         /* Connection status indicator */
@@ -1585,6 +1778,9 @@
             font-size: 16px;
             transition: all 0.2s;
             color: var(--fgColor-muted);
+            min-width: 44px;
+            min-height: 44px;
+            justify-content: center;
         }
         .nav-btn:hover {
             background: var(--bgColor-muted);
