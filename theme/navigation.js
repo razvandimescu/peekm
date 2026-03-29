@@ -419,8 +419,9 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('[SPA] Initialization complete');
 });
 
-// Cleanup on page unload
+// Save state and cleanup on page unload
 window.addEventListener('beforeunload', function() {
+    saveTreeState();
     if (eventSource) {
         eventSource.close();
     }
