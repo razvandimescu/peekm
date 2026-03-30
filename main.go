@@ -719,6 +719,7 @@ func (w *gzipResponseWriter) Flush() {
 
 func withGzip(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Vary", "Accept-Encoding")
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			handler.ServeHTTP(w, r)
 			return
@@ -735,7 +736,6 @@ func withGzip(handler http.Handler) http.Handler {
 		}
 		defer gz.Close()
 		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Vary", "Accept-Encoding")
 		w.Header().Del("Content-Length")
 		handler.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz}, r)
 	})
@@ -2164,11 +2164,8 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove from markdownFiles list and recollect files
+	removeFromWhitelist(targetPath)
 	fileMutex.Lock()
-	currentBrowseDir := browseDir
-	markdownFiles = collectMarkdownFiles(currentBrowseDir)
-	// Clear currentFile if it was the deleted file
 	if currentFile == targetPath {
 		currentFile = ""
 	}
@@ -2280,12 +2277,26 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
 }
 
-// applyMoveState updates whitelist, pinnedDirs, and currentFile after a successful rename.
 func applyMoveState(oldPath, newPath string, isDir bool) {
 	sep := string(filepath.Separator)
 	fileMutex.Lock()
 	defer fileMutex.Unlock()
-	markdownFiles = collectMarkdownFiles(browseDir)
+	// Surgical whitelist update: rewrite matching prefixes instead of re-walking the directory
+	if isDir {
+		prefix := oldPath + sep
+		for i, f := range markdownFiles {
+			if strings.HasPrefix(f, prefix) {
+				markdownFiles[i] = newPath + f[len(oldPath):]
+			}
+		}
+	} else {
+		for i, f := range markdownFiles {
+			if f == oldPath {
+				markdownFiles[i] = newPath
+				break
+			}
+		}
+	}
 	if isDir && pinnedDirs[oldPath] {
 		delete(pinnedDirs, oldPath)
 		pinnedDirs[newPath] = true

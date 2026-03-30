@@ -280,26 +280,15 @@ function reinitializeScripts() {
     const viewType = content.dataset.view;
 
     try {
-        // Update nav button active states
         updateNavButtons();
+        checkShareStatus();
 
-        // Check share status if viewing a file/preview (buttons are in the partial now)
-        var shareBtn = document.getElementById('share-btn');
-        if (shareBtn) {
-            checkShareStatus();
-        }
-
-        // Common initialization for both views
         if (viewType === 'browser') {
-            // Browser mode - setup collapsible directories
             if (typeof setupCollapse === 'function') {
                 setupCollapse();
             } else {
                 console.warn('[Reinit] setupCollapse not available');
             }
-        } else if (viewType === 'file') {
-            // File mode - no special initialization needed
-            // Delete button uses inline onclick handler, no reinitialization required
         }
 
         // Initialize sidebar (Focus Mode) - works for both views
@@ -1128,6 +1117,7 @@ async function checkShareStatus() {
         var resp = await fetch('/share?path=' + encodeURIComponent(filePath));
         var data = await resp.json();
         var shareBtn = document.getElementById('share-btn');
+        if (!shareBtn) return;
         if (data.active) {
             shareBtn.classList.add('share-active');
             updateSharePanel(data);
