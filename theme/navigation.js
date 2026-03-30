@@ -283,23 +283,10 @@ function reinitializeScripts() {
         // Update nav button active states
         updateNavButtons();
 
-        // Update download button visibility (markdown only, not preview)
-        const downloadBtn = document.getElementById('download-btn');
-        if (downloadBtn) {
-            downloadBtn.style.display = viewType === 'file' ? 'inline-block' : 'none';
-        }
-
-        // Update share button visibility (file + preview)
+        // Check share status if viewing a file/preview (buttons are in the partial now)
         var shareBtn = document.getElementById('share-btn');
         if (shareBtn) {
-            var showShare = viewType === 'file' || viewType === 'preview';
-            shareBtn.style.display = showShare ? 'inline-block' : 'none';
-            if (showShare) {
-                checkShareStatus();
-            } else {
-                setSharePanelOpen(false);
-                shareBtn.classList.remove('share-active');
-            }
+            checkShareStatus();
         }
 
         // Common initialization for both views

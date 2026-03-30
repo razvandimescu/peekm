@@ -735,6 +735,7 @@ func withGzip(handler http.Handler) http.Handler {
 		}
 		defer gz.Close()
 		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
 		w.Header().Del("Content-Length")
 		handler.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz}, r)
 	})
@@ -2270,20 +2271,30 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.Lock()
-	markdownFiles = collectMarkdownFiles(browseDir)
-	if currentFile == validatedSource {
-		currentFile = destPath
-	} else if sourceInfo.IsDir() && strings.HasPrefix(currentFile, validatedSource+sep) {
-		currentFile = filepath.Join(destPath, currentFile[len(validatedSource):])
-	}
-	fileMutex.Unlock()
+	applyMoveState(validatedSource, destPath, sourceInfo.IsDir())
 
 	newRelPath := getRelativePath(destPath)
 	log.Printf("Moved: %s → %s", req.Source, newRelPath)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
+}
+
+// applyMoveState updates whitelist, pinnedDirs, and currentFile after a successful rename.
+func applyMoveState(oldPath, newPath string, isDir bool) {
+	sep := string(filepath.Separator)
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+	markdownFiles = collectMarkdownFiles(browseDir)
+	if isDir && pinnedDirs[oldPath] {
+		delete(pinnedDirs, oldPath)
+		pinnedDirs[newPath] = true
+	}
+	if currentFile == oldPath {
+		currentFile = newPath
+	} else if isDir && strings.HasPrefix(currentFile, oldPath+sep) {
+		currentFile = filepath.Join(newPath, currentFile[len(oldPath):])
+	}
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request) {

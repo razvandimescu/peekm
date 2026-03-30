@@ -251,12 +251,14 @@
             border-color: var(--borderColor-emphasis);
         }
 
-        .top-bar button:focus-visible {
+        .top-bar button:focus-visible,
+        .nav-btn:focus-visible {
             outline: 2px solid var(--fgColor-accent);
             outline-offset: -2px;
         }
 
-        .top-bar button:focus:not(:focus-visible) {
+        .top-bar button:focus:not(:focus-visible),
+        .nav-btn:focus:not(:focus-visible) {
             outline: none;
         }
 
@@ -1277,6 +1279,7 @@
                 top: 8px;
                 max-width: none;
                 z-index: 1001;
+                background: var(--bgColor-default);
             }
 
             .top-bar-divider {
@@ -1892,6 +1895,16 @@
             z-index: 100;
             font-size: 13px;
         }
+        @media (max-width: 480px) {
+            .share-panel {
+                position: fixed;
+                top: auto;
+                bottom: 16px;
+                left: 16px;
+                right: 16px;
+                min-width: auto;
+            }
+        }
         .share-url-label {
             font-size: 11px;
             color: var(--fgColor-muted);
@@ -2047,7 +2060,7 @@
             <button class="mobile-search-btn" onclick="openMobileSearch()" aria-label="Search files" title="Search files">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"/></svg>
             </button>
-            <div class="top-bar-views">
+            <div class="top-bar-views" role="navigation" aria-label="View switcher">
                 <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
                 </a>
