@@ -2296,6 +2296,10 @@ func applyMoveState(oldPath, newPath string, isDir bool) {
 				break
 			}
 		}
+		// Pin source directory so it stays visible after its last file is moved out
+		if sourceDir := filepath.Dir(oldPath); sourceDir != browseDir {
+			pinnedDirs[sourceDir] = true
+		}
 	}
 	if isDir && pinnedDirs[oldPath] {
 		delete(pinnedDirs, oldPath)
