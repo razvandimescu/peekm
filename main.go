@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"embed"
 	"encoding/json"
@@ -84,6 +85,7 @@ var (
 	currentFile   string
 	fileMutex     sync.RWMutex
 	browseDir     string
+	pinnedDirs    = make(map[string]bool) // user-created folders kept visible until they get files
 	fileWatcher   watcherManager
 	dirWatcher    watcherManager
 
@@ -699,6 +701,46 @@ func localOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz *gzip.Writer
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.gz.Write(b)
+}
+
+func (w *gzipResponseWriter) Flush() {
+	w.gz.Flush()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func withGzip(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Vary", "Accept-Encoding")
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		// Skip SSE — must be unbuffered
+		if r.URL.Path == "/events" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		if err != nil {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		defer gz.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Del("Content-Length")
+		handler.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz}, r)
+	})
+}
+
 // registerRoutes registers all HTTP routes
 func registerRoutes() {
 	// Local-only routes (owner's browser)
@@ -1176,6 +1218,7 @@ func serveAndWait(addr, startURL string) {
 
 	server := &http.Server{
 		Addr:        addr,
+		Handler:     withGzip(http.DefaultServeMux),
 		ReadTimeout: 15 * time.Second,
 		// WriteTimeout intentionally omitted for SSE streaming endpoints
 		// SSE connections are long-lived and should not have write timeouts
@@ -1958,6 +2001,11 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Created folder: %s", absPath)
+
+	fileMutex.Lock()
+	pinnedDirs[absPath] = true
+	fileMutex.Unlock()
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -2116,11 +2164,8 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove from markdownFiles list and recollect files
+	removeFromWhitelist(targetPath)
 	fileMutex.Lock()
-	currentBrowseDir := browseDir
-	markdownFiles = collectMarkdownFiles(currentBrowseDir)
-	// Clear currentFile if it was the deleted file
 	if currentFile == targetPath {
 		currentFile = ""
 	}
@@ -2223,20 +2268,48 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.Lock()
-	markdownFiles = collectMarkdownFiles(browseDir)
-	if currentFile == validatedSource {
-		currentFile = destPath
-	} else if sourceInfo.IsDir() && strings.HasPrefix(currentFile, validatedSource+sep) {
-		currentFile = filepath.Join(destPath, currentFile[len(validatedSource):])
-	}
-	fileMutex.Unlock()
+	applyMoveState(validatedSource, destPath, sourceInfo.IsDir())
 
 	newRelPath := getRelativePath(destPath)
 	log.Printf("Moved: %s → %s", req.Source, newRelPath)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"newPath": newRelPath})
+}
+
+func applyMoveState(oldPath, newPath string, isDir bool) {
+	sep := string(filepath.Separator)
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+	// Surgical whitelist update: rewrite matching prefixes instead of re-walking the directory
+	if isDir {
+		prefix := oldPath + sep
+		for i, f := range markdownFiles {
+			if strings.HasPrefix(f, prefix) {
+				markdownFiles[i] = newPath + f[len(oldPath):]
+			}
+		}
+	} else {
+		for i, f := range markdownFiles {
+			if f == oldPath {
+				markdownFiles[i] = newPath
+				break
+			}
+		}
+		// Pin source directory so it stays visible after its last file is moved out
+		if sourceDir := filepath.Dir(oldPath); sourceDir != browseDir {
+			pinnedDirs[sourceDir] = true
+		}
+	}
+	if isDir && pinnedDirs[oldPath] {
+		delete(pinnedDirs, oldPath)
+		pinnedDirs[newPath] = true
+	}
+	if currentFile == oldPath {
+		currentFile = newPath
+	} else if isDir && strings.HasPrefix(currentFile, oldPath+sep) {
+		currentFile = filepath.Join(newPath, currentFile[len(oldPath):])
+	}
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request) {
@@ -2965,11 +3038,11 @@ func generateTreeHTML() string {
 		}
 	}
 
-	// Add real directories that aren't already in the tree (user-created empty folders)
-	addRealDirs(absDir, dirNodes)
+	// Add pinned directories (user-created via UI) that aren't already in the tree
+	pinned := addPinnedDirs(absDir, dirNodes)
 
 	// Clean phantom dirs (intermediate path nodes with no file descendants that don't exist on disk)
-	cleanEmptyDirs(root, absDir)
+	cleanEmptyDirs(root, absDir, pinned)
 	sortTree(root)
 
 	// Generate HTML
@@ -3166,42 +3239,45 @@ func ensureDirChain(parts []string, dirNodes map[string]*fileNode) {
 	}
 }
 
-func addRealDirs(absDir string, dirNodes map[string]*fileNode) {
-	customPatterns := getIgnorePatterns(absDir)
-	filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
+func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) map[string]bool {
+	fileMutex.RLock()
+	pinned := make(map[string]bool, len(pinnedDirs))
+	for k, v := range pinnedDirs {
+		pinned[k] = v
+	}
+	fileMutex.RUnlock()
+
+	for absPath := range pinned {
+		if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+			continue
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			fileMutex.Lock()
+			delete(pinnedDirs, absPath)
+			fileMutex.Unlock()
+			delete(pinned, absPath)
+			continue
+		}
+		relPath, err := filepath.Rel(absDir, absPath)
 		if err != nil {
-			return nil
-		}
-		if !info.IsDir() {
-			return nil
-		}
-		if path == absDir {
-			return nil
-		}
-		if isExcludedDir(info.Name(), customPatterns) {
-			return filepath.SkipDir
-		}
-		relPath, err := filepath.Rel(absDir, path)
-		if err != nil {
-			return nil
+			continue
 		}
 		if _, exists := dirNodes[relPath]; exists {
-			return nil
+			continue
 		}
 		ensureDirChain(strings.Split(relPath, string(filepath.Separator)), dirNodes)
-		return nil
-	})
+	}
+	return pinned
 }
 
-func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
+func cleanEmptyDirs(node *fileNode, browseRoot string, pinned map[string]bool) bool {
 	if !node.isDir {
-		return true // Keep files
+		return true
 	}
 
-	// Recursively clean children
 	kept := make([]*fileNode, 0)
 	for _, child := range node.children {
-		if cleanEmptyDirs(child, browseRoot) {
+		if cleanEmptyDirs(child, browseRoot, pinned) {
 			kept = append(kept, child)
 		}
 	}
@@ -3210,12 +3286,8 @@ func cleanEmptyDirs(node *fileNode, browseRoot string) bool {
 	if len(node.children) > 0 || node.name == "." {
 		return true
 	}
-	// Keep empty dirs that actually exist on disk (user-created)
 	if browseRoot != "" && node.path != "" {
-		absPath := filepath.Join(browseRoot, node.path)
-		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
-			return true
-		}
+		return pinned[filepath.Join(browseRoot, node.path)]
 	}
 	return false
 }
