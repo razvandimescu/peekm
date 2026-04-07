@@ -280,39 +280,15 @@ function reinitializeScripts() {
     const viewType = content.dataset.view;
 
     try {
-        // Update nav button active states
         updateNavButtons();
+        checkShareStatus();
 
-        // Update download button visibility (markdown only, not preview)
-        const downloadBtn = document.getElementById('download-btn');
-        if (downloadBtn) {
-            downloadBtn.style.display = viewType === 'file' ? 'inline-block' : 'none';
-        }
-
-        // Update share button visibility (file + preview)
-        var shareBtn = document.getElementById('share-btn');
-        if (shareBtn) {
-            var showShare = viewType === 'file' || viewType === 'preview';
-            shareBtn.style.display = showShare ? 'inline-block' : 'none';
-            if (showShare) {
-                checkShareStatus();
-            } else {
-                setSharePanelOpen(false);
-                shareBtn.classList.remove('share-active');
-            }
-        }
-
-        // Common initialization for both views
         if (viewType === 'browser') {
-            // Browser mode - setup collapsible directories
             if (typeof setupCollapse === 'function') {
                 setupCollapse();
             } else {
                 console.warn('[Reinit] setupCollapse not available');
             }
-        } else if (viewType === 'file') {
-            // File mode - no special initialization needed
-            // Delete button uses inline onclick handler, no reinitialization required
         }
 
         // Initialize sidebar (Focus Mode) - works for both views
@@ -419,8 +395,9 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('[SPA] Initialization complete');
 });
 
-// Cleanup on page unload
+// Save state and cleanup on page unload
 window.addEventListener('beforeunload', function() {
+    saveTreeState();
     if (eventSource) {
         eventSource.close();
     }
@@ -1140,6 +1117,7 @@ async function checkShareStatus() {
         var resp = await fetch('/share?path=' + encodeURIComponent(filePath));
         var data = await resp.json();
         var shareBtn = document.getElementById('share-btn');
+        if (!shareBtn) return;
         if (data.active) {
             shareBtn.classList.add('share-active');
             updateSharePanel(data);
@@ -1831,6 +1809,34 @@ function handleSearchKeyboard(e) {
         e.preventDefault();
         clearSearch();
     }
+}
+
+// Mobile search: reveal the search bar and focus input
+var _mobileSearchBlurHandler = null;
+function openMobileSearch() {
+    var middle = document.querySelector('.top-bar-middle');
+    var input = document.getElementById('file-search');
+    if (!middle || !input) return;
+
+    // Remove any stale listener
+    if (_mobileSearchBlurHandler) {
+        input.removeEventListener('blur', _mobileSearchBlurHandler);
+    }
+
+    middle.classList.add('mobile-expanded');
+    input.focus();
+
+    _mobileSearchBlurHandler = function() {
+        setTimeout(function() {
+            if (!input.value) {
+                middle.classList.remove('mobile-expanded');
+            }
+            input.removeEventListener('blur', _mobileSearchBlurHandler);
+            _mobileSearchBlurHandler = null;
+        }, 200);
+    };
+
+    input.addEventListener('blur', _mobileSearchBlurHandler);
 }
 
 // Clear search and hide dropdown

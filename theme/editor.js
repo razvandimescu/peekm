@@ -1,7 +1,5 @@
 // Edit mode functionality
 let originalMarkdown = '';
-let autoSaveTimeout = null;
-const AUTO_SAVE_DEBOUNCE_MS = 300;
 
 function getCurrentFilePath() {
     // Prefer data-file attribute (set for / and /memory default file views)
@@ -19,7 +17,6 @@ function getCurrentFilePath() {
 async function toggleEditMode() {
     const editor = document.getElementById('markdown-editor');
     const editorContainer = document.getElementById('editor-container');
-    const editButton = document.querySelector('.edit-button');
 
     if (!editor || !editorContainer) {
         console.error('Editor elements not found');
@@ -41,67 +38,11 @@ async function toggleEditMode() {
 
     editorContainer.classList.add('active');
     editor.focus();
-
-    // Setup debounced auto-save (only once per editor session)
-    if (!editor.dataset.autoSaveEnabled) {
-        editor.addEventListener('input', handleEditorInput);
-        editor.dataset.autoSaveEnabled = 'true';
-    }
-}
-
-function handleEditorInput() {
-    // Clear existing timeout
-    if (autoSaveTimeout) {
-        clearTimeout(autoSaveTimeout);
-    }
-
-    // Schedule new auto-save after debounce period
-    autoSaveTimeout = setTimeout(() => {
-        autoSaveMarkdown();
-    }, AUTO_SAVE_DEBOUNCE_MS);
-}
-
-async function autoSaveMarkdown() {
-    const editor = document.getElementById('markdown-editor');
-    const content = editor.value;
-    const filePath = getCurrentFilePath();
-
-    // Don't auto-save if content hasn't changed
-    if (content === originalMarkdown) {
-        return;
-    }
-
-    try {
-        const response = await fetch('/save', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: `file=${encodeURIComponent(filePath)}&content=${encodeURIComponent(content)}`
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[Editor] Auto-save failed:', errorText);
-            return;
-        }
-
-        originalMarkdown = content;
-        console.log('[Editor] Auto-saved');
-    } catch (err) {
-        console.error('[Editor] Auto-save error:', err.message);
-    }
 }
 
 function cancelEdit() {
     const editor = document.getElementById('markdown-editor');
     const editorContainer = document.getElementById('editor-container');
-
-    // Clear any pending auto-save
-    if (autoSaveTimeout) {
-        clearTimeout(autoSaveTimeout);
-        autoSaveTimeout = null;
-    }
 
     if (editor && editorContainer) {
         editor.value = originalMarkdown;
@@ -113,6 +54,12 @@ async function saveMarkdown() {
     const editor = document.getElementById('markdown-editor');
     const content = editor.value;
     const filePath = getCurrentFilePath();
+
+    if (content === originalMarkdown) {
+        const editorContainer = document.getElementById('editor-container');
+        if (editorContainer) editorContainer.classList.remove('active');
+        return;
+    }
 
     try {
         const response = await fetch('/save', {
@@ -134,7 +81,6 @@ async function saveMarkdown() {
             editorContainer.classList.remove('active');
         }
 
-        // SSE will automatically trigger preview update - no reload needed
         console.log('[Editor] File saved, waiting for SSE update...');
     } catch (err) {
         showErrorToast('Failed to save: ' + err.message);

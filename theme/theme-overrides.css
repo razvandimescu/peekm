@@ -843,6 +843,7 @@ a.timeline-session-id:hover {
     background: var(--bgColor-muted);
     border-radius: 4px;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .transcript-bash-input code {
     font-size: 0.95em;
