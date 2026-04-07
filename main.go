@@ -135,6 +135,9 @@ var (
 
 	// LAN share store (in-memory, dies on restart)
 	globalShareStore *shareStore
+
+	// AI-generated session summaries (background Ollama summarization)
+	globalSummaryStore *summaryStore
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -1225,7 +1228,7 @@ func resolveTarget() string {
 
 func buildStartupURL(baseURL, targetPath string) string {
 	if targetPath == "" {
-		fmt.Printf("peekm file browser at %s\n", baseURL)
+		fmt.Printf("peekm %s (%s) at %s\n", version, commit, baseURL)
 		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
 		return baseURL
 	}
@@ -1236,7 +1239,7 @@ func buildStartupURL(baseURL, targetPath string) string {
 		}
 	}
 	displayName := filepath.Base(targetPath)
-	fmt.Printf("peekm at %s\n", baseURL)
+	fmt.Printf("peekm %s (%s) at %s\n", version, commit, baseURL)
 	fmt.Printf("Opening %s - found %d markdown file(s)\n", displayName, len(markdownFiles))
 	return fullURL
 }
@@ -1526,6 +1529,9 @@ func main() {
 		case "setup":
 			runSetup(os.Args[2:])
 			return
+		case "summarize":
+			runSummarize(os.Args[2:])
+			return
 		}
 	}
 
@@ -1548,6 +1554,10 @@ func main() {
 		autoSetupClaudeHooks()
 		autoSetupPiHooks()
 		initSessionTracking()
+		if _, err := exec.LookPath("ollama"); err == nil {
+			globalSummaryStore = newSummaryStore(globalHeartbeats)
+			globalSummaryStore.startMonitor()
+		}
 	}
 
 	globalShareStore = newShareStore()
