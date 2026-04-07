@@ -280,6 +280,15 @@ body {
     border-bottom: 1px solid var(--borderColor-muted);
     margin-bottom: 12px;
 }
+.timeline-daily-summary {
+    font-size: 13px;
+    color: var(--fgColor-default);
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+    border-radius: 6px;
+    line-height: 1.5;
+}
 
 /* Session cards */
 .timeline-session {
@@ -386,6 +395,15 @@ a.timeline-session-id:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.timeline-ai-summary {
+    font-size: 12px;
+    color: var(--fgColor-muted);
+    margin-top: 4px;
+    padding-left: 8px;
+    border-left: 2px solid var(--borderColor-muted, var(--color-border-muted, #d0d7de));
+    font-style: italic;
+    line-height: 1.4;
 }
 .timeline-session-stats {
     font-size: 12px;

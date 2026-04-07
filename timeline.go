@@ -67,14 +67,17 @@ type timelineSession struct {
 	LastToolAgo    string // relative time of last tool call (for tooltip)
 	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
 	SessionType    string // "edit" or "conversation"
+	AISummary      string // LLM-generated summary (from Ollama)
 	Events         []timelineEntry
 	newestTime     time.Time
 	oldestTime     time.Time
 }
 
 type timelineDayGroup struct {
-	Label    string
-	Sessions []timelineSession
+	Label        string
+	DailySummary string // synthesized from session summaries
+	Sessions     []timelineSession
+	dateKey      string // unexported, "2006-01-02" for daily summary lookup
 }
 
 type timelineEntry struct {
@@ -91,16 +94,16 @@ type timelineEntry struct {
 }
 
 func dayLabel(t time.Time) string {
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	yesterday := today.AddDate(0, 0, -1)
+	eff := effectiveDate(t)
+	nowEff := effectiveDate(time.Now())
+	yesterdayEff := nowEff.AddDate(0, 0, -1)
 	switch {
-	case !t.Before(today):
+	case !eff.Before(nowEff):
 		return "Today"
-	case !t.Before(yesterday):
+	case !eff.Before(yesterdayEff):
 		return "Yesterday"
 	default:
-		return t.Format("Jan 2, 2006")
+		return eff.Format("Jan 2, 2006")
 	}
 }
 
@@ -348,7 +351,8 @@ func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	for i := range sessions {
 		label := dayLabel(sessions[i].newestTime)
 		if _, exists := bucketMap[label]; !exists {
-			bucketMap[label] = &timelineDayGroup{Label: label}
+			dk := effectiveDateKey(sessions[i].newestTime)
+			bucketMap[label] = &timelineDayGroup{Label: label, dateKey: dk}
 		}
 		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
 	}
@@ -402,7 +406,34 @@ func buildSessionTimeline(events []SessionEvent, baseDir string, discoverConvers
 
 	groups := assignSessionsToDays(sessions)
 	markActiveSessions(groups)
+	if globalSummaryStore != nil {
+		populateAISummaries(groups)
+		populateDailySummaries(groups)
+	}
 	return groups
+}
+
+func populateAISummaries(groups []timelineDayGroup) {
+	all := globalSummaryStore.getAll()
+	for i := range groups {
+		for j := range groups[i].Sessions {
+			s := &groups[i].Sessions[j]
+			if s.FullSessionID != "" {
+				if summary, ok := all[s.FullSessionID]; ok && !isContaminated(summary.Summary) {
+					s.AISummary = summary.Summary
+				}
+			}
+		}
+	}
+}
+
+func populateDailySummaries(groups []timelineDayGroup) {
+	allDaily := globalSummaryStore.getAllDaily()
+	for i := range groups {
+		if d, ok := allDaily[groups[i].dateKey]; ok && !isContaminated(d.Summary) {
+			groups[i].DailySummary = d.Summary
+		}
+	}
 }
 
 // mergeSessionsByTime interleaves two session slices by newestTime (newest first).

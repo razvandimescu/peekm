@@ -19,6 +19,7 @@
         {{range .Groups}}
         <div class="timeline-day">
             <div class="timeline-day-label">{{.Label}}</div>
+            {{if .DailySummary}}<div class="timeline-daily-summary">{{.DailySummary}}</div>{{end}}
             {{range .Sessions}}
             {{if eq .SessionType "conversation"}}
             <div class="timeline-session timeline-session-conversation{{if .IsActive}} timeline-session-active{{end}}">
@@ -31,6 +32,7 @@
                             {{if .IsActive}}<span class="timeline-active-badge" {{if .LastTool}}title="{{.LastTool}} · {{.LastToolAgo}}{{if .LastToolDetail}}&#10;{{.LastToolDetail}}{{end}}"{{end}}>Active{{if .LastTool}} · {{.LastTool}}{{end}}</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
+                        {{if .AISummary}}<div class="timeline-ai-summary">{{.AISummary}}</div>{{end}}
                         <div class="timeline-session-stats">
                             <span>{{.Duration}}</span>
                         </div>
@@ -51,6 +53,7 @@
                             {{if .IsActive}}<span class="timeline-active-badge" {{if .LastTool}}title="{{.LastTool}} · {{.LastToolAgo}}{{if .LastToolDetail}}&#10;{{.LastToolDetail}}{{end}}"{{end}}>Active{{if .LastTool}} · {{.LastTool}}{{end}}</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
+                        {{if .AISummary}}<div class="timeline-ai-summary">{{.AISummary}}</div>{{end}}
                         <div class="timeline-session-stats">
                             <span>{{.Duration}}</span>
                             <span class="stat-sep">&middot;</span>
