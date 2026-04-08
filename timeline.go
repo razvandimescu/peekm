@@ -73,6 +73,13 @@ type timelineSession struct {
 	oldestTime     time.Time
 }
 
+// DateRange is rendered by the timeline template as `{{.DateRange}}`.
+// Defined as a method (not stored field) so any code path that builds a
+// timelineSession gets the correct value without remembering to populate.
+func (s timelineSession) DateRange() string {
+	return formatDateRange(s.oldestTime, s.newestTime)
+}
+
 type timelineDayGroup struct {
 	Label        string
 	DailySummary string // synthesized from session summaries
@@ -115,14 +122,39 @@ func formatSessionDuration(d time.Duration) string {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm", int(d.Minutes()))
-	default:
+	case d < 24*time.Hour:
 		h := int(d.Hours())
 		m := int(d.Minutes()) % 60
 		if m == 0 {
 			return fmt.Sprintf("%dh", h)
 		}
 		return fmt.Sprintf("%dh%dm", h, m)
+	default:
+		days := int(d.Hours()) / 24
+		h := int(d.Hours()) % 24
+		if h == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd %dh", days, h)
 	}
+}
+
+// formatDateRange returns "Mar 31 → Apr 7" for multi-day sessions, or
+// empty for same-day. Uses plain calendar day rather than effectiveDate
+// (which has a 5am shift used for journal grouping) — a session ending
+// at 3am should still render its real calendar date.
+func formatDateRange(oldest, newest time.Time) string {
+	if oldest.IsZero() || newest.IsZero() {
+		return ""
+	}
+	if calendarDay(oldest).Equal(calendarDay(newest)) {
+		return ""
+	}
+	return oldest.Format("Jan 2") + " → " + newest.Format("Jan 2")
+}
+
+func calendarDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 type transcriptInfo struct {

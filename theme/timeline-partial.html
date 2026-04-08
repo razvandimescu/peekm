@@ -29,6 +29,7 @@
                         <div class="timeline-session-title">
                             {{if .FullSessionID}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-session-id">{{.SessionID}}</a>{{end}}
                             {{if .Project}}<span class="timeline-project-badge">{{.Project}}</span>{{end}}
+                            {{if .DateRange}}<span class="timeline-date-range" title="Session spans multiple days">{{.DateRange}}</span>{{end}}
                             {{if .IsActive}}<span class="timeline-active-badge" {{if .LastTool}}title="{{.LastTool}} · {{.LastToolAgo}}{{if .LastToolDetail}}&#10;{{.LastToolDetail}}{{end}}"{{end}}>Active{{if .LastTool}} · {{.LastTool}}{{end}}</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}
@@ -50,6 +51,7 @@
                         <div class="timeline-session-title">
                             {{if .FullSessionID}}<a href="/transcript?session={{.FullSessionID}}" class="timeline-session-id" onclick="event.stopPropagation()">{{.SessionID}}</a>{{else}}<span class="timeline-session-id">unknown</span>{{end}}
                             {{if .Project}}<span class="timeline-project-badge">{{.Project}}</span>{{end}}
+                            {{if .DateRange}}<span class="timeline-date-range" title="Session spans multiple days">{{.DateRange}}</span>{{end}}
                             {{if .IsActive}}<span class="timeline-active-badge" {{if .LastTool}}title="{{.LastTool}} · {{.LastToolAgo}}{{if .LastToolDetail}}&#10;{{.LastToolDetail}}{{end}}"{{end}}>Active{{if .LastTool}} · {{.LastTool}}{{end}}</span>{{end}}
                         </div>
                         {{if .Summary}}<div class="timeline-session-summary">{{.Summary}}</div>{{end}}

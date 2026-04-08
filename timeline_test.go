@@ -57,8 +57,10 @@ func TestAssignSessionsToDays_MultipleSessions_SameDay(t *testing.T) {
 }
 
 func TestDayLabel(t *testing.T) {
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 14, 0, 0, 0, now.Location())
+	// Anchor test inputs to the *effective* day boundary (dayStartHour = 5)
+	// so the test stays deterministic when run between midnight and 5am.
+	nowEff := effectiveDate(time.Now())
+	today := nowEff.Add(12 * time.Hour)
 	yesterday := today.AddDate(0, 0, -1)
 	lastWeek := today.AddDate(0, 0, -7)
 

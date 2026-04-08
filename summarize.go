@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,17 @@ const (
 	monitorTickInterval    = 30 * time.Second
 	summarizationTimeout   = 5 * time.Minute
 	ollamaModel            = "qwen3.5:27b-q8_0"
+	// Limit summary input to recent activity so multi-day sessions don't
+	// blur distinct work periods together.
+	summaryWindow = 24 * time.Hour
+)
+
+// Sentinel errors returned by generateSummary for expected skip paths.
+// Real failures (read errors, ollama errors) are wrapped via fmt.Errorf.
+var (
+	errNoRecentActivity  = errors.New("no recent activity in window")
+	errSummaryUpToDate   = errors.New("summary already covers latest activity")
+	errInsufficientInput = errors.New("too few conversation lines")
 )
 
 const dayStartHour = 5 // sessions before 5am group with previous day
@@ -40,16 +52,15 @@ type summaryStore struct {
 }
 
 type sessionSummary struct {
-	Summary         string    `json:"summary"`
-	Project         string    `json:"project"`
-	Outcome         string    `json:"outcome"`                  // "completed" | "partial" | "blocked"
-	Domain          string    `json:"domain"`                   // e.g. "bug fix", "feature", "refactor"
-	FilesModified   []string  `json:"files_modified,omitempty"` // basenames of edited files
-	FilesExplored   []string  `json:"files_explored,omitempty"` // basenames of read-only files
-	ToolsUsed       []string  `json:"tools_used,omitempty"`     // deduplicated tool names
-	StartedAt       string    `json:"started_at,omitempty"`     // RFC3339 from first transcript turn
-	TranscriptLines int       `json:"transcript_lines"`
-	GeneratedAt     time.Time `json:"generated_at"`
+	Summary       string    `json:"summary"`
+	Project       string    `json:"project"`
+	Outcome       string    `json:"outcome"`                  // "completed" | "partial" | "blocked"
+	Domain        string    `json:"domain"`                   // e.g. "bug fix", "feature", "refactor"
+	FilesModified []string  `json:"files_modified,omitempty"` // basenames of edited files
+	FilesExplored []string  `json:"files_explored,omitempty"` // basenames of read-only files
+	ToolsUsed     []string  `json:"tools_used,omitempty"`     // deduplicated tool names
+	StartedAt     string    `json:"started_at,omitempty"`     // RFC3339 from first transcript turn
+	GeneratedAt   time.Time `json:"generated_at"`
 }
 
 type summaryMetadata struct {
@@ -362,72 +373,101 @@ func (ss *summaryStore) summarizeSession(sessionID string) {
 	if !sessionInScopeWith(cwd) {
 		return
 	}
-
 	path := resolveTranscriptPath(sessionID)
 	if path == "" {
 		return
 	}
 
-	offset := 0
-	var previousSummary string
-	var project string
-	if existing, ok := ss.get(sessionID); ok {
-		offset = existing.TranscriptLines
-		previousSummary = existing.Summary
-		project = existing.Project
+	project := ""
+	if e, ok := ss.get(sessionID); ok {
+		project = e.Project
 	}
 	if project == "" && cwd != "" {
 		project = filepath.Base(cwd)
 	}
 
-	lines, totalLines, err := readTranscriptLines(path, offset)
+	switch err := ss.generateSummary(sessionID, project, path); {
+	case err == nil:
+		log.Printf("Summary: generated for %s [%s]", truncateSessionID(sessionID), project)
+		ss.maybeGenerateDailySummary(time.Now())
+	case errors.Is(err, errNoRecentActivity),
+		errors.Is(err, errSummaryUpToDate),
+		errors.Is(err, errInsufficientInput):
+		// expected skip — silent in monitor mode
+	default:
+		log.Printf("Summary: failed for %s: %v", truncateSessionID(sessionID), err)
+	}
+}
+
+// generateSummary runs the windowed summarization pipeline for one
+// session and stores the result. Returns nil on success, sentinel
+// errors for expected skips, or wrapped errors for real failures.
+func (ss *summaryStore) generateSummary(sessionID, project, path string) error {
+	existing, _ := ss.get(sessionID)
+
+	// mtime gate: skip the entire pipeline if the transcript hasn't
+	// been touched since we last summarized it.
+	if existing != nil {
+		if info, err := os.Stat(path); err == nil && existing.GeneratedAt.After(info.ModTime()) {
+			return errSummaryUpToDate
+		}
+	}
+
+	lines, _, err := readTranscriptLines(path, 0)
 	if err != nil {
-		log.Printf("Summary: cannot read transcript for %s: %v", truncateSessionID(sessionID), err)
-		return
+		return fmt.Errorf("read transcript: %w", err)
 	}
-	if len(lines) == 0 {
-		return
+	windowed := filterByTimeWindow(lines, time.Now(), summaryWindow)
+	if len(windowed) == 0 {
+		return errNoRecentActivity
 	}
 
-	meta := formatTranscriptForSummary(lines)
+	meta := formatTranscriptForSummary(windowed)
 	if meta.ConvLines < 5 || len(meta.Formatted) < 100 {
-		return
+		return errInsufficientInput
 	}
-	formatted := truncateBytes(meta.Formatted, 50000)
-
-	prompt := buildSummaryPrompt(formatted, previousSummary)
+	prompt := buildSummaryPrompt(truncateBytes(meta.Formatted, 50000), "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), summarizationTimeout)
 	defer cancel()
 
-	log.Printf("Summary: generating for session %s (%d new lines, offset %d, prompt %d bytes)",
-		truncateSessionID(sessionID), len(lines), offset, len(prompt))
-
 	raw, err := runOllamaSummarize(ctx, prompt)
 	if err != nil {
-		log.Printf("Summary: failed for %s: %v", truncateSessionID(sessionID), err)
-		return
+		return fmt.Errorf("ollama: %w", err)
 	}
 
 	parsed := parseOllamaResult(raw)
-	startedAt := extractSessionStartTime(lines)
-
 	ss.set(sessionID, &sessionSummary{
-		Summary:         parsed.Summary,
-		Project:         project,
-		Outcome:         parsed.Outcome,
-		Domain:          parsed.Domain,
-		FilesModified:   meta.FilesModified,
-		FilesExplored:   meta.FilesExplored,
-		ToolsUsed:       meta.ToolsUsed,
-		StartedAt:       startedAt,
-		TranscriptLines: totalLines,
-		GeneratedAt:     time.Now(),
+		Summary:       parsed.Summary,
+		Project:       project,
+		Outcome:       parsed.Outcome,
+		Domain:        parsed.Domain,
+		FilesModified: meta.FilesModified,
+		FilesExplored: meta.FilesExplored,
+		ToolsUsed:     meta.ToolsUsed,
+		StartedAt:     extractSessionStartTime(lines),
+		GeneratedAt:   time.Now(),
 	})
-	log.Printf("Summary: generated for %s [%s] outcome=%s domain=%q (%d chars)",
-		truncateSessionID(sessionID), project, parsed.Outcome, parsed.Domain, len(parsed.Summary))
+	return nil
+}
 
-	ss.maybeGenerateDailySummary(time.Now())
+func filterByTimeWindow(lines [][]byte, now time.Time, window time.Duration) [][]byte {
+	cutoff := now.Add(-window)
+	var filtered [][]byte
+	for _, line := range lines {
+		var env transcriptLineEnvelope
+		if json.Unmarshal(line, &env) != nil || env.Timestamp == "" {
+			continue
+		}
+		ts, ok := parseTimestamp(env.Timestamp)
+		if !ok {
+			continue
+		}
+		if ts.After(cutoff) {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
 }
 
 func readTranscriptLines(path string, offset int) ([][]byte, int, error) {
@@ -853,13 +893,9 @@ func runSummarize(args []string) {
 			continue
 		}
 
-		offset := 0
-		var previousSummary, project string
+		project := ""
 		if existing, ok := ss.get(sid); ok {
-			offset = existing.TranscriptLines
-			previousSummary = existing.Summary
 			project = existing.Project
-			fmt.Fprintf(os.Stderr, "Resuming from line %d\n", offset)
 		}
 		if project == "" {
 			// Derive from transcript path: ~/.claude/projects/{encoded-dir}/{sid}.jsonl
@@ -870,54 +906,19 @@ func runSummarize(args []string) {
 			}
 		}
 
-		lines, totalLines, err := readTranscriptLines(path, offset)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Read error: %v\n", err)
-			continue
-		}
-		if len(lines) == 0 {
-			fmt.Fprintln(os.Stderr, "No new lines")
-			continue
-		}
-
-		meta := formatTranscriptForSummary(lines)
-		if meta.ConvLines < 5 {
-			fmt.Fprintf(os.Stderr, "Too few conversation lines (%d)\n", meta.ConvLines)
-			continue
-		}
-		formatted := truncateBytes(meta.Formatted, 50000)
-		prompt := buildSummaryPrompt(formatted, previousSummary)
-
-		fmt.Fprintf(os.Stderr, "%d new lines (total %d), %d conv, prompt %d bytes\n",
-			len(lines), totalLines, meta.ConvLines, len(prompt))
-		fmt.Fprintln(os.Stderr, "Calling ollama...")
-
-		ctx, cancel := context.WithTimeout(context.Background(), summarizationTimeout)
-		raw, err := runOllamaSummarize(ctx, prompt)
-		cancel()
-		if err != nil {
+		switch err := ss.generateSummary(sid, project, path); {
+		case err == nil:
+			s, _ := ss.get(sid)
+			fmt.Fprintf(os.Stderr, "Done: outcome=%s domain=%q (%d chars)\n", s.Outcome, s.Domain, len(s.Summary))
+			fmt.Println(s.Summary)
+		case errors.Is(err, errNoRecentActivity):
+			fmt.Fprintf(os.Stderr, "No activity in last %s\n", summaryWindow)
+		case errors.Is(err, errSummaryUpToDate):
+			fmt.Fprintln(os.Stderr, "Summary is already up to date")
+		case errors.Is(err, errInsufficientInput):
+			fmt.Fprintln(os.Stderr, "Too few conversation lines in window")
+		default:
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
 		}
-
-		parsed := parseOllamaResult(raw)
-		startedAt := extractSessionStartTime(lines)
-
-		ss.set(sid, &sessionSummary{
-			Summary:         parsed.Summary,
-			Project:         project,
-			Outcome:         parsed.Outcome,
-			Domain:          parsed.Domain,
-			FilesModified:   meta.FilesModified,
-			FilesExplored:   meta.FilesExplored,
-			ToolsUsed:       meta.ToolsUsed,
-			StartedAt:       startedAt,
-			TranscriptLines: totalLines,
-			GeneratedAt:     time.Now(),
-		})
-
-		fmt.Fprintf(os.Stderr, "Done: outcome=%s domain=%q (%d chars)\n",
-			parsed.Outcome, parsed.Domain, len(parsed.Summary))
-		fmt.Println(parsed.Summary)
 	}
 }

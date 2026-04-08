@@ -370,6 +370,17 @@ a.timeline-session-id:hover {
     white-space: nowrap;
 }
 
+.timeline-date-range {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--fgColor-muted);
+    background: var(--bgColor-muted);
+    padding: 1px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+    cursor: help;
+}
+
 .timeline-active-badge {
     font-size: 10px;
     font-weight: 600;
