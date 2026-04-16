@@ -311,6 +311,11 @@ function reinitializeScripts() {
             initTranscriptLightbox();
         }
 
+        // Re-render mermaid diagrams after SPA content swap
+        if (typeof window.renderMermaid === 'function') {
+            window.renderMermaid();
+        }
+
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
     } catch (error) {
         console.error('[Reinit] Error during script initialization:', error);

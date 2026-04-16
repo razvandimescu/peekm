@@ -1988,21 +1988,12 @@
             const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
 
-            function renderMermaid() {
+            window.renderMermaid = function() {
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
-            }
+            };
 
-            document.addEventListener('DOMContentLoaded', function() {
-                renderMermaid();
-                const content = document.getElementById('content');
-                if (!content) return;
-                let timer = null;
-                new MutationObserver(function() {
-                    clearTimeout(timer);
-                    timer = setTimeout(renderMermaid, 50);
-                }).observe(content, { childList: true, subtree: true });
-            });
+            document.addEventListener('DOMContentLoaded', window.renderMermaid);
         })();
     </script>
 </head>
