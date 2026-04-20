@@ -315,6 +315,11 @@ function reinitializeScripts() {
             initTranscriptLightbox();
         }
 
+        // Re-render mermaid diagrams after SPA content swap
+        if (typeof window.renderMermaid === 'function') {
+            window.renderMermaid();
+        }
+
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
     } catch (error) {
         console.error('[Reinit] Error during script initialization:', error);
@@ -1492,54 +1497,41 @@ function initializeSidebar() {
 
     const viewType = content.dataset.view;
 
-    // Unified layout: Always show sidebar (for 'file', 'empty', and 'memory' views)
-    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
-        // Show hamburger button
-        updateSidebarToggleButton();
+    // Show hamburger button for all unified layout views
+    updateSidebarToggleButton();
 
-        // Restore saved state or default to expanded (Persistent Navigation)
-        const container = document.querySelector('.layout-container');
-        if (!container) return;
+    // Restore saved state or default to expanded (Persistent Navigation)
+    const container = document.querySelector('.layout-container');
+    if (!container) return;
 
-        // On mobile, always start collapsed regardless of saved state —
-        // the sidebar is a temporary overlay there, not persistent nav.
-        setSidebarState(isMobileViewport() ? 'collapsed' : readSavedSidebarState());
+    // On mobile, always start collapsed regardless of saved state —
+    // the sidebar is a temporary overlay there, not persistent nav.
+    setSidebarState(isMobileViewport() ? 'collapsed' : readSavedSidebarState());
 
-        // Memory mode accent: driven by sessionStorage so it persists across file clicks
-        const inMemoryMode = viewType === 'memory' || sessionStorage.getItem('peekm_memory_mode') === 'true';
-        const sidebar = document.querySelector('.file-sidebar');
-        if (sidebar) sidebar.classList.toggle('memory-mode', inMemoryMode);
+    // Memory mode accent: driven by sessionStorage so it persists across file clicks
+    const inMemoryMode = viewType === 'memory' || sessionStorage.getItem('peekm_memory_mode') === 'true';
+    const sidebar = document.querySelector('.file-sidebar');
+    if (sidebar) sidebar.classList.toggle('memory-mode', inMemoryMode);
 
-        if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
-            const breadcrumb = document.getElementById('breadcrumb');
-            if (breadcrumb) {
-                breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
-            }
+    if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
+        const breadcrumb = document.getElementById('breadcrumb');
+        if (breadcrumb) {
+            breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
         }
-        if (viewType === 'file' && !inMemoryMode) {
-            updateBreadcrumb();
-        }
-        if (viewType === 'file') {
-            highlightCurrentFile();
-        }
+    }
+    if (viewType === 'file' && !inMemoryMode) {
+        updateBreadcrumb();
+    }
+    if (viewType === 'file') {
+        highlightCurrentFile();
     }
 }
 
 // Update hamburger button visibility
 function updateSidebarToggleButton() {
     const toggleBtn = document.getElementById('sidebar-toggle');
-    const content = document.getElementById('content');
-
-    if (!toggleBtn || !content) return;
-
-    const viewType = content.dataset.view;
-
-    // Show hamburger button in unified layout (file, empty, or memory views)
-    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
-        toggleBtn.style.display = 'inline-block';
-    } else {
-        toggleBtn.style.display = 'none';
-    }
+    if (!toggleBtn) return;
+    toggleBtn.style.display = 'inline-block';
 }
 
 // Note: syncSidebarContent() removed in unified layout
