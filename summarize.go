@@ -25,7 +25,7 @@ const (
 	sessionActiveThreshold = 5 * time.Minute
 	monitorTickInterval    = 30 * time.Second
 	summarizationTimeout   = 5 * time.Minute
-	ollamaModel            = "qwen3.5:27b-q8_0"
+	ollamaModel            = "qwen3.6:35b-a3b-q4_K_M"
 	// Limit summary input to recent activity so multi-day sessions don't
 	// blur distinct work periods together.
 	summaryWindow = 24 * time.Hour
@@ -718,26 +718,53 @@ func truncateBytes(s string, maxBytes int) string {
 	return s[:maxBytes] + "\n[... truncated ...]"
 }
 
-const dailyPromptTemplate = `Synthesize these %d coding session summaries into a single daily journal entry.
-Write 2-4 sentences covering the day's main accomplishments and status.
-Be specific about files and features. No bullet points.
-Do not mention "the user" or "the assistant".
+const dailyPromptTemplate = `Merge these %d per-session fact lists from the same day into a single deduplicated list.
+Input is already in typed-bullet form. Your job is ONLY to dedupe and consolidate — do not rewrite, do not summarize, do not add commentary.
 
+Rules:
+- Output format is identical to input: ` + "`- [TYPE] fact — key: value, key: value`" + `
+- If two sessions emit the same fact, keep ONE bullet.
+- If two bullets state near-duplicate facts, keep the clearer wording and merge key/value fields when they agree. Never invent a merged value.
+- Drop ` + "`[note] exploratory session, no durable facts`" + ` unless it is the ONLY content across the entire day.
+- Preserve the TYPE taxonomy from the input. Do not invent new types.
+- NO prose, NO headers, NO preamble, NO closing summary. Bullets only.
+
+SESSIONS:
 %s`
 
-const summaryPromptTemplate = `Summarize the following Claude Code session transcript concisely.
+const summaryPromptTemplate = `Extract durable facts from this Claude Code session transcript.
+Output is consumed by other systems that dedupe across sessions — be concise, specific, and self-contained.
 
-Focus on:
-- What the user was trying to accomplish (the goal)
-- What was actually done (files created/modified, key decisions)
-- Current status (completed, in-progress, blocked)
+Output ONLY a markdown bullet list. Each bullet:
+- [TYPE] fact — key: value, key: value
 
-Write 2-4 sentences. Be specific about file names and features. Do not use bullet points.
-Do not mention "the user" or "the assistant" — describe what was done passively or imperatively.
+TYPES (use exactly one per bullet):
+- decision — a deliberate choice. MUST include ` + "`why: <reason stated in the transcript>`" + `. If the reason is absent from the transcript, DO NOT emit a decision bullet.
+- gotcha — a real trap that bit someone in this session. Include ` + "`trigger: <what causes it>`" + ` when stated.
+- preference — a user preference expressed in this session. Include ` + "`why: ...`" + ` when stated.
+- entity — a file, function, branch, service, repo, person, or URL worth remembering later. Include ` + "`kind: <file|function|branch|service|repo|person|url>`" + `.
+- inflight — work in progress or blocked at session end. Include ` + "`branch: <name>`" + ` if stated.
+- note — anything else worth preserving that does not fit the above.
 
-After your summary, on a NEW line write exactly:
+Rules:
+- NO prose, NO headers, NO preamble, NO closing summary. Bullets only.
+- Each fact stands alone. Do not say "the user" or "we" — state the fact itself.
+- Routine activity (ran tests, fixed typo, rebased, formatted code) is NOT a fact.
+- NEVER invent a ` + "`why`" + ` or ` + "`trigger`" + `. If the transcript does not say it, omit the field.
+- Deduplicate within your own output.
+- If nothing durable happened, emit exactly: ` + "`- [note] exploratory session, no durable facts`" + `.
+
+After the bullet list, on NEW lines, append exactly:
 OUTCOME: completed OR partial OR blocked
 DOMAIN: <short label, e.g. "bug fix", "feature", "refactor", "review", "config", "performance">
+
+Example output:
+- [decision] switched Ollama output from prose to typed bullets — why: JSON breaks on small models, bullets survive partial output
+- [gotcha] filepath.Walk SkipDir on symlink entries skips all siblings — trigger: symlink to directory appears as file entry
+- [entity] summarize.go — kind: file
+- [inflight] typed-fact extraction pipeline — branch: feat/ollama-summarization
+OUTCOME: partial
+DOMAIN: feature
 
 %s---TRANSCRIPT---
 %s`
@@ -746,7 +773,7 @@ func buildSummaryPrompt(transcript, previousSummary string) string {
 	contextSection := ""
 	if previousSummary != "" {
 		contextSection = fmt.Sprintf(
-			"This is a CONTINUATION of a session previously summarized as:\n> %s\n\nSummarize the NEW activity below, incorporating the above context into a unified summary.\n\n",
+			"This session CONTINUES an earlier window. Facts already extracted from prior windows (do NOT re-emit these):\n%s\n\nExtract only NEW facts from the transcript below.\n\n",
 			previousSummary,
 		)
 	}
