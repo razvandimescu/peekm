@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -636,6 +637,15 @@ func (m *watcherManager) close() {
 	if m.current != nil {
 		m.current.Close()
 	}
+}
+
+var mermaidFenceRe = regexp.MustCompile("(?ms)^```mermaid[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*$")
+
+func preprocessMermaid(content []byte) []byte {
+	return mermaidFenceRe.ReplaceAllFunc(content, func(match []byte) []byte {
+		body := mermaidFenceRe.FindSubmatch(match)[1]
+		return []byte(`<pre class="mermaid">` + template.HTMLEscapeString(string(body)) + `</pre>`)
+	})
 }
 
 // newMarkdownRenderer creates a configured goldmark renderer
@@ -1698,7 +1708,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	md := newMarkdownRenderer()
 	var buf bytes.Buffer
-	if err := md.Convert(content, &buf); err != nil {
+	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
 		http.Error(w, "Failed to render markdown", http.StatusInternalServerError)
 		return
 	}
@@ -1787,7 +1797,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			md := newMarkdownRenderer()
 			var buf bytes.Buffer
-			if err := md.Convert(markdownContent, &buf); err == nil {
+			if err := md.Convert(preprocessMermaid(markdownContent), &buf); err == nil {
 				content = template.HTML(buf.String())
 				showBackButton = true
 				title = filepath.Base(defaultFile)
@@ -2411,7 +2421,7 @@ func renderMarkdownContent(absFilePath string) (template.HTML, error) {
 	}
 	md := newMarkdownRenderer()
 	var buf bytes.Buffer
-	if err := md.Convert(content, &buf); err != nil {
+	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
 		return "", err
 	}
 	return template.HTML(buf.String()), nil

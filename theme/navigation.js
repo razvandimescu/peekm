@@ -249,6 +249,10 @@ async function navigate(url, addToHistory = true) {
             expandParentDirectories(filePath);
         }
 
+        // On mobile, dismiss the overlay sidebar after navigation so the
+        // tapped content becomes visible (standard mobile drawer pattern).
+        collapseSidebarOnMobile();
+
         console.log('[Navigate] Navigated to:', url);
     } catch (error) {
         console.error('[Navigate] Error:', error);
@@ -309,6 +313,11 @@ function reinitializeScripts() {
         // Initialize transcript lightbox on SPA navigation
         if (viewType === 'transcript') {
             initTranscriptLightbox();
+        }
+
+        // Re-render mermaid diagrams after SPA content swap
+        if (typeof window.renderMermaid === 'function') {
+            window.renderMermaid();
         }
 
         console.log('[Reinit] Scripts reinitialized for view:', viewType);
@@ -1416,34 +1425,66 @@ function clearSessionMetadata() {
 
 const SIDEBAR_STORAGE_KEY = 'peekm_sidebar_state';
 
-// Toggle sidebar visibility
+// Matches the CSS @media (max-width: 768px) breakpoint where the
+// sidebar becomes a fixed-position overlay instead of persistent nav.
+function isMobileViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
+// Single source of truth for sidebar state changes. Writes the dataset
+// attribute and keeps the hamburger button label/tooltip in sync. Skips
+// the work when the state hasn't changed. Does NOT persist — callers
+// decide whether to write to localStorage.
+function setSidebarState(state) {
+    const container = document.querySelector('.layout-container');
+    if (!container || container.dataset.sidebar === state) return;
+    container.dataset.sidebar = state;
+
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    if (toggleBtn) {
+        const expanded = state === 'expanded';
+        toggleBtn.title = expanded
+            ? 'Hide navigation (Cmd/Ctrl+B)'
+            : 'Show navigation (Cmd/Ctrl+B)';
+        toggleBtn.setAttribute('aria-label',
+            expanded ? 'Hide navigation sidebar' : 'Show navigation sidebar');
+    }
+}
+
+function readSavedSidebarState() {
+    try {
+        return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'collapsed'
+            ? 'collapsed'
+            : 'expanded';
+    } catch (error) {
+        console.error('[Sidebar] Failed to load state:', error);
+        return 'expanded';
+    }
+}
+
+// Auto-dismiss the overlay after navigation on mobile so the tapped
+// content becomes visible (standard mobile drawer pattern).
+function collapseSidebarOnMobile() {
+    if (isMobileViewport()) {
+        setSidebarState('collapsed');
+    }
+}
+
 function toggleSidebar() {
     const container = document.querySelector('.layout-container');
     if (!container) return;
 
-    const isExpanded = container.dataset.sidebar === 'expanded';
-    const newState = isExpanded ? 'collapsed' : 'expanded';
+    const newState = container.dataset.sidebar === 'expanded' ? 'collapsed' : 'expanded';
+    setSidebarState(newState);
 
-    container.dataset.sidebar = newState;
-
-    // Update button tooltip
-    const toggleBtn = document.getElementById('sidebar-toggle');
-    if (toggleBtn) {
-        toggleBtn.title = newState === 'expanded'
-            ? 'Hide navigation (Cmd/Ctrl+B)'
-            : 'Show navigation (Cmd/Ctrl+B)';
-        toggleBtn.setAttribute('aria-label',
-            newState === 'expanded'
-                ? 'Hide navigation sidebar'
-                : 'Show navigation sidebar'
-        );
-    }
-
-    // Save preference to localStorage
-    try {
-        localStorage.setItem(SIDEBAR_STORAGE_KEY, newState);
-    } catch (error) {
-        console.error('[Sidebar] Failed to save state:', error);
+    // Persist desktop preference only — mobile sidebar is an ephemeral
+    // overlay, so toggles there shouldn't overwrite the saved state.
+    if (!isMobileViewport()) {
+        try {
+            localStorage.setItem(SIDEBAR_STORAGE_KEY, newState);
+        } catch (error) {
+            console.error('[Sidebar] Failed to save state:', error);
+        }
     }
 
     console.log('[Sidebar] Toggled to:', newState);
@@ -1456,62 +1497,41 @@ function initializeSidebar() {
 
     const viewType = content.dataset.view;
 
-    // Unified layout: Always show sidebar (for 'file', 'empty', and 'memory' views)
-    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
-        // Show hamburger button
-        updateSidebarToggleButton();
+    // Show hamburger button for all unified layout views
+    updateSidebarToggleButton();
 
-        // Restore saved state or default to expanded (Persistent Navigation)
-        const container = document.querySelector('.layout-container');
-        if (!container) return;
+    // Restore saved state or default to expanded (Persistent Navigation)
+    const container = document.querySelector('.layout-container');
+    if (!container) return;
 
-        try {
-            const savedState = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-            if (savedState === 'collapsed') {
-                container.dataset.sidebar = 'collapsed';
-            } else {
-                container.dataset.sidebar = 'expanded';
-            }
-        } catch (error) {
-            console.error('[Sidebar] Failed to load state:', error);
-            container.dataset.sidebar = 'expanded';
-        }
+    // On mobile, always start collapsed regardless of saved state —
+    // the sidebar is a temporary overlay there, not persistent nav.
+    setSidebarState(isMobileViewport() ? 'collapsed' : readSavedSidebarState());
 
-        // Memory mode accent: driven by sessionStorage so it persists across file clicks
-        const inMemoryMode = viewType === 'memory' || sessionStorage.getItem('peekm_memory_mode') === 'true';
-        const sidebar = document.querySelector('.file-sidebar');
-        if (sidebar) sidebar.classList.toggle('memory-mode', inMemoryMode);
+    // Memory mode accent: driven by sessionStorage so it persists across file clicks
+    const inMemoryMode = viewType === 'memory' || sessionStorage.getItem('peekm_memory_mode') === 'true';
+    const sidebar = document.querySelector('.file-sidebar');
+    if (sidebar) sidebar.classList.toggle('memory-mode', inMemoryMode);
 
-        if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
-            const breadcrumb = document.getElementById('breadcrumb');
-            if (breadcrumb) {
-                breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
-            }
+    if (viewType === 'memory' || (viewType === 'file' && inMemoryMode)) {
+        const breadcrumb = document.getElementById('breadcrumb');
+        if (breadcrumb) {
+            breadcrumb.innerHTML = '<a href="/memory" style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fgColor-done); text-decoration: none; opacity: 1;">\u2190 Memory</a>';
         }
-        if (viewType === 'file' && !inMemoryMode) {
-            updateBreadcrumb();
-        }
-        if (viewType === 'file') {
-            highlightCurrentFile();
-        }
+    }
+    if (viewType === 'file' && !inMemoryMode) {
+        updateBreadcrumb();
+    }
+    if (viewType === 'file') {
+        highlightCurrentFile();
     }
 }
 
 // Update hamburger button visibility
 function updateSidebarToggleButton() {
     const toggleBtn = document.getElementById('sidebar-toggle');
-    const content = document.getElementById('content');
-
-    if (!toggleBtn || !content) return;
-
-    const viewType = content.dataset.view;
-
-    // Show hamburger button in unified layout (file, empty, or memory views)
-    if (viewType === 'file' || viewType === 'empty' || viewType === 'memory') {
-        toggleBtn.style.display = 'inline-block';
-    } else {
-        toggleBtn.style.display = 'none';
-    }
+    if (!toggleBtn) return;
+    toggleBtn.style.display = 'inline-block';
 }
 
 // Note: syncSidebarContent() removed in unified layout
