@@ -104,6 +104,41 @@
             background: var(--fgColor-danger, #d1242f);
         }
 
+        .docx-btn {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            font-size: 12px;
+            color: var(--fgColor-default, #1f2328);
+            cursor: pointer;
+            font-family: inherit;
+            line-height: 1.4;
+            white-space: nowrap;
+        }
+
+        .docx-btn.ready {
+            display: inline-flex;
+        }
+
+        .docx-btn:hover:not(:disabled) {
+            background: var(--bgColor-muted, #f6f8fa);
+            color: var(--fgColor-accent, #0969da);
+            border-color: var(--borderColor-muted, #afb8c1);
+        }
+
+        .docx-btn:disabled {
+            opacity: 0.7;
+            cursor: progress;
+        }
+
+        .docx-btn svg {
+            flex-shrink: 0;
+        }
+
         .shared-content {
             max-width: 980px;
             margin: 0 auto;
@@ -147,8 +182,38 @@
             .shared-banner { padding: 8px 12px; }
             .shared-banner-left strong { max-width: 180px; }
             .shared-banner-sep, .shared-banner-link { display: none; }
+            .docx-btn-label { display: none; }
+            .docx-btn { padding: 3px 7px; }
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        (function() {
+            if (typeof mermaid === 'undefined') return;
+            // Defer init+run to DOMContentLoaded so theme-manager.js (loaded later in body)
+            // has already applied data-color-mode from localStorage. Without this defer,
+            // mermaid would pick its theme from a stale OS-only signal.
+            function isDark() {
+                var mode = document.documentElement.getAttribute('data-color-mode');
+                if (mode === 'dark') return true;
+                if (mode === 'light') return false;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+            document.addEventListener('DOMContentLoaded', function() {
+                // Cache mermaid sources before run() consumes them — DOCX export re-renders
+                // them in light theme to preserve contrast on a white page background.
+                window.peekmMermaidSources = [];
+                document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el) {
+                    if (el.textContent && !el.querySelector('svg')) {
+                        window.peekmMermaidSources.push(el.textContent.trim());
+                    }
+                });
+                mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose' });
+                try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
+                catch (e) { console.warn('[mermaid] render failed', e); }
+            });
+        })();
+    </script>
 </head>
 <body>
     <div class="shared-banner">
@@ -158,7 +223,11 @@
             <a class="shared-banner-link" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener">peekm</a>
         </div>
         {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
-        {{else}}<span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
+        {{else}}<button type="button" id="docx-download-btn" class="docx-btn" disabled aria-label="Download as DOCX">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
+            <span class="docx-btn-label">Download as DOCX</span>
+        </button>
+        <span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
         {{end}}
     </div>
 
@@ -240,6 +309,230 @@
             }
             connectSSE();
             {{end}}
+        })();
+    </script>
+    <script>
+        (function() {
+            var btn = document.getElementById('docx-download-btn');
+            if (!btn) return;
+
+            var fileName = '{{.FileName}}';
+            var label = btn.querySelector('.docx-btn-label');
+            var origLabel = label ? label.textContent : 'Download as DOCX';
+
+            // Resolve once mermaid has rendered every diagram, or after a short timeout.
+            function waitForMermaid() {
+                var els = document.querySelectorAll('pre.mermaid, .mermaid');
+                if (els.length === 0) return Promise.resolve();
+                return new Promise(function(resolve) {
+                    var start = Date.now();
+                    (function tick() {
+                        var done = Array.prototype.every.call(els, function(el) {
+                            return el.getAttribute('data-processed') === 'true' || el.querySelector('svg');
+                        });
+                        if (done || Date.now() - start > 5000) resolve();
+                        else setTimeout(tick, 100);
+                    })();
+                });
+            }
+
+            // Lazy-load html-to-image (handles foreignObject) + html-docx-js, both with SRI.
+            // html-to-image is needed because mermaid uses <foreignObject> for HTML labels,
+            // which a plain <img src="svg-blob"> + canvas pipeline can't rasterise.
+            var libsPromise = null;
+            function loadLibs() {
+                if (libsPromise) return libsPromise;
+                libsPromise = Promise.all([
+                    loadScript(
+                        'https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.min.js',
+                        'sha384-wNc5eWDV2JUK6HVVRPhI8Bfc08Br5nd66LmdO7jDYWK0fd5uNvfqKKS9QXEOLwfO'
+                    ),
+                    loadScript(
+                        'https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js',
+                        'sha384-T9phw4PsWkw02w0Oq523aDlYzJ5Q4v/BUJZ3tQhenX0My0kgUnxA7CNO64LxS+O3'
+                    )
+                ]).then(function() {
+                    return { htmlToImage: window.htmlToImage, htmlDocx: window.htmlDocx };
+                }).catch(function(err) {
+                    libsPromise = null;
+                    throw err;
+                });
+                return libsPromise;
+            }
+
+            function loadScript(src, integrity) {
+                return new Promise(function(resolve, reject) {
+                    var s = document.createElement('script');
+                    s.src = src;
+                    s.integrity = integrity;
+                    s.crossOrigin = 'anonymous';
+                    s.onload = resolve;
+                    s.onerror = function() { reject(new Error('Failed to load ' + src)); };
+                    document.head.appendChild(s);
+                });
+            }
+
+            // Cap display width so Word doesn't render at the PNG's native pixel size.
+            // 600px ≈ 6.25in at 96dpi, fits Word's default content area (8.5in - 2in margins).
+            var TARGET_DISPLAY_WIDTH_PX = 600;
+
+            // Rasterise an SVG (including <foreignObject> content) to a PNG data URL plus
+            // pixel display dimensions for Word's HTML import to honour.
+            function rasterise(svgEl, htmlToImage) {
+                var rect = svgEl.getBoundingClientRect();
+                var srcW = Math.max(rect.width || 600, 1);
+                var srcH = Math.max(rect.height || 400, 1);
+                var displayW = Math.min(srcW, TARGET_DISPLAY_WIDTH_PX);
+                var displayH = displayW * (srcH / srcW);
+                return htmlToImage.toPng(svgEl, {
+                    width: srcW,
+                    height: srcH,
+                    pixelRatio: 2,
+                    backgroundColor: '#ffffff'
+                }).then(function(dataUrl) {
+                    return { dataUrl: dataUrl, width: Math.round(displayW), height: Math.round(displayH) };
+                });
+            }
+
+            // Re-render a mermaid source in light theme into an offscreen light-mode
+            // wrapper, then rasterise. Needed because dark-mode diagrams on a white DOCX
+            // page lose contrast (especially classDef-styled "dim" nodes whose foreignObject
+            // text was inheriting white from page CSS).
+            async function renderMermaidLight(sourceCode, htmlToImage) {
+                var id = 'peekm-docx-mm-' + Math.random().toString(36).slice(2, 8);
+                var result = await mermaid.render(id, sourceCode);
+
+                var wrapper = document.createElement('div');
+                wrapper.setAttribute('data-color-mode', 'light');
+                wrapper.setAttribute('data-light-theme', 'light');
+                wrapper.style.cssText = 'position:fixed;left:-10000px;top:0;background:#fff;color:#1f2328;';
+                wrapper.innerHTML = result.svg;
+                document.body.appendChild(wrapper);
+
+                try {
+                    var svgEl = wrapper.querySelector('svg');
+                    if (!svgEl) throw new Error('mermaid.render returned no SVG');
+                    await new Promise(function(r) { requestAnimationFrame(r); });
+                    return await rasterise(svgEl, htmlToImage);
+                } finally {
+                    wrapper.remove();
+                }
+            }
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, function(c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+            }
+
+            async function buildDocxBlob() {
+                await waitForMermaid();
+                var libs = await loadLibs();
+
+                var src = document.getElementById('shared-content');
+                var clone = src.cloneNode(true);
+
+                // Switch mermaid to light theme for any re-renders during export.
+                // Live SVGs already on the page are unaffected (initialize only changes future renders).
+                var pageIsDark = (function() {
+                    var mode = document.documentElement.getAttribute('data-color-mode');
+                    if (mode === 'dark') return true;
+                    if (mode === 'light') return false;
+                    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+                })();
+                if (typeof mermaid !== 'undefined') {
+                    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+                }
+
+                try {
+                    var liveSvgs = Array.prototype.slice.call(src.querySelectorAll('svg'));
+                    var clonedSvgs = Array.prototype.slice.call(clone.querySelectorAll('svg'));
+                    var sources = window.peekmMermaidSources || [];
+                    var mermaidIdx = 0;
+
+                    for (var i = 0; i < clonedSvgs.length; i++) {
+                        try {
+                            var liveSvg = liveSvgs[i] || clonedSvgs[i];
+                            var isMermaid = !!liveSvg.closest('.mermaid, pre.mermaid');
+                            var png;
+                            if (isMermaid && mermaidIdx < sources.length) {
+                                png = await renderMermaidLight(sources[mermaidIdx], libs.htmlToImage);
+                                mermaidIdx++;
+                            } else {
+                                png = await rasterise(liveSvg, libs.htmlToImage);
+                            }
+                            var img = document.createElement('img');
+                            img.src = png.dataUrl;
+                            img.setAttribute('width', png.width);
+                            img.setAttribute('height', png.height);
+                            clonedSvgs[i].parentNode.replaceChild(img, clonedSvgs[i]);
+                        } catch (err) {
+                            console.warn('[docx] svg→png failed', err);
+                            var ph = document.createElement('p');
+                            ph.textContent = '[Diagram could not be exported]';
+                            ph.style.fontStyle = 'italic';
+                            ph.style.color = '#888';
+                            clonedSvgs[i].parentNode.replaceChild(ph, clonedSvgs[i]);
+                        }
+                    }
+                } finally {
+                    // Restore mermaid theme to match the live page state.
+                    if (typeof mermaid !== 'undefined') {
+                        mermaid.initialize({ startOnLoad: false, theme: pageIsDark ? 'dark' : 'default', securityLevel: 'loose' });
+                    }
+                }
+
+                // Inline the page's styles so headings/code/tables survive Word's HTML import.
+                var css = '';
+                document.querySelectorAll('style').forEach(function(s) { css += s.textContent + '\n'; });
+
+                // No body padding — Word's page margins (1" default = ~96px each side on letter)
+                // already provide breathing room. Adding HTML padding compounds unpredictably
+                // with Word's margins and squeezes the content area.
+                // Force light theme on the exported HTML — DOCX is read on white paper.
+                var html = '<!DOCTYPE html><html data-color-mode="light" data-light-theme="light"><head><meta charset="utf-8"><title>' +
+                    escapeHtml(fileName) + '</title><style>' + css +
+                    'body{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;color:#1f2328;}' +
+                    'img{max-width:100%;height:auto;}' +
+                    '</style></head><body class="markdown-body">' +
+                    clone.innerHTML + '</body></html>';
+
+                return libs.htmlDocx.asBlob(html);
+            }
+
+            function triggerDownload(blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = fileName.replace(/\.md$/i, '') + '.docx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(function() { URL.revokeObjectURL(url); }, 0);
+            }
+
+            async function handleClick() {
+                btn.disabled = true;
+                if (label) label.textContent = 'Preparing…';
+                try {
+                    var blob = await buildDocxBlob();
+                    triggerDownload(blob);
+                } catch (err) {
+                    console.error('[docx] export failed', err);
+                    alert('Could not generate DOCX. Please try again.');
+                } finally {
+                    if (label) label.textContent = origLabel;
+                    btn.disabled = false;
+                }
+            }
+
+            btn.addEventListener('click', handleClick);
+
+            // Reveal once mermaid (if any) has rendered.
+            waitForMermaid().then(function() {
+                btn.classList.add('ready');
+                btn.disabled = false;
+            });
         })();
     </script>
     {{end}}
