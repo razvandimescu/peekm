@@ -442,7 +442,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 	}
 	md := newMarkdownRenderer()
 	var buf bytes.Buffer
-	if err := md.Convert(content, &buf); err != nil {
+	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)
 		return
 	}
