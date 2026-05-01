@@ -1,6 +1,6 @@
 # peekm
 
-**Real-time observability for AI coding sessions.**
+**See what every Claude Code session is doing across all your projects — live, not after the fact.**
 
 [![GitHub stars](https://img.shields.io/github/stars/razvandimescu/peekm)](https://github.com/razvandimescu/peekm)
 [![Go Report Card](https://goreportcard.com/badge/github.com/razvandimescu/peekm?v=2)](https://goreportcard.com/report/github.com/razvandimescu/peekm)
@@ -31,8 +31,6 @@ Run `peekm setup autostart` to launch peekm automatically on login.
 
 Or install globally: `npm i -g @peekm/peekm` | `brew install razvandimescu/tap/peekm`
 
-Works with Claude Code today. More agents coming.
-
 ## What You Get
 
 **AI session observability:**
@@ -44,8 +42,8 @@ Works with Claude Code today. More agents coming.
 
 **Also included:**
 
-- **Sharing** — share any file (Markdown, HTML, SVG, TXT) via LAN or public URL via `share.peekm.dev` (opt-in, 1-hour TTL, no account). HTML shares include co-located assets (CSS, JS, images)
-- **File viewer** — VS Code-style sidebar with Markdown, HTML, SVG, and TXT support. Fuzzy search (Cmd/Ctrl+P), in-browser editing (Markdown), syntax highlighting, light/dark/auto themes
+- **Sharing** — share any file (Markdown, HTML, SVG, TXT) via LAN or public URL via `share.peekm.dev` (opt-in, 1-hour TTL, no account). HTML shares include co-located assets (CSS, JS, images); Markdown shares offer one-click DOCX download
+- **File viewer** — VS Code-style sidebar with Markdown, HTML, SVG, and TXT support. Fuzzy search (Cmd/Ctrl+P), in-browser editing (Markdown), Mermaid diagram rendering, syntax highlighting, light/dark/auto themes
 - **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
 - **Persistent history** — events survive restarts via `~/.peekm/events.jsonl`
 
@@ -57,9 +55,17 @@ peekm correlates file edits with session metadata and conversations, giving you 
 
 ## How It Works
 
-peekm installs a PostToolUse hook into Claude Code that reports session metadata to a local HTTP server. File changes are correlated with session data and served through a local web UI with SSE for live updates. No data leaves your machine unless you opt into public sharing.
+peekm registers a PostToolUse hook with Claude Code so it can correlate file edits with the session that made them. Setup runs automatically on first launch when `~/.claude` exists.
 
-Setup is automatic — peekm detects `~/.claude` on first run and configures hooks. Run `peekm setup claude-code --remove` to undo.
+**What setup does:**
+
+- Creates `~/.claude/peekm-hook.sh` — the hook script that fires after each Claude Code tool call.
+- Adds an entry to `~/.claude/settings.json` under `hooks.PostToolUse` — non-destructive merge; existing hooks are preserved, and re-running setup is idempotent.
+- Captures events to `~/.peekm/events.jsonl` — appended even when peekm isn't running, so no sessions are lost.
+
+**What the hook sends:** session ID, file path, and tool name — no file contents, no prompts, no model output. Posted to `127.0.0.1:6419` only. No data leaves your machine unless you opt into public sharing.
+
+**To remove:** `peekm setup claude-code --remove` strips the entry from `settings.json` and deletes the hook script.
 
 ## Installation
 
@@ -107,6 +113,7 @@ AI tracking is on by default when `~/.claude` exists. Disable with `-no-ai-track
 
 - **LAN** (default): token-scoped URL on your local network. Recipients see a read-only rendered view with live reload.
 - **Public** (opt-in): click "Make public" to tunnel through `share.peekm.dev`. HTTPS URL, expires after 1 hour, no account needed.
+- **DOCX download**: shared Markdown views include a one-click DOCX export for recipients.
 
 ## Background Service
 
@@ -134,9 +141,11 @@ _site
 
 </details>
 
-## Requirements
+## Requirements & Limits
 
 Claude Code (for AI tracking). macOS, Linux, or Windows. No runtime dependencies — peekm is a single static binary.
+
+Scope today: Claude Code only. Tracks PostToolUse hooks (file edits and tool calls), not the model's internal reasoning. Single-machine — no team or multi-machine sync.
 
 ## FAQ
 
