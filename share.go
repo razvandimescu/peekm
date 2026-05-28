@@ -400,13 +400,21 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ext := strings.ToLower(filepath.Ext(entry.FilePath))
+
+	// Raw markdown source download (the ".md" action on the shared view). Path-based,
+	// not a query param, so it survives the relay — which forwards path suffixes but
+	// drops query strings.
+	if assetPath == "raw" && !shareableRawExts[ext] {
+		serveSharedSource(w, r, entry)
+		return
+	}
+
 	// Asset passthrough: /s/{token}/style.css
 	if assetPath != "" {
 		serveSharedAsset(w, r, entry, assetPath)
 		return
 	}
-
-	ext := strings.ToLower(filepath.Ext(entry.FilePath))
 
 	// HTML/SVG/text files: serve raw content (no peekm wrapper)
 	if shareableRawExts[ext] {
@@ -430,6 +438,15 @@ func serveSharedRawFile(w http.ResponseWriter, r *http.Request, entry *shareEntr
 		ct = "text/plain; charset=utf-8"
 	}
 	w.Header().Set("Content-Type", ct)
+	http.ServeFile(w, r, entry.FilePath)
+}
+
+// serveSharedSource serves the raw markdown source as a download. The link's download
+// attribute supplies the filename through the relay (which strips Content-Disposition);
+// the header still covers direct LAN access and CLI clients.
+func serveSharedSource(w http.ResponseWriter, r *http.Request, entry *shareEntry) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(entry.FilePath)))
 	http.ServeFile(w, r, entry.FilePath)
 }
 

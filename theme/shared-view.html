@@ -54,14 +54,29 @@
         }
 
         .shared-banner-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             color: var(--fgColor-muted, #656d76);
             text-decoration: none;
             white-space: nowrap;
+            font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: -0.01em;
+        }
+
+        .shared-banner-link svg {
+            color: var(--peekm-accent, #0a8043);
+            filter: drop-shadow(0 0 4px var(--peekm-accent-glow, rgba(10, 128, 67, 0.35)));
         }
 
         .shared-banner-link:hover {
-            color: var(--fgColor-accent, #0969da);
-            text-decoration: underline;
+            color: var(--fgColor-default, #1f2328);
+        }
+
+        .shared-banner-link:hover svg {
+            color: var(--peekm-accent, #0a8043);
         }
 
         .expiry-badge {
@@ -104,39 +119,105 @@
             background: var(--fgColor-danger, #d1242f);
         }
 
-        .docx-btn {
+        /* Split download button: primary ".md" segment + caret that opens a format menu. */
+        .dl-split {
+            position: relative;
             display: none;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 10px;
-            border-radius: 12px;
-            background: var(--bgColor-default, #fff);
-            border: 1px solid var(--borderColor-default, #d0d7de);
-            font-size: 12px;
-            color: var(--fgColor-default, #1f2328);
-            cursor: pointer;
-            font-family: inherit;
-            line-height: 1.4;
-            white-space: nowrap;
+            align-items: stretch;
         }
 
-        .docx-btn.ready {
+        .dl-split.ready {
             display: inline-flex;
         }
 
-        .docx-btn:hover:not(:disabled) {
+        .dl-primary,
+        .dl-caret {
+            display: inline-flex;
+            align-items: center;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            color: var(--fgColor-default, #1f2328);
+            font-family: inherit;
+            font-size: 12px;
+            line-height: 1.4;
+            cursor: pointer;
+        }
+
+        .dl-primary {
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 12px 0 0 12px;
+            border-right: none;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .dl-caret {
+            padding: 3px 7px;
+            border-radius: 0 12px 12px 0;
+        }
+
+        .dl-primary:hover,
+        .dl-caret:hover,
+        .dl-caret[aria-expanded="true"] {
             background: var(--bgColor-muted, #f6f8fa);
             color: var(--fgColor-accent, #0969da);
             border-color: var(--borderColor-muted, #afb8c1);
         }
 
-        .docx-btn:disabled {
-            opacity: 0.7;
-            cursor: progress;
+        .dl-primary svg,
+        .dl-caret svg {
+            flex-shrink: 0;
         }
 
-        .docx-btn svg {
-            flex-shrink: 0;
+        .dl-menu {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            min-width: 168px;
+            padding: 4px;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            z-index: 20;
+        }
+
+        .dl-menu[hidden] {
+            display: none;
+        }
+
+        .dl-menu-item {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 10px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--fgColor-default, #1f2328);
+            font-family: inherit;
+            font-size: 13px;
+            text-align: left;
+            text-decoration: none;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .dl-menu-item:hover:not([aria-disabled="true"]),
+        .dl-menu-item:focus-visible {
+            background: var(--bgColor-muted, #f6f8fa);
+            outline: none;
+        }
+
+        .dl-menu-item[aria-disabled="true"] {
+            color: var(--fgColor-muted, #656d76);
+            cursor: default;
+        }
+
+        .dl-menu-hint {
+            color: var(--fgColor-muted, #656d76);
+            font-size: 11px;
         }
 
         .shared-content {
@@ -182,8 +263,22 @@
             .shared-banner { padding: 8px 12px; }
             .shared-banner-left strong { max-width: 180px; }
             .shared-banner-sep, .shared-banner-link { display: none; }
-            .docx-btn-label { display: none; }
-            .docx-btn { padding: 3px 7px; }
+            .dl-primary-label { display: none; }
+            .dl-primary { padding: 3px 9px; }
+        }
+
+        /* Touch: each split segment is an independent ≥44px tap target. */
+        @media (hover: none) and (pointer: coarse) {
+            .dl-primary, .dl-caret {
+                min-height: 44px;
+                min-width: 44px;
+                justify-content: center;
+            }
+            .dl-menu-item {
+                display: flex;
+                align-items: center;
+                min-height: 44px;
+            }
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -220,13 +315,25 @@
         <div class="shared-banner-left">
             <strong>{{.FileName}}</strong>
             <span class="shared-banner-sep">·</span>
-            <a class="shared-banner-link" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener">peekm</a>
+            <a class="shared-banner-link" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener" aria-label="Shared via peekm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                peekm
+            </a>
         </div>
         {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
-        {{else}}<button type="button" id="docx-download-btn" class="docx-btn" disabled aria-label="Download as DOCX">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
-            <span class="docx-btn-label">Download as DOCX</span>
-        </button>
+        {{else}}<div class="dl-split" id="dl-split">
+            <a class="dl-primary" id="dl-md-primary" href="/s/{{.Token}}/raw" download="{{.FileName}}" aria-label="Download Markdown source">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
+                <span class="dl-primary-label">Download .md</span>
+            </a>
+            <button type="button" class="dl-caret" id="dl-caret" aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu" aria-label="More download formats">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.78 6.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 7.28a.749.749 0 1 1 1.06-1.06L8 9.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+            </button>
+            <div class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-caret" hidden>
+                <a class="dl-menu-item" role="menuitem" href="/s/{{.Token}}/raw" download="{{.FileName}}">Markdown (.md)</a>
+                <button type="button" class="dl-menu-item" role="menuitem" id="docx-menu-item" aria-disabled="true">Word (.docx)<span class="dl-menu-hint" id="docx-hint"> — preparing…</span></button>
+            </div>
+        </div>
         <span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
         {{end}}
     </div>
@@ -313,12 +420,14 @@
     </script>
     <script>
         (function() {
-            var btn = document.getElementById('docx-download-btn');
-            if (!btn) return;
+            var split = document.getElementById('dl-split');
+            if (!split) return;
 
+            var caret = document.getElementById('dl-caret');
+            var menu = document.getElementById('dl-menu');
+            var docxItem = document.getElementById('docx-menu-item');
+            var docxHint = document.getElementById('docx-hint');
             var fileName = '{{.FileName}}';
-            var label = btn.querySelector('.docx-btn-label');
-            var origLabel = label ? label.textContent : 'Download as DOCX';
 
             // Resolve once mermaid has rendered every diagram, or after a short timeout.
             function waitForMermaid() {
@@ -511,27 +620,73 @@
                 setTimeout(function() { URL.revokeObjectURL(url); }, 0);
             }
 
-            async function handleClick() {
-                btn.disabled = true;
-                if (label) label.textContent = 'Preparing…';
+            async function generateDocx() {
+                if (docxItem.getAttribute('aria-disabled') === 'true') return;
+                docxItem.setAttribute('aria-disabled', 'true');
+                if (docxHint) { docxHint.textContent = ' — generating…'; docxHint.hidden = false; }
                 try {
                     var blob = await buildDocxBlob();
                     triggerDownload(blob);
+                    closeMenu();
                 } catch (err) {
                     console.error('[docx] export failed', err);
                     alert('Could not generate DOCX. Please try again.');
                 } finally {
-                    if (label) label.textContent = origLabel;
-                    btn.disabled = false;
+                    docxItem.setAttribute('aria-disabled', 'false');
+                    if (docxHint) docxHint.hidden = true;
                 }
             }
 
-            btn.addEventListener('click', handleClick);
+            function menuItems() {
+                return Array.prototype.slice.call(menu.querySelectorAll('.dl-menu-item'));
+            }
+            function openMenu() {
+                menu.hidden = false;
+                caret.setAttribute('aria-expanded', 'true');
+                var items = menuItems();
+                if (items.length) items[0].focus();
+                document.addEventListener('click', onDocClick, true);
+                document.addEventListener('keydown', onKeydown, true);
+            }
+            function closeMenu() {
+                if (menu.hidden) return;
+                menu.hidden = true;
+                caret.setAttribute('aria-expanded', 'false');
+                document.removeEventListener('click', onDocClick, true);
+                document.removeEventListener('keydown', onKeydown, true);
+            }
+            function onDocClick(e) {
+                if (!split.contains(e.target)) closeMenu();
+            }
+            function onKeydown(e) {
+                var items = menuItems();
+                var idx = items.indexOf(document.activeElement);
+                if (e.key === 'Escape') {
+                    e.preventDefault(); closeMenu(); caret.focus();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault(); items[(idx + 1) % items.length].focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault(); items[(idx - 1 + items.length) % items.length].focus();
+                } else if (e.key === 'Tab') {
+                    closeMenu();
+                }
+            }
 
-            // Reveal once mermaid (if any) has rendered.
+            caret.addEventListener('click', function(e) {
+                e.stopPropagation();
+                menu.hidden ? openMenu() : closeMenu();
+            });
+            docxItem.addEventListener('click', generateDocx);
+            // Markdown item is a plain <a download> — let the browser handle it, then close.
+            menu.querySelector('a.dl-menu-item').addEventListener('click', closeMenu);
+
+            // Reveal the whole control immediately — ".md" needs no rendering. Gate only the
+            // DOCX item until mermaid (if any) has finished. On diagram-free docs this
+            // resolves on the same tick, so the disabled state is never seen.
+            split.classList.add('ready');
             waitForMermaid().then(function() {
-                btn.classList.add('ready');
-                btn.disabled = false;
+                docxItem.setAttribute('aria-disabled', 'false');
+                if (docxHint) docxHint.hidden = true;
             });
         })();
     </script>
