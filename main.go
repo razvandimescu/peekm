@@ -70,12 +70,16 @@ var (
 	}
 
 	// Flags
-	port        = flag.Int("port", 6419, "Port to serve on")
-	openBrowser = flag.Bool("browser", true, "Open browser automatically")
-	showVersion = flag.Bool("version", false, "Show version information")
-	showIgnored = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
-	disableHook = flag.Bool("no-ai-tracking", false, "Disable AI session tracking endpoint")
-	demoMode    = flag.Bool("demo", false, "Demo mode (fake tunnel for public sharing)")
+	port         = flag.Int("port", 6419, "Port to serve on")
+	openBrowser  = flag.Bool("browser", true, "Open browser automatically")
+	showVersion  = flag.Bool("version", false, "Show version information")
+	showIgnored  = flag.Bool("show-ignored", false, "Show all excluded directories and exit")
+	disableHook  = flag.Bool("no-ai-tracking", false, "Disable AI session tracking endpoint")
+	demoMode     = flag.Bool("demo", false, "Demo mode (fake tunnel for public sharing)")
+	trustedCIDRs = flag.String("trusted-cidr", "", "Comma-separated CIDRs allowed beyond localhost (e.g. 100.64.0.0/10 for a Tailscale tailnet)")
+
+	// Parsed form of -trusted-cidr; empty keeps the default localhost-only guard.
+	trustedNets []*net.IPNet
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
 	clients      = make(map[chan string]bool)
@@ -703,11 +707,19 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 func localOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if host != "127.0.0.1" && host != "::1" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+		if host == "127.0.0.1" || host == "::1" {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		if ip := net.ParseIP(host); ip != nil {
+			for _, n := range trustedNets {
+				if n.Contains(ip) {
+					next(w, r)
+					return
+				}
+			}
+		}
+		http.Error(w, "Forbidden", http.StatusForbidden)
 	}
 }
 
@@ -1279,6 +1291,17 @@ func main() {
 	}
 
 	flag.Parse()
+
+	for _, c := range strings.Split(*trustedCIDRs, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			log.Fatalf("invalid -trusted-cidr %q: %v", c, err)
+		}
+		trustedNets = append(trustedNets, n)
+	}
 
 	if *showVersion {
 		fmt.Printf("peekm %s (commit: %s, built: %s)\n", version, commit, date)
