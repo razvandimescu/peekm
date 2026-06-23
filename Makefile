@@ -2,8 +2,12 @@
 
 all: check
 
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS := -X main.commit=$(COMMIT) -X main.date=$(DATE)
+
 build:
-	go build ./...
+	go build -ldflags "$(LDFLAGS)" ./...
 
 test:
 	go test -race ./...

@@ -67,14 +67,24 @@ type timelineSession struct {
 	LastToolAgo    string // relative time of last tool call (for tooltip)
 	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
 	SessionType    string // "edit" or "conversation"
+	AISummary      string // LLM-generated summary (from Ollama)
 	Events         []timelineEntry
 	newestTime     time.Time
 	oldestTime     time.Time
 }
 
+// DateRange is rendered by the timeline template as `{{.DateRange}}`.
+// Defined as a method (not stored field) so any code path that builds a
+// timelineSession gets the correct value without remembering to populate.
+func (s timelineSession) DateRange() string {
+	return formatDateRange(s.oldestTime, s.newestTime)
+}
+
 type timelineDayGroup struct {
-	Label    string
-	Sessions []timelineSession
+	Label        string
+	DailySummary string // synthesized from session summaries
+	Sessions     []timelineSession
+	dateKey      string // unexported, "2006-01-02" for daily summary lookup
 }
 
 type timelineEntry struct {
@@ -91,16 +101,16 @@ type timelineEntry struct {
 }
 
 func dayLabel(t time.Time) string {
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	yesterday := today.AddDate(0, 0, -1)
+	eff := effectiveDate(t)
+	nowEff := effectiveDate(time.Now())
+	yesterdayEff := nowEff.AddDate(0, 0, -1)
 	switch {
-	case !t.Before(today):
+	case !eff.Before(nowEff):
 		return "Today"
-	case !t.Before(yesterday):
+	case !eff.Before(yesterdayEff):
 		return "Yesterday"
 	default:
-		return t.Format("Jan 2, 2006")
+		return eff.Format("Jan 2, 2006")
 	}
 }
 
@@ -112,14 +122,39 @@ func formatSessionDuration(d time.Duration) string {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm", int(d.Minutes()))
-	default:
+	case d < 24*time.Hour:
 		h := int(d.Hours())
 		m := int(d.Minutes()) % 60
 		if m == 0 {
 			return fmt.Sprintf("%dh", h)
 		}
 		return fmt.Sprintf("%dh%dm", h, m)
+	default:
+		days := int(d.Hours()) / 24
+		h := int(d.Hours()) % 24
+		if h == 0 {
+			return fmt.Sprintf("%dd", days)
+		}
+		return fmt.Sprintf("%dd %dh", days, h)
 	}
+}
+
+// formatDateRange returns "Mar 31 → Apr 7" for multi-day sessions, or
+// empty for same-day. Uses plain calendar day rather than effectiveDate
+// (which has a 5am shift used for journal grouping) — a session ending
+// at 3am should still render its real calendar date.
+func formatDateRange(oldest, newest time.Time) string {
+	if oldest.IsZero() || newest.IsZero() {
+		return ""
+	}
+	if calendarDay(oldest).Equal(calendarDay(newest)) {
+		return ""
+	}
+	return oldest.Format("Jan 2") + " → " + newest.Format("Jan 2")
+}
+
+func calendarDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 type transcriptInfo struct {
@@ -348,7 +383,8 @@ func assignSessionsToDays(sessions []timelineSession) []timelineDayGroup {
 	for i := range sessions {
 		label := dayLabel(sessions[i].newestTime)
 		if _, exists := bucketMap[label]; !exists {
-			bucketMap[label] = &timelineDayGroup{Label: label}
+			dk := effectiveDateKey(sessions[i].newestTime)
+			bucketMap[label] = &timelineDayGroup{Label: label, dateKey: dk}
 		}
 		bucketMap[label].Sessions = append(bucketMap[label].Sessions, sessions[i])
 	}
@@ -402,7 +438,34 @@ func buildSessionTimeline(events []SessionEvent, baseDir string, discoverConvers
 
 	groups := assignSessionsToDays(sessions)
 	markActiveSessions(groups)
+	if globalSummaryStore != nil {
+		populateAISummaries(groups)
+		populateDailySummaries(groups)
+	}
 	return groups
+}
+
+func populateAISummaries(groups []timelineDayGroup) {
+	all := globalSummaryStore.getAll()
+	for i := range groups {
+		for j := range groups[i].Sessions {
+			s := &groups[i].Sessions[j]
+			if s.FullSessionID != "" {
+				if summary, ok := all[s.FullSessionID]; ok && !isContaminated(summary.Summary) {
+					s.AISummary = summary.Summary
+				}
+			}
+		}
+	}
+}
+
+func populateDailySummaries(groups []timelineDayGroup) {
+	allDaily := globalSummaryStore.getAllDaily()
+	for i := range groups {
+		if d, ok := allDaily[groups[i].dateKey]; ok && !isContaminated(d.Summary) {
+			groups[i].DailySummary = d.Summary
+		}
+	}
 }
 
 // mergeSessionsByTime interleaves two session slices by newestTime (newest first).
