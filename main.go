@@ -703,6 +703,22 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// isTunnelRequest reports whether a request arrived via the public tunnel relay.
+func isTunnelRequest(r *http.Request) bool {
+	return r.Header.Get("X-Tunnel") == "true"
+}
+
+// blockTunnel rejects requests that arrived via the public tunnel relay.
+func blockTunnel(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isTunnelRequest(r) {
+			http.Error(w, "Not available over tunnel", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // localOnly rejects requests from non-localhost addresses
 func localOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -780,7 +796,7 @@ func registerRoutes() {
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
-	http.HandleFunc("/transcript/reply", localOnly(withRecovery(withCSRFCheck(handleTranscriptReply))))
+	http.HandleFunc("/transcript/reply", localOnly(withRecovery(withCSRFCheck(blockTunnel(handleTranscriptReply)))))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))

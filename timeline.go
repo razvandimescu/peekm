@@ -153,7 +153,7 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 	}
 
 	projectsDir := filepath.Join(home, ".claude", "projects")
-	encodedDir := strings.ReplaceAll(baseDir, "/", "-")
+	encodedDir := encodeProjectDir(baseDir)
 	sessionsDir := filepath.Join(projectsDir, encodedDir)
 
 	entries, err := os.ReadDir(sessionsDir)

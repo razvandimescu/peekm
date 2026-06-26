@@ -61,6 +61,12 @@ type contentBlock struct {
 	Images          []imageData   // for tool_result blocks containing images
 }
 
+// encodeProjectDir maps an absolute directory to the name Claude Code uses for its
+// project folder under ~/.claude/projects (slashes become dashes).
+func encodeProjectDir(dir string) string {
+	return strings.ReplaceAll(dir, "/", "-")
+}
+
 // resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
 // Tries the current browseDir first, then falls back to scanning all project dirs.
 func resolveTranscriptPath(sessionID string) string {
@@ -75,7 +81,7 @@ func resolveTranscriptPath(sessionID string) string {
 	fileMutex.RLock()
 	dir := browseDir
 	fileMutex.RUnlock()
-	candidate := filepath.Join(projectsDir, strings.ReplaceAll(dir, "/", "-"), fileName)
+	candidate := filepath.Join(projectsDir, encodeProjectDir(dir), fileName)
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -93,15 +94,13 @@ func deriveSessionCwd(jsonlPath string) (string, error) {
 			continue
 		}
 		lastCwd = entry.Cwd
-		if strings.ReplaceAll(entry.Cwd, "/", "-") == encodedParent {
+		if encodeProjectDir(entry.Cwd) == encodedParent {
 			matchCwd = entry.Cwd
+			break // canonical project dir found; no need to scan the rest of the transcript
 		}
 	}
 
-	cwd := matchCwd
-	if cwd == "" {
-		cwd = lastCwd
-	}
+	cwd := cmp.Or(matchCwd, lastCwd)
 	if cwd == "" {
 		return "", fmt.Errorf("no cwd in transcript")
 	}
@@ -136,13 +135,11 @@ func (s *sessionSteerer) runReply(cwd, resumeID, prompt string, fork bool) (newI
 
 	out, err := cmd.Output()
 	if err != nil {
-		stderr := ""
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			stderr = strings.TrimSpace(string(ee.Stderr))
-		}
-		if stderr != "" {
-			return "", "", fmt.Errorf("%w: %s", err, stderr)
+			if stderr := strings.TrimSpace(string(ee.Stderr)); stderr != "" {
+				return "", "", fmt.Errorf("%w: %s", err, stderr)
+			}
 		}
 		return "", "", err
 	}
@@ -167,15 +164,37 @@ func (s *sessionSteerer) runReply(cwd, resumeID, prompt string, fork bool) (newI
 	return newID, result, nil
 }
 
+// reply continues a session with fork-once-then-chain semantics: the first reply forks (the
+// original transcript is never written), later replies resume the peekm-owned branch in place.
+// Serialised per session. Returns the branch id and the assistant's final text.
+func (s *sessionSteerer) reply(cwd, session, text string) (branch, result string, err error) {
+	lock := s.lockFor(session)
+	lock.Lock()
+	defer lock.Unlock()
+
+	branch = s.branchOf(session)
+	fork := branch == ""
+	resumeID := session
+	if branch != "" {
+		resumeID = branch
+	}
+
+	newID, result, err := s.runReply(cwd, resumeID, text, fork)
+	if err != nil {
+		return "", "", err
+	}
+	if fork && newID != "" {
+		s.setBranch(session, newID)
+		branch = newID
+		log.Printf("reply: forked session %s -> branch %s", truncateSessionID(session), truncateSessionID(newID))
+	}
+	return branch, result, nil
+}
+
 // handleTranscriptReply continues a session from the transcript page (fork-once-then-chain).
 func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	// Steering is never available over the public tunnel.
-	if r.Header.Get("X-Tunnel") == "true" {
-		http.Error(w, "Not available over tunnel", http.StatusForbidden)
 		return
 	}
 
@@ -213,27 +232,11 @@ func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lock := steerer.lockFor(session)
-	lock.Lock()
-	defer lock.Unlock()
-
-	branch := steerer.branchOf(session)
-	fork := branch == ""
-	resumeID := session
-	if !fork {
-		resumeID = branch
-	}
-
-	newID, result, err := steerer.runReply(cwd, resumeID, text, fork)
+	branch, result, err := steerer.reply(cwd, session, text)
 	if err != nil {
 		log.Printf("reply: claude failed for session %s: %v", truncateSessionID(session), err)
 		http.Error(w, "Claude failed to reply", http.StatusBadGateway)
 		return
-	}
-	if fork && newID != "" {
-		steerer.setBranch(session, newID)
-		branch = newID
-		log.Printf("reply: forked session %s -> branch %s", truncateSessionID(session), truncateSessionID(newID))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

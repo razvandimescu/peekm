@@ -475,7 +475,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
 		FileName:         filepath.Base(entry.FilePath),
 		FilePath:         entry.FilePath,
-		IsTunnel:         r.Header.Get("X-Tunnel") == "true",
+		IsTunnel:         isTunnelRequest(r),
 	}
 	var renderBuf bytes.Buffer
 	if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
