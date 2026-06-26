@@ -164,3 +164,66 @@ func TestParseGitOriginURL(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildRibbon(t *testing.T) {
+	t.Run("empty yields nil", func(t *testing.T) {
+		if got := buildRibbon(nil); got != nil {
+			t.Errorf("got %v, want nil", got)
+		}
+	})
+
+	t.Run("one cell per event with tool classes and normalized heights", func(t *testing.T) {
+		events := []timelineEntry{
+			{ToolName: "Write", EditCount: 1},
+			{ToolName: "Edit", EditCount: 5},
+			{ToolName: "Bash", EditCount: 2},
+			{ToolName: "Grep", EditCount: 1},
+		}
+		got := buildRibbon(events)
+		if len(got) != 4 {
+			t.Fatalf("got %d cells, want 4", len(got))
+		}
+		wantTools := []string{"write", "edit", "bash", "other"}
+		for i, c := range got {
+			if c.Tool != wantTools[i] {
+				t.Errorf("cell %d tool = %q, want %q", i, c.Tool, wantTools[i])
+			}
+			if c.Height < 16 || c.Height > 100 {
+				t.Errorf("cell %d height = %d, out of [16,100]", i, c.Height)
+			}
+		}
+		// Busiest column (Edit:5) must be the tallest.
+		if got[1].Height != 100 {
+			t.Errorf("busiest cell height = %d, want 100", got[1].Height)
+		}
+	})
+
+	t.Run("deterministic", func(t *testing.T) {
+		events := []timelineEntry{
+			{ToolName: "Edit", EditCount: 3},
+			{ToolName: "Write", EditCount: 3},
+			{ToolName: "Bash", EditCount: 1},
+		}
+		a := buildRibbon(events)
+		b := buildRibbon(events)
+		if len(a) != len(b) {
+			t.Fatalf("non-deterministic length")
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				t.Errorf("cell %d differs: %+v vs %+v", i, a[i], b[i])
+			}
+		}
+	})
+
+	t.Run("buckets long sessions to the cap", func(t *testing.T) {
+		events := make([]timelineEntry, ribbonMaxCells*3)
+		for i := range events {
+			events[i] = timelineEntry{ToolName: "Edit", EditCount: 1}
+		}
+		got := buildRibbon(events)
+		if len(got) > ribbonMaxCells {
+			t.Errorf("got %d cells, want <= %d", len(got), ribbonMaxCells)
+		}
+	})
+}

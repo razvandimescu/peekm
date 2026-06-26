@@ -746,8 +746,8 @@ func withGzip(handler http.Handler) http.Handler {
 			handler.ServeHTTP(w, r)
 			return
 		}
-		// Skip SSE — must be unbuffered
-		if r.URL.Path == "/events" {
+		// Skip SSE (must be unbuffered) and already-compressed font assets
+		if r.URL.Path == "/events" || strings.HasPrefix(r.URL.Path, "/assets/fonts/") {
 			handler.ServeHTTP(w, r)
 			return
 		}
@@ -780,6 +780,7 @@ func registerRoutes() {
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
+	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
@@ -972,6 +973,25 @@ func isWhitelistedLocked(path string) bool {
 		}
 	}
 	return isMemoryFile(path)
+}
+
+// serveFontAsset serves an embedded woff2 from theme/fonts with a long-lived,
+// immutable cache. The filename is validated to a single .woff2 segment to
+// prevent traversal; localOnly already restricts this to the owner's browser.
+func serveFontAsset(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/assets/fonts/")
+	if name == "" || strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".woff2") {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := themeFS.ReadFile("theme/fonts/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "font/woff2")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Write(data)
 }
 
 // mustReadThemeFile reads a file from themeFS or fatally logs

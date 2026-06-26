@@ -68,8 +68,16 @@ type timelineSession struct {
 	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
 	SessionType    string // "edit" or "conversation"
 	Events         []timelineEntry
+	Ribbon         []ribbonCell // spatial activity strip (chronological)
 	newestTime     time.Time
 	oldestTime     time.Time
+}
+
+// ribbonCell is one column of a session's activity ribbon: a tool-colored bar
+// whose height encodes relative edit volume at that point in the session.
+type ribbonCell struct {
+	Tool   string // "write" | "edit" | "bash" | "other" (CSS class suffix)
+	Height int    // 16..100 (percent of ribbon height)
 }
 
 type timelineDayGroup struct {
@@ -285,6 +293,82 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 	})
 }
 
+// ribbonToolClass maps a tool name to one of the four ribbon color groups.
+func ribbonToolClass(tool string) string {
+	switch tool {
+	case "Write":
+		return "write"
+	case "Edit", "MultiEdit", "NotebookEdit":
+		return "edit"
+	case "Bash":
+		return "bash"
+	default:
+		return "other"
+	}
+}
+
+// ribbonMaxCells caps a ribbon's width so long sessions stay legible; events
+// beyond this are bucketed proportionally rather than truncated.
+const ribbonMaxCells = 48
+
+// buildRibbon turns a session's chronological (aggregated) events into a fixed
+// set of activity columns. Cell height is normalized to the busiest column;
+// cell color is the dominant tool in that column. Deterministic output.
+func buildRibbon(events []timelineEntry) []ribbonCell {
+	n := len(events)
+	if n == 0 {
+		return nil
+	}
+	cells := n
+	if cells > ribbonMaxCells {
+		cells = ribbonMaxCells
+	}
+	type bucket struct {
+		counts map[string]int
+		total  int
+	}
+	buckets := make([]bucket, cells)
+	for i := range buckets {
+		buckets[i].counts = map[string]int{}
+	}
+	for i, e := range events {
+		edits := e.EditCount
+		if edits < 1 {
+			edits = 1
+		}
+		bi := i * cells / n
+		buckets[bi].counts[ribbonToolClass(e.ToolName)] += edits
+		buckets[bi].total += edits
+	}
+
+	maxTotal := 1
+	for _, b := range buckets {
+		if b.total > maxTotal {
+			maxTotal = b.total
+		}
+	}
+
+	order := []string{"write", "edit", "bash", "other"}
+	out := make([]ribbonCell, 0, cells)
+	for _, b := range buckets {
+		if b.total == 0 {
+			continue
+		}
+		dom, domN := "other", -1
+		for _, cls := range order {
+			if b.counts[cls] > domN {
+				dom, domN = cls, b.counts[cls]
+			}
+		}
+		h := 16 + b.total*84/maxTotal
+		if h > 100 {
+			h = 100
+		}
+		out = append(out, ribbonCell{Tool: dom, Height: h})
+	}
+	return out
+}
+
 func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSession {
 	transcriptCache := buildTranscriptCache(events)
 
@@ -336,6 +420,7 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 		}
 		sort.Strings(toolNames)
 		s.Tools = toolNames
+		s.Ribbon = buildRibbon(s.Events)
 
 		sessions = append(sessions, *s)
 	}
