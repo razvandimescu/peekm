@@ -780,6 +780,7 @@ func registerRoutes() {
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
+	http.HandleFunc("/transcript/reply", localOnly(withRecovery(withCSRFCheck(handleTranscriptReply))))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))

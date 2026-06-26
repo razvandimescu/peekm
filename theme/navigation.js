@@ -313,6 +313,7 @@ function reinitializeScripts() {
         // Initialize transcript lightbox on SPA navigation
         if (viewType === 'transcript') {
             initTranscriptLightbox();
+            initReplyBox();
         }
 
         // Re-render mermaid diagrams after SPA content swap
@@ -1117,6 +1118,49 @@ async function stopSharing() {
 function copyShareURL(inputId) {
     var url = document.getElementById(inputId).value;
     navigator.clipboard.writeText(url).then(function() { showToast('URL copied'); });
+}
+
+async function submitReply() {
+    var box = document.querySelector('.transcript-reply');
+    var input = document.getElementById('reply-input');
+    var btn = document.getElementById('reply-send');
+    if (!box || !input || !btn) return;
+    var session = box.dataset.session;
+    var text = input.value.trim();
+    if (!text) { input.focus(); return; }
+
+    btn.disabled = true;
+    input.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+        var resp = await fetch('/transcript/reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: session, text: text })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        input.value = '';
+        showToast('Reply sent');
+        // Re-render the transcript so the new turns appear.
+        await navigate(window.location.pathname + window.location.search, false);
+    } catch (err) {
+        btn.disabled = false;
+        input.disabled = false;
+        btn.textContent = 'Send';
+        showErrorToast('Reply failed: ' + (err.message || err));
+    }
+}
+
+function initReplyBox() {
+    var input = document.getElementById('reply-input');
+    if (!input || input.dataset.bound) return;
+    input.dataset.bound = '1';
+    input.addEventListener('keydown', function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault();
+            submitReply();
+        }
+    });
 }
 
 async function checkShareStatus() {

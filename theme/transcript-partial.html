@@ -87,6 +87,15 @@
             {{end}}
         </div>
         <div id="transcript-bottom"></div>
+        {{if .SessionID}}
+        <div class="transcript-reply" data-session="{{.SessionID}}">
+            <textarea id="reply-input" class="transcript-reply-input" rows="3" placeholder="Reply to this session&hellip;" aria-label="Reply to this session"></textarea>
+            <div class="transcript-reply-actions">
+                <span class="transcript-reply-hint">Continues on a safe branch &middot; &#8984;&#9166; to send</span>
+                <button id="reply-send" class="transcript-reply-btn" onclick="submitReply()">Send</button>
+            </div>
+        </div>
+        {{end}}
         <div id="transcript-lightbox" class="transcript-lightbox" hidden><img src="" alt=""></div>
         {{else}}
         <div class="transcript-empty">
