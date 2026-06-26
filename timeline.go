@@ -293,17 +293,20 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 	})
 }
 
-// ribbonToolClass maps a tool name to one of the four ribbon color groups.
-func ribbonToolClass(tool string) string {
+// ribbonClassNames are the four ribbon color groups, indexed by ribbonToolClass.
+var ribbonClassNames = [4]string{"write", "edit", "bash", "other"}
+
+// ribbonToolClass maps a tool name to a ribbonClassNames index.
+func ribbonToolClass(tool string) int {
 	switch tool {
 	case "Write":
-		return "write"
+		return 0
 	case "Edit", "MultiEdit", "NotebookEdit":
-		return "edit"
+		return 1
 	case "Bash":
-		return "bash"
+		return 2
 	default:
-		return "other"
+		return 3
 	}
 }
 
@@ -314,57 +317,43 @@ const ribbonMaxCells = 48
 // buildRibbon turns a session's chronological (aggregated) events into a fixed
 // set of activity columns. Cell height is normalized to the busiest column;
 // cell color is the dominant tool in that column. Deterministic output.
+//
+// Bucket indices i*cells/n are surjective onto [0,cells), so every column gets
+// at least one event — no empty cells, no clamp needed (b.total <= maxTotal).
 func buildRibbon(events []timelineEntry) []ribbonCell {
 	n := len(events)
 	if n == 0 {
 		return nil
 	}
-	cells := n
-	if cells > ribbonMaxCells {
-		cells = ribbonMaxCells
-	}
-	type bucket struct {
-		counts map[string]int
-		total  int
-	}
-	buckets := make([]bucket, cells)
-	for i := range buckets {
-		buckets[i].counts = map[string]int{}
-	}
+	cells := min(n, ribbonMaxCells)
+	counts := make([][4]int, cells)
+	totals := make([]int, cells)
 	for i, e := range events {
 		edits := e.EditCount
 		if edits < 1 {
 			edits = 1
 		}
 		bi := i * cells / n
-		buckets[bi].counts[ribbonToolClass(e.ToolName)] += edits
-		buckets[bi].total += edits
+		counts[bi][ribbonToolClass(e.ToolName)] += edits
+		totals[bi] += edits
 	}
 
 	maxTotal := 1
-	for _, b := range buckets {
-		if b.total > maxTotal {
-			maxTotal = b.total
+	for _, t := range totals {
+		if t > maxTotal {
+			maxTotal = t
 		}
 	}
 
-	order := []string{"write", "edit", "bash", "other"}
-	out := make([]ribbonCell, 0, cells)
-	for _, b := range buckets {
-		if b.total == 0 {
-			continue
-		}
-		dom, domN := "other", -1
-		for _, cls := range order {
-			if b.counts[cls] > domN {
-				dom, domN = cls, b.counts[cls]
+	out := make([]ribbonCell, cells)
+	for i := range out {
+		dom, domN := 0, -1
+		for cls, c := range counts[i] {
+			if c > domN {
+				dom, domN = cls, c
 			}
 		}
-		h := 16 + b.total*84/maxTotal
-		if h > 100 {
-			h = 100
-		}
-		out = append(out, ribbonCell{Tool: dom, Height: h})
+		out[i] = ribbonCell{Tool: ribbonClassNames[dom], Height: 16 + totals[i]*84/maxTotal}
 	}
 	return out
 }

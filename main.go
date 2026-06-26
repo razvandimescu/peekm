@@ -980,7 +980,7 @@ func isWhitelistedLocked(path string) bool {
 // prevent traversal; localOnly already restricts this to the owner's browser.
 func serveFontAsset(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/assets/fonts/")
-	if name == "" || strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".woff2") {
+	if strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".woff2") {
 		http.NotFound(w, r)
 		return
 	}

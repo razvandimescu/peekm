@@ -2068,41 +2068,6 @@
             border-radius: 0 2px 2px 0;
         }
 
-        /* Live-edit badge — files just touched by an AI session.
-           The server marks them with data-live on the tree link. */
-        .tree-file a[data-live] {
-            position: relative;
-        }
-        .tree-live-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            margin-left: 6px;
-            font-family: var(--font-mono);
-            font-size: 9px;
-            font-weight: 500;
-            letter-spacing: 0.4px;
-            text-transform: uppercase;
-            color: var(--peekm-amber);
-            background: var(--peekm-amber-soft);
-            border: 1px solid var(--peekm-amber-border);
-            padding: 0 5px;
-            border-radius: 20px;
-            vertical-align: middle;
-        }
-        .tree-live-badge::before {
-            content: "";
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: var(--peekm-amber);
-            animation: tree-live-pulse 1.8s ease-in-out infinite;
-        }
-        @keyframes tree-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        @media (prefers-reduced-motion: reduce) {
-            .tree-live-badge::before { animation: none; }
-        }
-
         /* ---- Calm content surface: dark headings (kill the accent bleed),
                narrower reading column, generous breathing room ---- */
         h1 {
