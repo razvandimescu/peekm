@@ -25,22 +25,24 @@
 
 [data-theme="dark"] {
     color-scheme: dark !important;
-    --focus-outlineColor: #1f6feb !important;
-    --fgColor-default: #f0f6fc !important;
-    --fgColor-muted: #9198a1 !important;
-    --fgColor-accent: #4493f8 !important;
+    --focus-outlineColor: #3f7af0 !important;
+    /* Navy-tinted dark theme (peekm identity) — surfaces carry a blue cast
+       instead of GitHub's neutral near-black. Semantic colors stay GitHub's. */
+    --fgColor-default: #e8eef8 !important;
+    --fgColor-muted: #98a6c4 !important;
+    --fgColor-accent: #5b91ff !important;
     --fgColor-success: #3fb950 !important;
     --fgColor-attention: #d29922 !important;
     --fgColor-danger: #f85149 !important;
     --fgColor-done: #ab7df8 !important;
-    --bgColor-default: #0d1117 !important;
-    --bgColor-muted: #151b23 !important;
-    --bgColor-neutral-muted: #656c7633 !important;
+    --bgColor-default: #0f1a2c !important;
+    --bgColor-muted: #0a1220 !important;
+    --bgColor-neutral-muted: #5b91ff1f !important;
     --bgColor-attention-muted: #bb800926 !important;
-    --borderColor-default: #3d444d !important;
-    --borderColor-muted: #3d444db3 !important;
-    --borderColor-neutral-muted: #3d444db3 !important;
-    --borderColor-accent-emphasis: #1f6feb !important;
+    --borderColor-default: #273a55 !important;
+    --borderColor-muted: #1c2a44b3 !important;
+    --borderColor-neutral-muted: #1c2a44b3 !important;
+    --borderColor-accent-emphasis: #3f7af0 !important;
     --borderColor-success-emphasis: #238636 !important;
     --borderColor-attention-emphasis: #9e6a03 !important;
     --borderColor-danger-emphasis: #da3633 !important;
