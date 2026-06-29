@@ -790,6 +790,8 @@ a.timeline-session-id:hover {
 
 .transcript-text {
     line-height: 1.7;
+    background: transparent;
+    overflow-wrap: anywhere;
 }
 .transcript-text p:first-child { margin-top: 0; }
 .transcript-text p:last-child { margin-bottom: 0; }
