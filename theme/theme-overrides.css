@@ -632,14 +632,27 @@ a.timeline-session-id:hover {
 
 .transcript-nav {
     display: flex;
+    align-items: center;
     gap: 16px;
     font-size: 0.85em;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin-top: 12px;
+    padding: 10px 0;
+    background: var(--bgColor-default);
+    border-bottom: 1px solid var(--borderColor-muted);
 }
 .transcript-nav a {
     color: var(--fgColor-accent);
     text-decoration: none;
 }
 .transcript-nav a:hover { text-decoration: underline; }
+.transcript-nav-jumps {
+    margin-left: auto;
+    display: flex;
+    gap: 16px;
+}
 
 .transcript-stats {
     display: flex;
@@ -728,6 +741,30 @@ a.timeline-session-id:hover {
     overflow-x: auto;
     font-size: 0.85em;
 }
+
+/* Long pasted user messages: faded preview + expand (CSS-only) */
+.transcript-longtext:not(:has(input:checked)) > .transcript-text {
+    max-height: 280px;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+    mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.transcript-longtext-toggle {
+    display: inline-flex;
+    margin-top: 8px;
+    padding: 4px 10px;
+    font-size: 0.85em;
+    color: var(--fgColor-accent);
+    background: var(--bgColor-default);
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+.transcript-longtext-toggle:hover { border-color: var(--borderColor-emphasis); }
+.transcript-longtext .lt-less { display: none; }
+.transcript-longtext:has(input:checked) .lt-more { display: none; }
+.transcript-longtext:has(input:checked) .lt-less { display: inline; }
 /* Thinking blocks: minimal, deemphasized */
 .transcript-thinking {
     margin: 4px 0;

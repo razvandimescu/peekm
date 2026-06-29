@@ -403,9 +403,9 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 		switch peek.Type {
 		case "text":
 			if peek.Text != "" {
-				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
-				markCollapsible(&block, peek.Text)
-				blocks = append(blocks, block)
+				// Assistant prose is the signal we want read in full; only the
+				// plain-string user prompt path collapses (see parseContentBlocks).
+				blocks = append(blocks, contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)})
 			}
 		case "thinking":
 			if peek.Thinking != "" {
