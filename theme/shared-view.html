@@ -445,21 +445,18 @@
                 });
             }
 
-            // Lazy-load html-to-image (handles foreignObject) + html-docx-js, both with SRI.
+            // Lazy-load html-to-image (handles foreignObject) + html-docx-js. Both are
+            // vendored into the binary and served same-origin under /s/{token}/_vendor/,
+            // so the export needs no third-party CDN and no SRI to drift.
             // html-to-image is needed because mermaid uses <foreignObject> for HTML labels,
             // which a plain <img src="svg-blob"> + canvas pipeline can't rasterise.
             var libsPromise = null;
             function loadLibs() {
                 if (libsPromise) return libsPromise;
+                var vendor = '/s/{{.Token}}/_vendor/';
                 libsPromise = Promise.all([
-                    loadScript(
-                        'https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.min.js',
-                        'sha384-wNc5eWDV2JUK6HVVRPhI8Bfc08Br5nd66LmdO7jDYWK0fd5uNvfqKKS9QXEOLwfO'
-                    ),
-                    loadScript(
-                        'https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js',
-                        'sha384-T9phw4PsWkw02w0Oq523aDlYzJ5Q4v/BUJZ3tQhenX0My0kgUnxA7CNO64LxS+O3'
-                    )
+                    loadScript(vendor + 'html-to-image.min.js'),
+                    loadScript(vendor + 'html-docx.min.js')
                 ]).then(function() {
                     return { htmlToImage: window.htmlToImage, htmlDocx: window.htmlDocx };
                 }).catch(function(err) {
@@ -469,12 +466,10 @@
                 return libsPromise;
             }
 
-            function loadScript(src, integrity) {
+            function loadScript(src) {
                 return new Promise(function(resolve, reject) {
                     var s = document.createElement('script');
                     s.src = src;
-                    s.integrity = integrity;
-                    s.crossOrigin = 'anonymous';
                     s.onload = resolve;
                     s.onerror = function() { reject(new Error('Failed to load ' + src)); };
                     document.head.appendChild(s);

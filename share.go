@@ -410,6 +410,14 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Vendored libraries (DOCX export deps), embedded in the binary and served
+	// same-origin so the shared view needs no third-party CDN. Reserved prefix,
+	// checked before user-asset passthrough.
+	if name := strings.TrimPrefix(assetPath, "_vendor/"); name != assetPath {
+		serveVendoredAsset(w, r, name)
+		return
+	}
+
 	// Asset passthrough: /s/{token}/style.css
 	if assetPath != "" {
 		serveSharedAsset(w, r, entry, assetPath)
@@ -521,4 +529,29 @@ func serveSharedAsset(w http.ResponseWriter, r *http.Request, entry *shareEntry,
 
 	w.Header().Set("Content-Type", contentType)
 	http.ServeFile(w, r, resolved)
+}
+
+// vendoredAssets allowlists the embedded JS libraries servable under
+// /s/{token}/_vendor/. The allowlist also blocks path traversal: only these
+// exact names resolve, so "../shared-view.html" and friends never read.
+var vendoredAssets = map[string]bool{
+	"html-docx.min.js":     true,
+	"html-to-image.min.js": true,
+}
+
+// serveVendoredAsset serves a binary-embedded third-party library by allowlisted
+// name. Content is frozen at build time, so it is safe to cache immutably.
+func serveVendoredAsset(w http.ResponseWriter, r *http.Request, name string) {
+	if !vendoredAssets[name] {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := themeFS.ReadFile("theme/vendor/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Write(data)
 }
