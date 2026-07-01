@@ -87,6 +87,33 @@ func TestDeriveSessionCwdPrefersEncodedMatch(t *testing.T) {
 	}
 }
 
+// TestResolveEncodedPathFoldsUnderscore guards the property deriveSessionCwd relies on:
+// Claude Code folds '_' (and '.') into '-' when encoding project dirs, so recovering the
+// real cwd requires trying both separators and preferring the longest on-disk match.
+// A plain "/"->"-" comparison (the earlier bug) never matched an underscore-named project.
+func TestResolveEncodedPathFoldsUnderscore(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{"rinkt_neville", "rinkt_bot", "rinkt_bot_api"} {
+		if err := os.MkdirAll(filepath.Join(root, "projects", p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		encoded string
+		want    string
+	}{
+		{"projects-rinkt-neville", filepath.Join(root, "projects", "rinkt_neville")},
+		{"projects-rinkt-bot", filepath.Join(root, "projects", "rinkt_bot")},
+		{"projects-rinkt-bot-api", filepath.Join(root, "projects", "rinkt_bot_api")}, // longest match
+	}
+	for _, tc := range cases {
+		got, ok := resolveEncodedPath(strings.Split(tc.encoded, "-"), 0, root)
+		if !ok || got != tc.want {
+			t.Errorf("resolveEncodedPath(%q) = %q ok=%v, want %q", tc.encoded, got, ok, tc.want)
+		}
+	}
+}
+
 func TestSteererForkOnceThenChain(t *testing.T) {
 	s := &sessionSteerer{branches: map[string]string{}, locks: map[string]*sync.Mutex{}}
 	const orig = "orig-session-id"

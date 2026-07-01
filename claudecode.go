@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,12 +67,19 @@ func (s *sessionSteerer) setBranch(id, branch string) {
 	s.branches[id] = branch
 }
 
-// deriveSessionCwd finds the project directory a session belongs to. A transcript can
-// span several cwds (worktrees, subdirs); the canonical one is the cwd whose "/"->"-"
-// encoding matches the JSONL's parent directory name. Falls back to the last cwd seen.
-// The result is validated to be within $HOME.
+// deriveSessionCwd finds the project directory a session belongs to. The JSONL's parent
+// directory name is Claude Code's encoding of the project dir, where /, _ and . all collapse
+// to -; resolveProjectDir decodes it back to the real path (the same resolver the memory
+// browser relies on to disambiguate e.g. rinkt_bot vs rinkt_bot_api). Falls back to the last
+// cwd recorded in the transcript when the encoded dir no longer resolves on disk. The result
+// is validated to be within $HOME.
 func deriveSessionCwd(jsonlPath string) (string, error) {
 	encodedParent := filepath.Base(filepath.Dir(jsonlPath))
+	if canonical := resolveProjectDir(encodedParent); canonical != "" {
+		if validated, err := validateAndResolvePath(canonical); err == nil {
+			return validated, nil
+		}
+	}
 
 	f, err := os.Open(jsonlPath)
 	if err != nil {
@@ -81,7 +87,7 @@ func deriveSessionCwd(jsonlPath string) (string, error) {
 	}
 	defer f.Close()
 
-	var matchCwd, lastCwd string
+	var lastCwd string
 	dec := json.NewDecoder(f)
 	for {
 		var entry struct {
@@ -90,22 +96,15 @@ func deriveSessionCwd(jsonlPath string) (string, error) {
 		if dec.Decode(&entry) != nil {
 			break
 		}
-		if entry.Cwd == "" {
-			continue
-		}
-		lastCwd = entry.Cwd
-		if encodeProjectDir(entry.Cwd) == encodedParent {
-			matchCwd = entry.Cwd
-			break // canonical project dir found; no need to scan the rest of the transcript
+		if entry.Cwd != "" {
+			lastCwd = entry.Cwd
 		}
 	}
-
-	cwd := cmp.Or(matchCwd, lastCwd)
-	if cwd == "" {
+	if lastCwd == "" {
 		return "", fmt.Errorf("no cwd in transcript")
 	}
 
-	validated, err := validateAndResolvePath(cwd)
+	validated, err := validateAndResolvePath(lastCwd)
 	if err != nil {
 		return "", fmt.Errorf("cwd outside boundary: %w", err)
 	}
@@ -197,6 +196,10 @@ func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Cap the body before reading it; maxReplyLength alone is only enforced post-decode.
+	// Slack covers the JSON envelope plus worst-case escaping of a max-length reply.
+	r.Body = http.MaxBytesReader(w, r.Body, 2*maxReplyLength+1024)
 
 	var req struct {
 		Session string `json:"session"`
