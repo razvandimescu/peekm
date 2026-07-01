@@ -108,6 +108,9 @@ AI tracking is on by default when `~/.claude` exists. Disable with `-no-ai-track
 | `-port` | `6419` | Port to serve on |
 | `-browser` | `true` | Auto-open browser |
 | `-no-ai-tracking` | `false` | Disable AI tracking |
+| `-trusted-cidr` | `""` | Comma-separated CIDRs allowed beyond localhost |
+
+By default peekm only answers requests from `localhost`. `-trusted-cidr` widens that guard to the ranges you list — e.g. `peekm -trusted-cidr 100.64.0.0/10 .` to reach it from devices on your Tailscale tailnet. Only add ranges you trust; anything in them can browse the served directory.
 
 **Sharing** — click the share button in the top bar.
 
