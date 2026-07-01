@@ -1,0 +1,15 @@
+name: Release Fractal
+
+# Appends a deterministic "release fingerprint" fractal + a 10-bucket changelog to the
+# release notes after goreleaser publishes. All logic lives in the reusable workflow;
+# goreleaser's own changelog is disabled in .goreleaser.yml so the two don't both emit one.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  fractal:
+    uses: razvandimescu/fractal-of-the-day/.github/workflows/release-fractal.reusable.yml@main
