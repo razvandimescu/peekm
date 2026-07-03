@@ -2175,12 +2175,16 @@
             color: var(--fgColor-muted);
         }
         /* The filename now lives in the breadcrumb; hide the in-content title
-           and subtitle for document views (kept in DOM for existing JS). */
+           to avoid duplication. The subtitle stays — it carries the file's
+           absolute path, which the breadcrumb (dir-relative) does not. */
         [data-view="file"] .file-title,
-        [data-view="preview"] .file-title,
+        [data-view="preview"] .file-title {
+            display: none;
+        }
+        /* Absolute path caption sits flush at the top of the document. */
         [data-view="file"] .subtitle,
         [data-view="preview"] .subtitle {
-            display: none;
+            margin-top: 0;
         }
         @media (max-width: 767px) {
             .top-bar-breadcrumb { display: none; }
