@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -152,8 +153,15 @@ func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
 	return cache
 }
 
+// dirWithinBase reports whether dir is baseDir or lives under it.
+func dirWithinBase(dir, baseDir string) bool {
+	return filepath.Clean(dir) == filepath.Clean(baseDir) || isWithinDir(dir, baseDir)
+}
+
 // discoverTranscriptSessions scans Claude transcript files for sessions
 // not already tracked via events.jsonl (i.e. conversation-only sessions).
+// Every project under baseDir is scanned, matching how eventsForDir walks the
+// subtree — browsing a parent folder must still surface its projects' sessions.
 func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool) []timelineSession {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -161,9 +169,32 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 	}
 
 	projectsDir := filepath.Join(home, ".claude", "projects")
-	encodedDir := strings.ReplaceAll(baseDir, "/", "-")
-	sessionsDir := filepath.Join(projectsDir, encodedDir)
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
 
+	var sessions []timelineSession
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectDir := resolveProjectDir(entry.Name())
+		if projectDir == "" || !dirWithinBase(projectDir, baseDir) {
+			continue
+		}
+		sessions = append(sessions, transcriptSessionsIn(
+			filepath.Join(projectsDir, entry.Name()), projectDir, knownSessionIDs)...)
+	}
+	// Sort newest first for merge
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].newestTime.After(sessions[j].newestTime)
+	})
+	return sessions
+}
+
+// transcriptSessionsIn builds a session per transcript in one project's session directory.
+func transcriptSessionsIn(sessionsDir, projectDir string, knownSessionIDs map[string]bool) []timelineSession {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		return nil
@@ -198,7 +229,7 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 			SessionID:     truncateSessionID(sessionID),
 			FullSessionID: sessionID,
 			Summary:       summary,
-			Project:       filepath.Base(baseDir),
+			Project:       filepath.Base(projectDir),
 			HasTranscript: true,
 			SessionType:   "conversation",
 			newestTime:    newest,
@@ -206,10 +237,6 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 			Duration:      formatSessionDuration(newest.Sub(oldest)),
 		})
 	}
-	// Sort newest first for merge
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].newestTime.After(sessions[j].newestTime)
-	})
 	return sessions
 }
 
@@ -223,8 +250,19 @@ func parseTranscriptTimestamp(raw json.RawMessage) (time.Time, bool) {
 	return parseTimestamp(ts.Timestamp)
 }
 
+// transcriptHeadRecords bounds the head scan: summary and the opening timestamp
+// both live in the first handful of records.
+const transcriptHeadRecords = 50
+
+// transcriptTailBytes is the window read from the end of a transcript to find
+// its closing timestamp.
+const transcriptTailBytes = 64 << 10
+
+var transcriptTimestampRe = regexp.MustCompile(`"timestamp":"([^"]+)"`)
+
 // extractTranscriptMeta extracts summary, first timestamp, and last timestamp
-// from a transcript JSONL in a single pass.
+// from a transcript JSONL. Transcripts run to hundreds of megabytes in
+// aggregate, so it reads a bounded head and tail rather than the whole file.
 func extractTranscriptMeta(path string) (summary string, first, last time.Time) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -233,22 +271,44 @@ func extractTranscriptMeta(path string) (summary string, first, last time.Time) 
 	defer f.Close()
 
 	dec := json.NewDecoder(f)
-	for i := 0; ; i++ {
+	for i := 0; i < transcriptHeadRecords; i++ {
 		var raw json.RawMessage
 		if dec.Decode(&raw) != nil {
 			break
 		}
-		if t, ok := parseTranscriptTimestamp(raw); ok {
-			if first.IsZero() {
-				first = t
-			}
-			last = t
+		if t, ok := parseTranscriptTimestamp(raw); ok && first.IsZero() {
+			first = t
 		}
-		if summary == "" && i < 50 {
+		if summary == "" {
 			summary = extractSummaryFromRaw(raw)
 		}
 	}
-	return
+	return summary, first, lastTranscriptTimestamp(f)
+}
+
+// lastTranscriptTimestamp scans the tail of an open transcript for the newest
+// timestamp, matching on the raw text so a truncated leading record is harmless.
+func lastTranscriptTimestamp(f *os.File) time.Time {
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}
+	}
+	offset := info.Size() - transcriptTailBytes
+	if offset < 0 {
+		offset = 0
+	}
+	buf := make([]byte, info.Size()-offset)
+	if _, err := f.ReadAt(buf, offset); err != nil {
+		return time.Time{}
+	}
+
+	matches := transcriptTimestampRe.FindAllSubmatch(buf, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if t, ok := parseTimestamp(string(matches[i][1])); ok {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 type sessionBuild struct {
