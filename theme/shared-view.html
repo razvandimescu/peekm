@@ -24,7 +24,6 @@
         /* ===== Branded hero — the public front door ===== */
         .s-hero {
             position: relative;
-            overflow: hidden;
             color: #fff;
             flex-shrink: 0;
             background:
@@ -46,7 +45,6 @@
         }
         .s-hero-wrap {
             position: relative;
-            z-index: 1;
             max-width: 980px;
             margin: 0 auto;
             padding: 0 32px;
@@ -74,6 +72,23 @@
         }
         .s-brand-mark b { color: #5b91ff; }
         .s-brand-by { font-size: 11px; color: #5e84b4; }
+
+        .s-nav-right { display: flex; align-items: center; gap: 10px; }
+        .s-theme-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 50%;
+            border: 1px solid rgba(91,145,255,0.28);
+            background: rgba(91,145,255,0.10);
+            color: #9fbdf5;
+            cursor: pointer;
+            transition: background .15s, color .15s;
+        }
+        .s-theme-toggle:hover { background: rgba(91,145,255,0.22); color: #fff; }
 
         .s-badge {
             display: inline-flex;
@@ -334,9 +349,12 @@
                     <span class="s-brand-mark">peek<b>m</b></span>
                     <span class="s-brand-by">shared view</span>
                 </a>
-                {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
-                {{else}}<span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
-                {{end}}
+                <div class="s-nav-right">
+                    {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
+                    {{else}}<span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
+                    {{end}}
+                    <button type="button" class="s-theme-toggle" id="s-theme-toggle" aria-label="Switch theme"></button>
+                </div>
             </nav>
 
             <span class="s-badge"><span class="dot"></span><strong>{{.FileName}}</strong></span>
@@ -383,6 +401,51 @@
     </footer>{{end}}
 
     <script>{{.ThemeManagerJS}}</script>
+    <script>
+        // Recipient-facing theme switch: starts on 'auto', pins light/dark once clicked.
+        (function() {
+            var SUN = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8ZM2.343 13.657a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 0 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0Zm9.193-9.193a.75.75 0 0 1 0-1.06l1.061-1.061a.75.75 0 0 1 1.06 1.06l-1.06 1.061a.75.75 0 0 1-1.06 0Z"/></svg>';
+            var MOON = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.221-7.832.749.749 0 0 1 0-.785v-.215Z"/></svg>';
+            var btn = document.getElementById('s-theme-toggle');
+            if (!btn) return;
+
+            function isDark() {
+                var mode = document.documentElement.getAttribute('data-color-mode');
+                if (mode === 'dark') return true;
+                if (mode === 'light') return false;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+            function paint() {
+                var dark = isDark();
+                btn.innerHTML = dark ? SUN : MOON;
+                btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+                // .markdown-body redeclares the GitHub color vars from prefers-color-scheme,
+                // so a forced theme only reaches the card if the attribute lands on it too.
+                var card = document.getElementById('shared-content');
+                if (!card) return;
+                var mode = document.documentElement.getAttribute('data-color-mode');
+                if (mode === 'light' || mode === 'dark') card.setAttribute('data-theme', mode);
+                else card.removeAttribute('data-theme');
+            }
+            btn.addEventListener('click', function() {
+                setTheme(isDark() ? 'light' : 'dark');
+                paint();
+                if (typeof mermaid !== 'undefined' && window.peekmMermaidSources) {
+                    document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el, i) {
+                        var src = window.peekmMermaidSources[i];
+                        if (!src) return;
+                        el.removeAttribute('data-processed');
+                        el.textContent = src;
+                    });
+                    mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose' });
+                    try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
+                    catch (e) { console.warn('[mermaid] re-render failed', e); }
+                }
+            });
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+            paint();
+        })();
+    </script>
     {{if not .IsExpired}}<script>
         (function() {
             var token = '{{.Token}}';
