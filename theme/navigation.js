@@ -410,7 +410,7 @@ function interceptLinks(e) {
     }
 
     // Intercept all internal navigation links (root, file views, timeline)
-    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/memory')) {
+    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/standup') || url.startsWith('/memory')) {
         e.preventDefault();
         navigate(url);
     }

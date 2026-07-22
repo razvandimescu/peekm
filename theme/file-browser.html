@@ -1555,6 +1555,14 @@
         }
         .session-ribbon-view:hover { text-decoration: underline; }
 
+        /* Timeline → Recap cross-link, beside the All/Edits toggle */
+        .timeline-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .timeline-recap-link {
+            color: var(--peekm-accent); font-family: var(--font-display); font-weight: 600;
+            font-size: 13px; text-decoration: none; white-space: nowrap;
+        }
+        .timeline-recap-link:hover { text-decoration: underline; }
+
         /* ===== Standup — a dense, read-aloud digest ===== */
         .standup { max-width: 760px; }
         .standup-head { margin-bottom: 20px; }
@@ -2440,9 +2448,9 @@
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
                     <span class="nav-btn-label">Timeline</span>
                 </a>
-                <a href="/standup" id="standup-btn" class="nav-btn" aria-label="Standup" title="Standup — a per-day digest to read at standup">
+                <a href="/standup" id="standup-btn" class="nav-btn" aria-label="Recap" title="Recap — what you shipped, ready to read at standup">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1h12.5c.966 0 1.75.784 1.75 1.75v9.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-9.5C0 1.784.784 1 1.75 1ZM1.5 2.75v9.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25ZM3.5 5.25A.75.75 0 0 1 4.25 4.5h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1-.75-.75Zm0 3A.75.75 0 0 1 4.25 7.5h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z"/></svg>
-                    <span class="nav-btn-label">Standup</span>
+                    <span class="nav-btn-label">Recap</span>
                 </a>{{end}}
                 <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4zM5 4h6v1.5H5V4zm0 3h6v1.5H5V7zm0 3h4v1.5H5V10z"/></svg>

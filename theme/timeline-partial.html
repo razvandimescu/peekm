@@ -10,9 +10,12 @@
         </div>
         {{end}}
 
-        <div class="timeline-filter-toggle">
-            <button class="timeline-filter-btn active" data-filter="all" onclick="setTimelineFilter('all')">All</button>
-            <button class="timeline-filter-btn" data-filter="edits" onclick="setTimelineFilter('edits')">Edits only</button>
+        <div class="timeline-controls">
+            <div class="timeline-filter-toggle">
+                <button class="timeline-filter-btn active" data-filter="all" onclick="setTimelineFilter('all')">All</button>
+                <button class="timeline-filter-btn" data-filter="edits" onclick="setTimelineFilter('edits')">Edits only</button>
+            </div>
+            <a href="/standup" class="timeline-recap-link" title="A per-day digest, ready to read at standup">Recap &rarr;</a>
         </div>
 
         {{if .Groups}}
