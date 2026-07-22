@@ -20,9 +20,9 @@ func mustTime(s string) time.Time {
 func TestActiveTime(t *testing.T) {
 	base := mustTime("2026-07-20T10:00:00Z")
 	tests := []struct {
-		name   string
-		gaps   []time.Duration // gaps between consecutive stamps
-		wantMs time.Duration
+		name string
+		gaps []time.Duration // gaps between consecutive stamps
+		want time.Duration
 	}{
 		{"single stamp", nil, 0},
 		{"gap under threshold", []time.Duration{4 * time.Minute}, 4 * time.Minute},
@@ -37,8 +37,8 @@ func TestActiveTime(t *testing.T) {
 			cur = cur.Add(g)
 			stamps = append(stamps, cur)
 		}
-		if got := activeTime(stamps); got != tt.wantMs {
-			t.Errorf("%s: activeTime = %v, want %v", tt.name, got, tt.wantMs)
+		if got := activeTime(stamps); got != tt.want {
+			t.Errorf("%s: activeTime = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
