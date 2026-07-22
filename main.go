@@ -1459,6 +1459,19 @@ func removeFromWhitelist(filePath string) {
 	}
 }
 
+// notifySessionActivity pushes a lightweight SSE event on every received hook
+// so an open transcript view can refresh while its session is active.
+func notifySessionActivity(sessionID, tool string) {
+	msgBytes, err := json.Marshal(map[string]string{
+		"type":    "session_activity",
+		"session": sessionID,
+		"tool":    tool,
+	})
+	if err == nil {
+		notifyClientsWithMessage(string(msgBytes))
+	}
+}
+
 // sendFileEvent sends a file event notification to clients
 func sendFileEvent(msg fileEventMessage) {
 	msgBytes, err := json.Marshal(msg)
@@ -2009,6 +2022,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
 	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
+	notifySessionActivity(req.SessionID, req.ToolName)
 	if req.FilePath == "" {
 		detail := req.Detail
 		if len(detail) > 80 {

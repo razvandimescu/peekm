@@ -125,6 +125,8 @@ function connectSSE() {
                 } else {
                     fileModifiedToast(data);
                 }
+            } else if (data.type === 'session_activity') {
+                scheduleTranscriptRefresh(data.session);
             } else if (data.type === 'connection_status') {
                 console.log('[SSE] Handling connection_status:', data.count);
                 updateConnectionStatus(data.count);
@@ -1251,6 +1253,48 @@ function initReplyBox() {
             submitReply();
         }
     });
+}
+
+// Live transcript: refresh the open transcript when SSE reports activity on
+// its session, preserving reply draft, expanded toggles, and scroll position.
+let transcriptRefreshTimer = null;
+function scheduleTranscriptRefresh(session) {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'transcript') return;
+    const current = new URLSearchParams(window.location.search).get('session');
+    if (!session || session !== current) return;
+    clearTimeout(transcriptRefreshTimer);
+    transcriptRefreshTimer = setTimeout(refreshTranscript, 2000);
+}
+
+async function refreshTranscript() {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'transcript') return;
+
+    const input = document.getElementById('reply-input');
+    const draft = input ? input.value : '';
+    const hadFocus = input && document.activeElement === input;
+    const opened = [];
+    content.querySelectorAll('.transcript-longtext-toggle > input').forEach(function(cb, i) {
+        if (cb.checked) opened.push(i);
+    });
+    const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+    const scrollY = window.scrollY;
+
+    await navigate(window.location.pathname + window.location.search, false);
+
+    const fresh = document.getElementById('content');
+    if (!fresh) return;
+    const toggles = fresh.querySelectorAll('.transcript-longtext-toggle > input');
+    opened.forEach(function(i) { if (toggles[i]) toggles[i].checked = true; });
+    const freshInput = document.getElementById('reply-input');
+    if (freshInput && draft) freshInput.value = draft;
+    if (freshInput && hadFocus) freshInput.focus();
+    if (nearBottom) {
+        window.scrollTo(0, document.body.scrollHeight);
+    } else {
+        window.scrollTo(0, scrollY);
+    }
 }
 
 async function checkShareStatus() {
