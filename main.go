@@ -660,9 +660,22 @@ func preprocessMermaid(content []byte) []byte {
 	})
 }
 
-// newMarkdownRenderer creates a configured goldmark renderer
+// newMarkdownRenderer creates a configured goldmark renderer for the user's
+// own markdown files; raw HTML passes through so authored pages keep working.
 func newMarkdownRenderer() goldmark.Markdown {
-	return goldmark.New(
+	return buildMarkdownRenderer(true)
+}
+
+// newSafeMarkdownRenderer escapes raw HTML. Transcript conversation content
+// can quote arbitrary markup (web snippets, template/code fragments) that must
+// never become live DOM in the viewer — stray tags corrupt the page and
+// scripts would execute.
+func newSafeMarkdownRenderer() goldmark.Markdown {
+	return buildMarkdownRenderer(false)
+}
+
+func buildMarkdownRenderer(allowRawHTML bool) goldmark.Markdown {
+	opts := []goldmark.Option{
 		goldmark.WithExtensions(
 			extension.GFM,
 			extension.Typographer,
@@ -675,10 +688,11 @@ func newMarkdownRenderer() goldmark.Markdown {
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
 		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
-		),
-	)
+	}
+	if allowRawHTML {
+		opts = append(opts, goldmark.WithRendererOptions(html.WithUnsafe()))
+	}
+	return goldmark.New(opts...)
 }
 
 // withRecovery wraps an HTTP handler with panic recovery

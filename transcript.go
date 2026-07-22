@@ -267,7 +267,7 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	}
 	defer f.Close()
 
-	md := newMarkdownRenderer()
+	md := newSafeMarkdownRenderer()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
 
