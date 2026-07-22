@@ -148,6 +148,7 @@ type baseTemplateData struct {
 	EditorJS          template.JS
 	NavigationJS      template.JS
 	AITrackingEnabled bool
+	FileCount         int // whitelist size, shown in the shared sidebar header across all shell views
 }
 
 // browserTemplateData is used for rendering the file browser and file views
@@ -162,7 +163,6 @@ type browserTemplateData struct {
 	FilePath       string           // Relative path of displayed file (for edit/raw)
 	SessionData    *SessionMetadata // Claude Code session info for this file
 	IsPreview      bool             // true for HTML/SVG/TXT files (no edit mode)
-	FileCount      int              // whitelisted markdown files, shown in the sidebar header
 }
 
 // markdownFileCount returns the size of the current whitelist (thread-safe).
@@ -482,6 +482,7 @@ func newBaseTemplateData() baseTemplateData {
 		EditorJS:          template.JS(editorJS),
 		NavigationJS:      template.JS(navigationJS),
 		AITrackingEnabled: !*disableHook,
+		FileCount:         markdownFileCount(),
 	}
 }
 
@@ -1878,7 +1879,6 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		ShowBackButton:   showBackButton,
 		BrowsePath:       currentBrowseDir,
 		FilePath:         filePath,
-		FileCount:        markdownFileCount(),
 	}
 
 	renderTemplate(w, r, data)
@@ -2435,7 +2435,6 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		BrowsePath:       currentBrowseDir,
 		SessionData:      sessionData,
 		IsPreview:        isPreview,
-		FileCount:        markdownFileCount(),
 	}
 
 	fileMutex.Lock()
