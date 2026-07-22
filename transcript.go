@@ -30,10 +30,12 @@ type transcriptTemplateData struct {
 
 // transcriptTurn represents a single user or assistant turn in the conversation
 type transcriptTurn struct {
-	Role      string // "user" or "assistant"
-	Blocks    []contentBlock
-	Model     string
-	Timestamp string
+	Role        string // "user" or "assistant"
+	Blocks      []contentBlock
+	Model       string
+	Timestamp   string
+	Collapsible bool // whole-turn clamp when accumulated content renders tall
+	LineCount   int  // estimated rendered lines for the toggle label
 }
 
 // imageData represents a base64-encoded image from a tool result
@@ -59,6 +61,8 @@ type contentBlock struct {
 	ToolInputHTML   template.HTML // structured rendering
 	ItemCount       int           // for context_summary
 	Images          []imageData   // for tool_result blocks containing images
+	textChars       int           // raw text size, for turn-level collapse accounting
+	textLines       int
 }
 
 // encodeProjectDir maps an absolute directory to the name Claude Code uses for its
@@ -292,6 +296,7 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	turns = pairToolResults(turns)
 	turns = removeEmptyTurns(turns)
 	turns = mergeConsecutiveTurns(turns)
+	turns = markTurnCollapsible(turns)
 	turns = expandFinalTurn(turns)
 	return turns, nil
 }
@@ -354,6 +359,7 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 			return nil
 		}
 		block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, str)}
+		recordTextSize(&block, str)
 		markCollapsible(&block, str, assistant)
 		return []contentBlock{block}
 	}
@@ -411,6 +417,7 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assista
 		case "text":
 			if peek.Text != "" {
 				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
+				recordTextSize(&block, peek.Text)
 				markCollapsible(&block, peek.Text, assistant)
 				blocks = append(blocks, block)
 			}
@@ -927,12 +934,46 @@ func markCollapsible(block *contentBlock, rawText string, assistant bool) {
 	}
 }
 
+func recordTextSize(block *contentBlock, rawText string) {
+	block.textChars = len(rawText)
+	block.textLines = strings.Count(rawText, "\n") + 1
+}
+
+// markTurnCollapsible clamps turns whose accumulated content renders tall.
+// Merged turns stitch many short text blocks and tool rows together, so
+// per-block thresholds never fire even when the turn dominates the page;
+// collapsed tool and thinking rows count ~2 rendered lines each.
+func markTurnCollapsible(turns []transcriptTurn) []transcriptTurn {
+	for i := range turns {
+		chars, lines := 0, 0
+		for _, b := range turns[i].Blocks {
+			switch b.Type {
+			case "text":
+				chars += b.textChars
+				lines += b.textLines
+			case "tool_use", "thinking":
+				lines += 2
+			}
+		}
+		long := chars > 1500 || lines > 30
+		if turns[i].Role == "assistant" {
+			long = chars > 2500 || lines > 30
+		}
+		if long {
+			turns[i].Collapsible = true
+			turns[i].LineCount = lines
+		}
+	}
+	return turns
+}
+
 // expandFinalTurn keeps the last turn fully visible — it often ends with a
 // question the reply composer directly below answers; collapsing would hide
 // the conversational hinge.
 func expandFinalTurn(turns []transcriptTurn) []transcriptTurn {
 	if len(turns) > 0 {
 		last := &turns[len(turns)-1]
+		last.Collapsible = false
 		for i := range last.Blocks {
 			last.Blocks[i].Collapsible = false
 		}

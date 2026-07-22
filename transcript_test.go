@@ -136,12 +136,15 @@ func TestMarkCollapsible(t *testing.T) {
 
 func TestExpandFinalTurn(t *testing.T) {
 	turns := []transcriptTurn{
-		{Role: "assistant", Blocks: []contentBlock{{Type: "text", Collapsible: true}}},
-		{Role: "assistant", Blocks: []contentBlock{{Type: "text", Collapsible: true}, {Type: "text", Collapsible: true}}},
+		{Role: "assistant", Collapsible: true, Blocks: []contentBlock{{Type: "text", Collapsible: true}}},
+		{Role: "assistant", Collapsible: true, Blocks: []contentBlock{{Type: "text", Collapsible: true}, {Type: "text", Collapsible: true}}},
 	}
 	turns = expandFinalTurn(turns)
-	if !turns[0].Blocks[0].Collapsible {
+	if !turns[0].Collapsible || !turns[0].Blocks[0].Collapsible {
 		t.Error("earlier turns should keep Collapsible")
+	}
+	if turns[1].Collapsible {
+		t.Error("final turn should not be collapsible")
 	}
 	for i, b := range turns[1].Blocks {
 		if b.Collapsible {
@@ -150,6 +153,35 @@ func TestExpandFinalTurn(t *testing.T) {
 	}
 	if out := expandFinalTurn(nil); out != nil {
 		t.Error("nil turns should pass through")
+	}
+}
+
+func TestMarkTurnCollapsible(t *testing.T) {
+	text := func(chars, lines int) contentBlock {
+		return contentBlock{Type: "text", textChars: chars, textLines: lines}
+	}
+	tool := contentBlock{Type: "tool_use"}
+	tests := []struct {
+		name string
+		turn transcriptTurn
+		want bool
+	}{
+		{"assistant many short blocks accumulate chars", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(1000, 5), text(1000, 5), text(1000, 5)}}, true},
+		{"assistant tool rows push over line budget", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(200, 2), tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool}}, true},
+		{"assistant modest turn stays open", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(800, 8), tool, tool}}, false},
+		{"user pasted log collapses", transcriptTurn{Role: "user",
+			Blocks: []contentBlock{text(1600, 10)}}, true},
+		{"user short stays open", transcriptTurn{Role: "user",
+			Blocks: []contentBlock{text(300, 3)}}, false},
+	}
+	for _, tt := range tests {
+		out := markTurnCollapsible([]transcriptTurn{tt.turn})
+		if out[0].Collapsible != tt.want {
+			t.Errorf("%s: Collapsible = %v, want %v", tt.name, out[0].Collapsible, tt.want)
+		}
 	}
 }
 

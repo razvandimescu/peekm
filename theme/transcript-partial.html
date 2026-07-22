@@ -40,6 +40,8 @@
                     {{if .Timestamp}}<span class="transcript-timestamp">{{formatTime .Timestamp}}</span>{{end}}
                 </div>
                 <div class="transcript-turn-body">
+                    {{if .Collapsible}}<div class="transcript-longtext lt-turn{{if eq .Role "assistant"}} lt-assistant{{end}}">{{end}}
+                    <div class="transcript-turn-blocks">
                     {{range .Blocks}}
                     {{if eq .Type "text"}}
                     {{if .Collapsible}}
@@ -96,6 +98,12 @@
                     </div>
                     {{end}}
                     {{end}}
+                    </div>
+                    {{if .Collapsible}}<label class="transcript-longtext-toggle">
+                        <input type="checkbox" hidden>
+                        <span class="lt-more">Show full {{if eq .Role "assistant"}}response{{else}}message{{end}} &middot; {{.LineCount}} lines</span>
+                        <span class="lt-less">Show less</span>
+                    </label></div>{{end}}
                 </div>
             </div>
             {{end}}

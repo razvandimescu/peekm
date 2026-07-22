@@ -895,15 +895,21 @@ a.timeline-session-id:hover {
     font-size: 0.85em;
 }
 
-/* Long messages: faded preview + expand (CSS-only). Assistant responses get
-   a taller preview — they're the payload, user blocks are often pasted logs. */
-.transcript-longtext:not(:has(input:checked)) > .transcript-text {
+/* Long content: faded preview + expand (CSS-only). Two tiers share one
+   mechanism: block-level (a single long text) clamps .transcript-text;
+   turn-level (accumulated blocks + tool rows) clamps .transcript-turn-blocks.
+   Assistant content gets a taller preview — it's the payload, long user
+   blocks are often pasted logs. Selectors bind to each container's OWN
+   toggle (direct child) so a nested block toggle can't expand its turn. */
+.transcript-longtext:not(:has(> .transcript-longtext-toggle > input:checked)) > .transcript-text,
+.lt-turn:not(:has(> .transcript-longtext-toggle > input:checked)) > .transcript-turn-blocks {
     max-height: 280px;
     overflow: hidden;
     -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
     mask-image: linear-gradient(to bottom, #000 60%, transparent);
 }
-.transcript-longtext.lt-assistant:not(:has(input:checked)) > .transcript-text {
+.transcript-longtext.lt-assistant:not(:has(> .transcript-longtext-toggle > input:checked)) > .transcript-text,
+.lt-turn.lt-assistant:not(:has(> .transcript-longtext-toggle > input:checked)) > .transcript-turn-blocks {
     max-height: 420px;
 }
 .transcript-longtext-toggle {
@@ -919,9 +925,9 @@ a.timeline-session-id:hover {
     user-select: none;
 }
 .transcript-longtext-toggle:hover { border-color: var(--borderColor-emphasis); }
-.transcript-longtext .lt-less { display: none; }
-.transcript-longtext:has(input:checked) .lt-more { display: none; }
-.transcript-longtext:has(input:checked) .lt-less { display: inline; }
+.transcript-longtext > .transcript-longtext-toggle > .lt-less { display: none; }
+.transcript-longtext:has(> .transcript-longtext-toggle > input:checked) > .transcript-longtext-toggle > .lt-more { display: none; }
+.transcript-longtext:has(> .transcript-longtext-toggle > input:checked) > .transcript-longtext-toggle > .lt-less { display: inline; }
 /* Thinking blocks: minimal, deemphasized */
 .transcript-thinking {
     margin: 4px 0;
