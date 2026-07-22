@@ -115,6 +115,8 @@ var (
 	memoryPartialTmpl      *template.Template
 	transcriptTmpl         *template.Template
 	transcriptPartialTmpl  *template.Template
+	standupTmpl            *template.Template
+	standupPartialTmpl     *template.Template
 	sharedViewTmpl         *template.Template
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
@@ -789,6 +791,8 @@ func registerRoutes() {
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
+	http.HandleFunc("/standup", localOnly(withRecovery(serveStandup)))
+	http.HandleFunc("/standup/save", localOnly(withRecovery(withCSRFCheck(handleStandupSave))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
@@ -1063,6 +1067,12 @@ func init() {
 	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(transcriptPartialHTML))
 	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(fileBrowserHTML))
 	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(transcriptPartialHTML))
+
+	// Standup
+	standupPartialHTML := mustReadThemeFile("theme/standup-partial.html")
+	standupPartialTmpl = template.Must(template.New("standup-partial").Funcs(funcMap).Parse(standupPartialHTML))
+	standupTmpl = template.Must(template.New("standup").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(standupTmpl.New("content").Funcs(funcMap).Parse(standupPartialHTML))
 
 	// Memory
 	memoryPartialHTML := mustReadThemeFile("theme/memory-partial.html")

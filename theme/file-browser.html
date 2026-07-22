@@ -1554,6 +1554,72 @@
             white-space: nowrap;
         }
         .session-ribbon-view:hover { text-decoration: underline; }
+
+        /* ===== Standup — a dense, read-aloud digest ===== */
+        .standup { max-width: 760px; }
+        .standup-head { margin-bottom: 20px; }
+        .standup-head-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .standup-date-label { font-family: var(--font-display); font-size: 26px; letter-spacing: -0.5px; margin: 0; }
+        .standup-datenav { display: inline-flex; align-items: center; gap: 4px; }
+        .standup-arrow {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 7px; text-decoration: none;
+            color: var(--fgColor-muted); font-size: 18px; line-height: 1;
+            border: 1px solid var(--borderColor-default);
+        }
+        .standup-arrow:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
+        .standup-arrow.disabled { opacity: 0.35; pointer-events: none; }
+        .standup-date-input {
+            font-family: var(--font-mono); font-size: 12.5px; padding: 5px 8px;
+            border: 1px solid var(--borderColor-default); border-radius: 7px;
+            background: var(--bgColor-default); color: var(--fgColor-default);
+        }
+        .standup-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+        .standup-summary { font-family: var(--font-mono); font-size: 12.5px; color: var(--fgColor-muted); }
+        .standup-actions { display: inline-flex; gap: 8px; }
+        .standup-lg-toggle, .standup-save {
+            font-family: var(--font-display); font-weight: 600; font-size: 13px; cursor: pointer;
+            padding: 6px 12px; border-radius: 7px; border: 1px solid var(--borderColor-default);
+            background: var(--bgColor-default); color: var(--fgColor-default);
+        }
+        .standup-save { background: var(--peekm-accent); border-color: var(--peekm-accent); color: #fff; }
+        .standup-save:hover { background: var(--peekm-accent-strong); }
+        .standup-lg-toggle:hover { background: var(--bgColor-muted); }
+        body.standup-lg .standup-lg-toggle { border-color: var(--peekm-accent); color: var(--peekm-accent); }
+
+        .standup-project { padding: 16px 0; border-top: 1px solid var(--borderColor-muted); }
+        .standup-project:first-of-type { border-top: none; }
+        .standup-project-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .standup-project-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+        .standup-metrics { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--fgColor-muted); text-align: right; }
+        .standup-churn { display: block; }
+        .standup-commits { list-style: none; margin: 10px 0 0; padding: 0; }
+        .standup-commits li { position: relative; padding-left: 16px; margin: 5px 0; font-size: 15px; line-height: 1.5; }
+        .standup-commits li::before { content: '•'; position: absolute; left: 2px; color: var(--peekm-accent); }
+        .standup-more { margin-top: 6px; font-size: 13px; }
+        .standup-more summary { cursor: pointer; color: var(--fgColor-muted); font-family: var(--font-mono); font-size: 12px; }
+        .standup-more ul { margin: 6px 0 0; padding-left: 18px; }
+        .standup-more li { margin: 4px 0; font-size: 14px; }
+        .standup-evidence { margin-top: 10px; font-size: 14px; color: var(--fgColor-default); }
+        .standup-evidence code { font-family: var(--font-mono); font-size: 12.5px; }
+        .standup-more-count { color: var(--fgColor-muted); }
+        .standup-prompt { color: var(--fgColor-muted); }
+        .standup-sessions { margin-top: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fgColor-muted); }
+
+        .standup-tail { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--borderColor-muted); }
+        .standup-tail-label {
+            font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase;
+            color: var(--fgColor-muted); margin-bottom: 8px;
+        }
+        .standup-tail-items { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
+        .standup-tail-sep { color: var(--borderColor-default); }
+        .standup-empty { color: var(--fgColor-muted); }
+        .standup-empty a { color: var(--peekm-accent); }
+
+        /* Read-aloud mode: larger body text, persisted with the theme preference. */
+        body.standup-lg .standup-commits li { font-size: 18px; line-height: 1.7; }
+        body.standup-lg .standup-evidence { font-size: 16px; }
+        body.standup-lg .standup-project-name { font-size: 19px; }
         @media (max-width: 480px) {
             .session-ribbon-when { margin-left: 0; }
         }
@@ -2373,6 +2439,10 @@
                 {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline — tracks Claude Code sessions">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
                     <span class="nav-btn-label">Timeline</span>
+                </a>
+                <a href="/standup" id="standup-btn" class="nav-btn" aria-label="Standup" title="Standup — a per-day digest to read at standup">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1h12.5c.966 0 1.75.784 1.75 1.75v9.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-9.5C0 1.784.784 1 1.75 1ZM1.5 2.75v9.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25ZM3.5 5.25A.75.75 0 0 1 4.25 4.5h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1-.75-.75Zm0 3A.75.75 0 0 1 4.25 7.5h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z"/></svg>
+                    <span class="nav-btn-label">Standup</span>
                 </a>{{end}}
                 <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4zM5 4h6v1.5H5V4zm0 3h6v1.5H5V7zm0 3h4v1.5H5V10z"/></svg>

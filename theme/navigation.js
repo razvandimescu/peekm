@@ -271,10 +271,35 @@ function updateNavButtons() {
     const isView = path.startsWith('/view/');
     const filesBtn = document.getElementById('files-btn');
     const timelineBtn = document.getElementById('timeline-btn');
+    const standupBtn = document.getElementById('standup-btn');
     const memoryBtn = document.getElementById('memory-btn');
     if (filesBtn) filesBtn.classList.toggle('active', path === '/' || (isView && !inMemoryMode));
     if (timelineBtn) timelineBtn.classList.toggle('active', path.startsWith('/timeline') || path.startsWith('/transcript'));
+    if (standupBtn) standupBtn.classList.toggle('active', path.startsWith('/standup'));
     if (memoryBtn) memoryBtn.classList.toggle('active', path.startsWith('/memory') || (isView && inMemoryMode));
+}
+
+// Standup: larger text for reading aloud, persisted alongside the theme preference.
+function toggleStandupLarge() {
+    const on = document.body.classList.toggle('standup-lg');
+    try { localStorage.setItem('peekm_standup_lg', on ? '1' : '0'); } catch (e) {}
+}
+
+// Standup: write standup-YYYY-MM-DD.md into the browse dir, then open it.
+function saveStandup(date) {
+    fetch('/standup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: date })
+    }).then(function (r) {
+        if (!r.ok) throw new Error('save failed');
+        return r.json();
+    }).then(function (data) {
+        if (typeof showToast === 'function') showToast('Saved ' + data.path);
+        navigate('/view/' + encodeURIComponent(data.path));
+    }).catch(function () {
+        if (typeof showToast === 'function') showToast('Could not save standup');
+    });
 }
 
 function reinitializeScripts() {
@@ -404,6 +429,11 @@ window.addEventListener('popstate', function(e) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[SPA] Initializing...');
+
+    // Restore standup large-text preference (body persists across SPA swaps)
+    try {
+        if (localStorage.getItem('peekm_standup_lg') === '1') document.body.classList.add('standup-lg');
+    } catch (e) {}
 
     // Setup persistent SSE connection
     connectSSE();
