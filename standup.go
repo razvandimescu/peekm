@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	ttmpl "text/template"
@@ -111,7 +112,6 @@ type standupDay struct {
 	TotalActive        string
 	TotalCommits       int
 	ProjectCount       int
-	SessionCount       int
 	PrevDate           string
 	NextDate           string // empty when the target is today (no forward step)
 	IsEmpty            bool
@@ -306,26 +306,31 @@ func computeGitCommits(root, dayStr string) *commitResult {
 	}
 	since := dayStr + " 00:00:00"
 	until := dayStr + " 23:59:59"
+	// One pass yields both subjects and churn: --shortstat appends a
+	// " N files changed, X insertions(+), Y deletions(-)" line after each commit.
 	// --all spans every branch so your own commits on a branch you've since
 	// switched away from still count; the absolute --author=<email> filter keeps
 	// a pulled-in teammate commit (their email) out regardless.
-	log := gitOutput(root, "log", "--all", "--no-merges", "--since="+since, "--until="+until,
-		"--author="+email, "--pretty=%h%x09%s")
-	if log == "" {
-		return r
-	}
-	for _, line := range strings.Split(log, "\n") {
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
+	out := gitOutput(root, "log", "--all", "--no-merges", "--since="+since, "--until="+until,
+		"--author="+email, "--shortstat", "--pretty=format:%h%x09%s")
+	for _, line := range strings.Split(out, "\n") {
+		if parts := strings.SplitN(line, "\t", 2); len(parts) == 2 {
+			if depBumpRe.MatchString(parts[1]) {
+				r.depBumps++
+			} else {
+				r.commits = append(r.commits, standupCommit{Short: parts[0], Subject: parts[1]})
+			}
 			continue
 		}
-		if depBumpRe.MatchString(parts[1]) {
-			r.depBumps++
-			continue
+		if m := insertionsRe.FindStringSubmatch(line); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			r.insertions += n
 		}
-		r.commits = append(r.commits, standupCommit{Short: parts[0], Subject: parts[1]})
+		if m := deletionsRe.FindStringSubmatch(line); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			r.deletions += n
+		}
 	}
-	r.insertions, r.deletions = gitChurn(root, since, until, email)
 	return r
 }
 
@@ -333,29 +338,6 @@ var (
 	insertionsRe = regexp.MustCompile(`(\d+) insertion`)
 	deletionsRe  = regexp.MustCompile(`(\d+) deletion`)
 )
-
-func gitChurn(root, since, until, email string) (ins, del int) {
-	out := gitOutput(root, "log", "--all", "--no-merges", "--since="+since, "--until="+until,
-		"--author="+email, "--shortstat", "--pretty=")
-	for _, m := range insertionsRe.FindAllStringSubmatch(out, -1) {
-		ins += atoiSafe(m[1])
-	}
-	for _, m := range deletionsRe.FindAllStringSubmatch(out, -1) {
-		del += atoiSafe(m[1])
-	}
-	return ins, del
-}
-
-func atoiSafe(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return n
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
-}
 
 // ---- assembly ----
 
@@ -486,7 +468,6 @@ func buildStandupDay(browseDir string, day time.Time) standupDay {
 	}
 	for _, p := range projects {
 		sd.TotalCommits += len(p.Commits)
-		sd.SessionCount += len(p.Sessions)
 	}
 	sd.ProjectCount = len(projects)
 	sd.TotalActive = formatActive(sumActive(projects))
@@ -611,10 +592,7 @@ func topBasenames(files map[string]bool, n int) []string {
 // headlineMetrics builds the per-project rail, appending only non-zero segments
 // (never render a zero).
 func headlineMetrics(p *standupProject) []string {
-	var segs []string
-	if p.ActiveStr != "" {
-		segs = append(segs, p.ActiveStr+" active")
-	}
+	segs := []string{p.ActiveStr + " active"}
 	if p.Edits > 0 {
 		segs = append(segs, fmt.Sprintf("%d %s", p.Edits, plural(p.Edits, "edit")))
 	}
@@ -798,11 +776,7 @@ func handleStandupSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "write error", http.StatusInternalServerError)
 		return
 	}
-	if !isWhitelistedFile(abs) {
-		fileMutex.Lock()
-		markdownFiles = append(markdownFiles, abs)
-		fileMutex.Unlock()
-	}
+	handleMarkdownCreated(abs) // whitelist + live file_added broadcast
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"path": name})
