@@ -135,22 +135,34 @@ func TestMarkCollapsible(t *testing.T) {
 }
 
 func TestExpandFinalTurn(t *testing.T) {
-	turns := []transcriptTurn{
-		{Role: "assistant", Collapsible: true, Blocks: []contentBlock{{Type: "text", Collapsible: true}}},
-		{Role: "assistant", Collapsible: true, Blocks: []contentBlock{{Type: "text", Collapsible: true}, {Type: "text", Collapsible: true}}},
+	collapsed := func(role string) transcriptTurn {
+		return transcriptTurn{Role: role, Collapsible: true,
+			Blocks: []contentBlock{{Type: "text", Collapsible: true}}}
 	}
-	turns = expandFinalTurn(turns)
-	if !turns[0].Collapsible || !turns[0].Blocks[0].Collapsible {
-		t.Error("earlier turns should keep Collapsible")
-	}
-	if turns[1].Collapsible {
-		t.Error("final turn should not be collapsible")
-	}
-	for i, b := range turns[1].Blocks {
-		if b.Collapsible {
-			t.Errorf("final turn block %d should not be collapsible", i)
+
+	t.Run("ends on assistant: only last turn expands", func(t *testing.T) {
+		turns := expandFinalTurn([]transcriptTurn{collapsed("user"), collapsed("assistant"), collapsed("assistant")})
+		if !turns[0].Collapsible || !turns[1].Collapsible {
+			t.Error("earlier turns should keep Collapsible")
 		}
-	}
+		if turns[2].Collapsible || turns[2].Blocks[0].Collapsible {
+			t.Error("final turn should be fully expanded")
+		}
+	})
+
+	t.Run("ends on user: preceding assistant turn expands too", func(t *testing.T) {
+		turns := expandFinalTurn([]transcriptTurn{collapsed("assistant"), collapsed("assistant"), collapsed("user")})
+		if !turns[0].Collapsible {
+			t.Error("earlier assistant turn should keep Collapsible")
+		}
+		if turns[1].Collapsible || turns[1].Blocks[0].Collapsible {
+			t.Error("last assistant turn before trailing user message should expand")
+		}
+		if turns[2].Collapsible {
+			t.Error("final user turn should expand")
+		}
+	})
+
 	if out := expandFinalTurn(nil); out != nil {
 		t.Error("nil turns should pass through")
 	}

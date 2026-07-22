@@ -967,16 +967,24 @@ func markTurnCollapsible(turns []transcriptTurn) []transcriptTurn {
 	return turns
 }
 
-// expandFinalTurn keeps the last turn fully visible — it often ends with a
-// question the reply composer directly below answers; collapsing would hide
-// the conversational hinge.
+// expandFinalTurn keeps the conversation's live tail fully visible: the last
+// turn, and — when the session ends on a user message awaiting a reply — the
+// assistant turn before it. That tail is the hinge the reply composer answers;
+// collapsing it would hide what the reader is responding to.
 func expandFinalTurn(turns []transcriptTurn) []transcriptTurn {
-	if len(turns) > 0 {
-		last := &turns[len(turns)-1]
-		last.Collapsible = false
-		for i := range last.Blocks {
-			last.Blocks[i].Collapsible = false
+	n := len(turns)
+	if n == 0 {
+		return turns
+	}
+	expand := func(t *transcriptTurn) {
+		t.Collapsible = false
+		for i := range t.Blocks {
+			t.Blocks[i].Collapsible = false
 		}
+	}
+	expand(&turns[n-1])
+	if turns[n-1].Role == "user" && n > 1 {
+		expand(&turns[n-2])
 	}
 	return turns
 }
