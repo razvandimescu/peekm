@@ -370,6 +370,20 @@ function interceptLinks(e) {
         return;
     }
 
+    // Same-page anchors (e.g. "Jump to end"): content scrolls inside .content-area,
+    // not the document, so native hash navigation resets the overflow:hidden root to
+    // the top instead of scrolling the pane. Scroll the container to the target.
+    if (url.startsWith('#')) {
+        const target = document.getElementById(url.slice(1));
+        const scroller = document.querySelector('.content-area');
+        if (target && scroller) {
+            e.preventDefault();
+            const top = scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            scroller.scrollTo({ top, behavior: 'smooth' });
+        }
+        return;
+    }
+
     // Intercept all internal navigation links (root, file views, timeline)
     if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/memory')) {
         e.preventDefault();
