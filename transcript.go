@@ -292,6 +292,7 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	turns = pairToolResults(turns)
 	turns = removeEmptyTurns(turns)
 	turns = mergeConsecutiveTurns(turns)
+	turns = expandFinalTurn(turns)
 	return turns, nil
 }
 
@@ -331,7 +332,7 @@ func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults 
 		return transcriptTurn{}, true
 	}
 
-	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user")
+	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user", msg.Role == "assistant")
 	if len(blocks) == 0 {
 		return transcriptTurn{}, true
 	}
@@ -345,7 +346,7 @@ func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults 
 }
 
 // parseContentBlocks extracts content blocks from a message's content field
-func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults bool) []contentBlock {
+func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults, assistant bool) []contentBlock {
 	// Content can be a string (user prompt) or array of blocks
 	var str string
 	if err := json.Unmarshal(raw, &str); err == nil {
@@ -353,7 +354,7 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 			return nil
 		}
 		block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, str)}
-		markCollapsible(&block, str)
+		markCollapsible(&block, str, assistant)
 		return []contentBlock{block}
 	}
 
@@ -369,7 +370,7 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 		}
 	}
 
-	return convertRawBlocks(rawBlocks, md)
+	return convertRawBlocks(rawBlocks, md, assistant)
 }
 
 // countToolResults counts tool_result blocks in a raw block list
@@ -399,7 +400,7 @@ type rawContentBlock struct {
 }
 
 // convertRawBlocks parses raw JSON blocks into contentBlock values
-func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []contentBlock {
+func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assistant bool) []contentBlock {
 	var blocks []contentBlock
 	for _, rb := range rawBlocks {
 		var peek rawContentBlock
@@ -409,9 +410,9 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 		switch peek.Type {
 		case "text":
 			if peek.Text != "" {
-				// Assistant prose is the signal we want read in full; only the
-				// plain-string user prompt path collapses (see parseContentBlocks).
-				blocks = append(blocks, contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)})
+				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
+				markCollapsible(&block, peek.Text, assistant)
+				blocks = append(blocks, block)
 			}
 		case "thinking":
 			if peek.Thinking != "" {
@@ -911,11 +912,32 @@ func extractToolResultContent(content json.RawMessage) (string, []imageData) {
 	return "", nil
 }
 
-func markCollapsible(block *contentBlock, rawText string) {
-	if len(rawText) > 1500 {
+// markCollapsible flags text blocks that render clamped with an expand toggle.
+// Assistant prose is the payload readers skim for, so it gets a higher trigger
+// than pasted user logs; the line-count check catches tall structured markdown
+// (tables, lists) that a char threshold misses.
+func markCollapsible(block *contentBlock, rawText string, assistant bool) {
+	long := len(rawText) > 1500
+	if assistant {
+		long = len(rawText) > 2500 || strings.Count(rawText, "\n") > 30
+	}
+	if long {
 		block.Collapsible = true
 		block.LineCount = strings.Count(rawText, "\n") + 1
 	}
+}
+
+// expandFinalTurn keeps the last turn fully visible — it often ends with a
+// question the reply composer directly below answers; collapsing would hide
+// the conversational hinge.
+func expandFinalTurn(turns []transcriptTurn) []transcriptTurn {
+	if len(turns) > 0 {
+		last := &turns[len(turns)-1]
+		for i := range last.Blocks {
+			last.Blocks[i].Collapsible = false
+		}
+	}
+	return turns
 }
 
 // truncateString truncates a string to maxLen runes, adding "..." if truncated.

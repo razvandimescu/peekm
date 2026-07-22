@@ -33,7 +33,7 @@
         </div>
         {{else if .Turns}}
         <div class="transcript-conversation">
-            {{range .Turns}}
+            {{range $turn := .Turns}}
             <div class="transcript-turn transcript-{{.Role}}">
                 <div class="transcript-turn-header">
                     <span class="transcript-role-badge transcript-role-{{.Role}}">{{if eq .Role "user"}}You{{else}}Claude{{end}}</span>
@@ -43,11 +43,11 @@
                     {{range .Blocks}}
                     {{if eq .Type "text"}}
                     {{if .Collapsible}}
-                    <div class="transcript-longtext">
+                    <div class="transcript-longtext{{if eq $turn.Role "assistant"}} lt-assistant{{end}}">
                         <div class="transcript-text markdown-body">{{.HTML}}</div>
                         <label class="transcript-longtext-toggle">
                             <input type="checkbox" hidden>
-                            <span class="lt-more">Show full message &middot; {{.LineCount}} lines</span>
+                            <span class="lt-more">Show full {{if eq $turn.Role "assistant"}}response{{else}}message{{end}} &middot; {{.LineCount}} lines</span>
                             <span class="lt-less">Show less</span>
                         </label>
                     </div>

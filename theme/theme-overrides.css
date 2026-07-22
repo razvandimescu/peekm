@@ -895,12 +895,16 @@ a.timeline-session-id:hover {
     font-size: 0.85em;
 }
 
-/* Long pasted user messages: faded preview + expand (CSS-only) */
+/* Long messages: faded preview + expand (CSS-only). Assistant responses get
+   a taller preview — they're the payload, user blocks are often pasted logs. */
 .transcript-longtext:not(:has(input:checked)) > .transcript-text {
     max-height: 280px;
     overflow: hidden;
     -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
     mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.transcript-longtext.lt-assistant:not(:has(input:checked)) > .transcript-text {
+    max-height: 420px;
 }
 .transcript-longtext-toggle {
     display: inline-flex;

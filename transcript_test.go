@@ -108,6 +108,51 @@ func TestToolIcon(t *testing.T) {
 	}
 }
 
+func TestMarkCollapsible(t *testing.T) {
+	long := strings.Repeat("x", 1600)
+	veryLong := strings.Repeat("x", 2600)
+	tall := strings.Repeat("line\n", 35)
+	tests := []struct {
+		name      string
+		text      string
+		assistant bool
+		want      bool
+	}{
+		{"user over 1500", long, false, true},
+		{"user under 1500", "short", false, false},
+		{"assistant 1600 chars stays open", long, true, false},
+		{"assistant over 2500 chars", veryLong, true, true},
+		{"assistant over 30 lines", tall, true, true},
+		{"assistant short", "short", true, false},
+	}
+	for _, tt := range tests {
+		var b contentBlock
+		markCollapsible(&b, tt.text, tt.assistant)
+		if b.Collapsible != tt.want {
+			t.Errorf("%s: Collapsible = %v, want %v", tt.name, b.Collapsible, tt.want)
+		}
+	}
+}
+
+func TestExpandFinalTurn(t *testing.T) {
+	turns := []transcriptTurn{
+		{Role: "assistant", Blocks: []contentBlock{{Type: "text", Collapsible: true}}},
+		{Role: "assistant", Blocks: []contentBlock{{Type: "text", Collapsible: true}, {Type: "text", Collapsible: true}}},
+	}
+	turns = expandFinalTurn(turns)
+	if !turns[0].Blocks[0].Collapsible {
+		t.Error("earlier turns should keep Collapsible")
+	}
+	for i, b := range turns[1].Blocks {
+		if b.Collapsible {
+			t.Errorf("final turn block %d should not be collapsible", i)
+		}
+	}
+	if out := expandFinalTurn(nil); out != nil {
+		t.Error("nil turns should pass through")
+	}
+}
+
 func TestDiffOps(t *testing.T) {
 	toStr := func(ops []diffOp) string {
 		var b []byte
