@@ -1,0 +1,20 @@
+name: Release Fractal (manual)
+
+# Manually render (or re-render) the fractal + changelog for an existing release tag.
+# Useful to backfill a release created before this was wired up, or to re-run after a fix.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to render a fractal for (e.g. v0.1.30)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  fractal:
+    uses: razvandimescu/fractal-of-the-day/.github/workflows/release-fractal.reusable.yml@main
+    with:
+      tag: ${{ inputs.tag }}

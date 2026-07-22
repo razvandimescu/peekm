@@ -1,13 +1,8 @@
 <main id="content" data-view="transcript" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container">
-        <div class="transcript-header">
+        <div class="transcript-header" id="transcript-top">
             <h1>{{.Title}}</h1>
             {{if .Subtitle}}<p class="subtitle">{{.Subtitle}}</p>{{end}}
-            <div class="transcript-nav">
-                <a href="/">Files</a>
-                <a href="/timeline">Timeline</a>
-                <a href="#transcript-bottom">Jump to end</a>
-            </div>
             {{if .SessionStats}}
             <div class="transcript-stats">
                 <span>{{.SessionStats.FileCount}} file{{if ne .SessionStats.FileCount 1}}s{{end}}</span>
@@ -19,6 +14,14 @@
                 <span>{{.SessionStats.Tools}}</span>{{end}}
             </div>
             {{end}}
+            <div class="transcript-nav">
+                <a href="/">Files</a>
+                <a href="/timeline">Timeline</a>
+                <span class="transcript-nav-jumps">
+                    <a href="#transcript-top">Top</a>
+                    <a href="#transcript-bottom">End</a>
+                </span>
+            </div>
         </div>
 
         {{if .NotFound}}
@@ -39,7 +42,18 @@
                 <div class="transcript-turn-body">
                     {{range .Blocks}}
                     {{if eq .Type "text"}}
+                    {{if .Collapsible}}
+                    <div class="transcript-longtext">
+                        <div class="transcript-text markdown-body">{{.HTML}}</div>
+                        <label class="transcript-longtext-toggle">
+                            <input type="checkbox" hidden>
+                            <span class="lt-more">Show full message &middot; {{.LineCount}} lines</span>
+                            <span class="lt-less">Show less</span>
+                        </label>
+                    </div>
+                    {{else}}
                     <div class="transcript-text markdown-body">{{.HTML}}</div>
+                    {{end}}
                     {{else if eq .Type "thinking"}}
                     <details class="transcript-thinking">
                         <summary>Thinking</summary>

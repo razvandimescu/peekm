@@ -36,6 +36,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+  # Chained here rather than a release: published workflow because goreleaser creates the
+  # release with GITHUB_TOKEN, and GITHUB_TOKEN-triggered events don't start new workflow runs.
+  fractal:
+    needs: goreleaser
+    permissions:
+      contents: write
+    uses: razvandimescu/fractal-of-the-day/.github/workflows/release-fractal.reusable.yml@main
+    with:
+      tag: ${{ github.ref_name }}
+
   publish-npm:
     needs: goreleaser
     runs-on: ubuntu-latest

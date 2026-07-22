@@ -271,10 +271,75 @@ function updateNavButtons() {
     const isView = path.startsWith('/view/');
     const filesBtn = document.getElementById('files-btn');
     const timelineBtn = document.getElementById('timeline-btn');
+    const standupBtn = document.getElementById('standup-btn');
     const memoryBtn = document.getElementById('memory-btn');
     if (filesBtn) filesBtn.classList.toggle('active', path === '/' || (isView && !inMemoryMode));
     if (timelineBtn) timelineBtn.classList.toggle('active', path.startsWith('/timeline') || path.startsWith('/transcript'));
+    if (standupBtn) standupBtn.classList.toggle('active', path.startsWith('/standup'));
     if (memoryBtn) memoryBtn.classList.toggle('active', path.startsWith('/memory') || (isView && inMemoryMode));
+}
+
+// Standup: larger text for reading aloud, persisted alongside the theme preference.
+function toggleStandupLarge() {
+    const on = document.body.classList.toggle('standup-lg');
+    try { localStorage.setItem('peekm_standup_lg', on ? '1' : '0'); } catch (e) {}
+}
+
+// Standup: copy a plain-text digest for pasting into a Slack/GitHub thread —
+// the "hand a teammate who missed standup" path, without saving a file first.
+function copyRecap(btn) {
+    var lines = [];
+    var label = document.querySelector('.standup-date-label');
+    var summary = document.querySelector('.standup-summary');
+    lines.push('*Recap — ' + (label ? label.textContent.trim() : '') + '*'
+        + (summary ? '  ·  ' + summary.textContent.trim() : ''));
+    lines.push('');
+    document.querySelectorAll('.standup-project').forEach(function (p) {
+        var name = p.querySelector('.standup-project-name');
+        if (!name) return;
+        var metrics = p.querySelector('.standup-metrics');
+        var m = metrics ? metrics.textContent.replace(/\s+/g, ' ').trim() : '';
+        lines.push('• ' + name.textContent.trim() + (m ? ' — ' + m : ''));
+    });
+    var tail = document.querySelector('.standup-tail-items');
+    if (tail) { lines.push(''); lines.push('Also touched: ' + tail.textContent.replace(/\s+/g, ' ').trim()); }
+    var text = lines.join('\n');
+
+    var done = function () {
+        btn.classList.add('copied');
+        var orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.classList.remove('copied'); btn.textContent = orig; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { copyFallback(text, done); });
+    } else {
+        copyFallback(text, done);
+    }
+}
+function copyFallback(text, done) {
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    t.remove();
+}
+
+// Standup: write standup-YYYY-MM-DD.md into the browse dir, then open it.
+function saveStandup(date) {
+    fetch('/standup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: date })
+    }).then(function (r) {
+        if (!r.ok) throw new Error('save failed');
+        return r.json();
+    }).then(function (data) {
+        if (typeof showToast === 'function') showToast('Saved ' + data.path);
+        navigate('/view/' + encodeURIComponent(data.path));
+    }).catch(function () {
+        if (typeof showToast === 'function') showToast('Could not save standup');
+    });
 }
 
 function reinitializeScripts() {
@@ -286,6 +351,12 @@ function reinitializeScripts() {
     try {
         updateNavButtons();
         checkShareStatus();
+
+        // A swapped-in #content mints a fresh .markdown-body with no data-theme,
+        // so a forced theme must be re-stamped onto it (see applyThemeToContent).
+        if (typeof applyThemeToContent === 'function') {
+            applyThemeToContent(localStorage.getItem('theme') || 'auto');
+        }
 
         if (viewType === 'browser') {
             if (typeof setupCollapse === 'function') {
@@ -365,8 +436,22 @@ function interceptLinks(e) {
         return;
     }
 
+    // Same-page anchors (e.g. "Jump to end"): content scrolls inside .content-area,
+    // not the document, so native hash navigation resets the overflow:hidden root to
+    // the top instead of scrolling the pane. Scroll the container to the target.
+    if (url.startsWith('#')) {
+        const target = document.getElementById(url.slice(1));
+        const scroller = document.querySelector('.content-area');
+        if (target && scroller) {
+            e.preventDefault();
+            const top = scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            scroller.scrollTo({ top, behavior: 'smooth' });
+        }
+        return;
+    }
+
     // Intercept all internal navigation links (root, file views, timeline)
-    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/memory')) {
+    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/standup') || url.startsWith('/memory')) {
         e.preventDefault();
         navigate(url);
     }
@@ -385,6 +470,11 @@ window.addEventListener('popstate', function(e) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[SPA] Initializing...');
+
+    // Restore standup large-text preference (body persists across SPA swaps)
+    try {
+        if (localStorage.getItem('peekm_standup_lg') === '1') document.body.classList.add('standup-lg');
+    } catch (e) {}
 
     // Setup persistent SSE connection
     connectSSE();
@@ -1541,9 +1631,6 @@ function initializeSidebar() {
 
     const viewType = content.dataset.view;
 
-    // Show hamburger button for all unified layout views
-    updateSidebarToggleButton();
-
     // Restore saved state or default to expanded (Persistent Navigation)
     const container = document.querySelector('.layout-container');
     if (!container) return;
@@ -1569,13 +1656,6 @@ function initializeSidebar() {
     if (viewType === 'file') {
         highlightCurrentFile();
     }
-}
-
-// Update hamburger button visibility
-function updateSidebarToggleButton() {
-    const toggleBtn = document.getElementById('sidebar-toggle');
-    if (!toggleBtn) return;
-    toggleBtn.style.display = 'inline-block';
 }
 
 // Note: syncSidebarContent() removed in unified layout

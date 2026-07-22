@@ -16,7 +16,22 @@ function setTheme(mode) {
         html.setAttribute('data-color-mode', mode);
     }
 
+    applyThemeToContent(mode);
     updateThemeButton(mode);
+}
+
+// github-markdown.css redeclares its color vars on .markdown-body itself inside
+// prefers-color-scheme queries, so a forced theme on the root never reaches the
+// content pane. Stamp the attribute on every .markdown-body so the !important
+// [data-theme] overrides win locally. Called again after SPA swaps mint new panes.
+function applyThemeToContent(mode) {
+    document.querySelectorAll('.markdown-body').forEach(el => {
+        if (mode === 'auto') {
+            el.removeAttribute('data-theme');
+        } else {
+            el.setAttribute('data-theme', mode);
+        }
+    });
 }
 
 function updateThemeButton(mode) {

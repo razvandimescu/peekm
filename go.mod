@@ -1,12 +1,14 @@
 module github.com/razvandimescu/peekm
 
-go 1.24.0
+go 1.25.0
+
+toolchain go1.26.4
 
 require (
 	github.com/alecthomas/chroma/v2 v2.2.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/rancher/remotedialer v0.6.0
-	github.com/yuin/goldmark v1.7.13
+	github.com/yuin/goldmark v1.7.17
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 )
 
@@ -22,7 +24,7 @@ require (
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 )

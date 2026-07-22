@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{.FileName}} - Shared via peekm</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <style>
         {{.GitHubCSS}}
         {{.ThemeOverrides}}
@@ -15,270 +18,317 @@
             padding: 0;
             min-height: 100vh;
             background: var(--bgColor-muted, #f6f8fa);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-family: var(--font-body);
         }
 
-        .shared-banner {
-            position: sticky;
-            top: 0;
-            z-index: 10;
+        /* ===== Branded hero — the public front door ===== */
+        .s-hero {
+            position: relative;
+            color: #fff;
             flex-shrink: 0;
+            background:
+                radial-gradient(ellipse 55% 90% at 86% -10%, rgba(47,111,237,0.42), transparent 60%),
+                radial-gradient(ellipse 50% 80% at 6% 115%, rgba(232,149,44,0.12), transparent 55%),
+                linear-gradient(150deg, #0b1a31 0%, #10274a 55%, #143a66 100%);
+            padding: 22px 0 52px;
+        }
+        .s-hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(91,145,255,0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(91,145,255,0.06) 1px, transparent 1px);
+            background-size: 50px 50px;
+            mask-image: radial-gradient(ellipse 90% 80% at 50% 25%, #000 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 25%, #000 40%, transparent 80%);
+        }
+        .s-hero-wrap {
+            position: relative;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 0 32px;
+        }
+
+        .s-nav {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 24px;
-            background: var(--bgColor-default, #fff);
-            border-bottom: 1px solid var(--borderColor-default, #d0d7de);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-            font-size: 13px;
-            color: var(--fgColor-default, #1f2328);
             gap: 12px;
+            margin-bottom: 40px;
         }
+        .s-brand {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 8px;
+            color: #fff;
+            text-decoration: none;
+        }
+        .s-brand-mark {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 21px;
+            letter-spacing: -0.5px;
+        }
+        .s-brand-mark b { color: #5b91ff; }
+        .s-brand-by { font-size: 11px; color: #5e84b4; }
 
-        .shared-banner-left {
-            display: flex;
+        .s-nav-right { display: flex; align-items: center; gap: 10px; }
+        .s-theme-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 50%;
+            border: 1px solid rgba(91,145,255,0.28);
+            background: rgba(91,145,255,0.10);
+            color: #9fbdf5;
+            cursor: pointer;
+            transition: background .15s, color .15s;
+        }
+        .s-theme-toggle:hover { background: rgba(91,145,255,0.22); color: #fff; }
+
+        .s-badge {
+            display: inline-flex;
             align-items: center;
             gap: 8px;
-            min-width: 0;
+            margin-bottom: 16px;
+            padding: 5px 13px;
+            border-radius: 30px;
+            background: rgba(232,149,44,0.14);
+            border: 1px solid rgba(232,149,44,0.30);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            letter-spacing: 0.3px;
+            color: #f0a845;
+            max-width: 100%;
+            box-sizing: border-box;
         }
-
-        .shared-banner-left strong {
+        .s-badge .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: #f0a845; box-shadow: 0 0 9px #f0a845; flex-shrink: 0;
+        }
+        .s-badge strong {
+            font-weight: 500;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 400px;
         }
 
-        .shared-banner-sep {
-            color: var(--fgColor-muted, #656d76);
+        .s-hero h1 {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: clamp(26px, 4vw, 40px);
+            line-height: 1.08;
+            letter-spacing: -1px;
+            margin: 0 0 14px;
+            word-break: break-word;
         }
+        .s-hero h1 em { font-style: normal; color: #5b91ff; }
+        .s-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            color: #8fb1da;
+        }
+        .s-meta .sep { width: 1px; height: 13px; background: rgba(255,255,255,0.18); }
 
-        .shared-banner-link {
+        /* actions row — user agency: export/copy up front */
+        .s-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 26px;
+        }
+        .s-copy {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            color: var(--fgColor-muted, #656d76);
-            text-decoration: none;
-            white-space: nowrap;
-            font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-            font-weight: 700;
-            font-size: 12px;
-            letter-spacing: -0.01em;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 13.5px;
+            cursor: pointer;
+            transition: background .15s, border-color .15s;
         }
+        .s-copy:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.4); }
+        .s-copy svg { flex-shrink: 0; }
+        .s-copy.copied { color: #7ee2a0; border-color: rgba(126,226,160,0.5); background: rgba(126,226,160,0.12); }
 
-        .shared-banner-link svg {
-            color: var(--peekm-accent, #0a8043);
-            filter: drop-shadow(0 0 4px var(--peekm-accent-glow, rgba(10, 128, 67, 0.35)));
-        }
-
-        .shared-banner-link:hover {
-            color: var(--fgColor-default, #1f2328);
-        }
-
-        .shared-banner-link:hover svg {
-            color: var(--peekm-accent, #0a8043);
-        }
-
+        /* ===== Expiry pill (sits in hero nav, restyled for dark) ===== */
         .expiry-badge {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 3px 10px;
-            border-radius: 12px;
-            background: var(--bgColor-default, #fff);
-            border: 1px solid var(--borderColor-default, #d0d7de);
+            gap: 7px;
+            padding: 6px 13px;
+            border-radius: 30px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.18);
             font-size: 12px;
-            color: var(--fgColor-muted, #656d76);
+            color: #b8d0ee;
             white-space: nowrap;
         }
-
         .expiry-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--fgColor-success, #1a7f37);
+            width: 6px; height: 6px; border-radius: 50%;
+            background: #3fb950; box-shadow: 0 0 8px rgba(63,185,80,0.6);
         }
-
         .expiry-badge.warning {
-            background: var(--bgColor-attention-muted, #fff8c5);
-            border-color: var(--borderColor-attention-muted, #d4a72c66);
-            color: var(--fgColor-attention, #9a6700);
+            background: rgba(240,168,69,0.14);
+            border-color: rgba(240,168,69,0.4);
+            color: #f0a845;
         }
-
-        .expiry-badge.warning .expiry-dot {
-            background: var(--fgColor-attention, #9a6700);
-        }
-
+        .expiry-badge.warning .expiry-dot { background: #f0a845; box-shadow: 0 0 8px rgba(240,168,69,0.6); }
         .expiry-badge.expired {
-            background: var(--bgColor-danger-muted, #ffebe9);
-            border-color: var(--borderColor-danger-muted, #ff818266);
-            color: var(--fgColor-danger, #d1242f);
+            background: rgba(248,81,73,0.14);
+            border-color: rgba(248,81,73,0.4);
+            color: #ff8a82;
         }
+        .expiry-badge.expired .expiry-dot { background: #ff8a82; box-shadow: none; }
 
-        .expiry-badge.expired .expiry-dot {
-            background: var(--fgColor-danger, #d1242f);
-        }
-
-        /* Split download button: primary ".md" segment + caret that opens a format menu. */
-        .dl-split {
-            position: relative;
-            display: none;
-            align-items: stretch;
-        }
-
-        .dl-split.ready {
-            display: inline-flex;
-        }
-
-        .dl-primary,
-        .dl-caret {
+        /* ===== Split download button (primary .md + caret menu) ===== */
+        .dl-split { position: relative; display: none; align-items: stretch; }
+        .dl-split.ready { display: inline-flex; }
+        .dl-primary, .dl-caret {
             display: inline-flex;
             align-items: center;
-            background: var(--bgColor-default, #fff);
-            border: 1px solid var(--borderColor-default, #d0d7de);
-            color: var(--fgColor-default, #1f2328);
-            font-family: inherit;
-            font-size: 12px;
-            line-height: 1.4;
+            border: 1px solid #2f6fed;
+            background: #2f6fed;
+            color: #fff;
             cursor: pointer;
+            transition: background .15s, transform .08s;
         }
-
         .dl-primary {
-            gap: 6px;
-            padding: 3px 10px;
-            border-radius: 12px 0 0 12px;
-            border-right: none;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 10px 0 0 10px;
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 13.5px;
             text-decoration: none;
             white-space: nowrap;
+            box-shadow: 0 10px 28px -12px rgba(47,111,237,0.7);
         }
-
         .dl-caret {
-            padding: 3px 7px;
-            border-radius: 0 12px 12px 0;
+            padding: 0 11px;
+            border-radius: 0 10px 10px 0;
+            border-left-color: rgba(255,255,255,0.25);
         }
-
-        .dl-primary:hover,
-        .dl-caret:hover,
-        .dl-caret[aria-expanded="true"] {
-            background: var(--bgColor-muted, #f6f8fa);
-            color: var(--fgColor-accent, #0969da);
-            border-color: var(--borderColor-muted, #afb8c1);
-        }
-
-        .dl-primary svg,
-        .dl-caret svg {
-            flex-shrink: 0;
-        }
+        .dl-primary:hover, .dl-caret:hover, .dl-caret[aria-expanded="true"] { background: #5b91ff; }
+        .dl-primary:active { transform: translateY(1px); }
+        .dl-primary svg, .dl-caret svg { flex-shrink: 0; }
 
         .dl-menu {
             position: absolute;
-            top: calc(100% + 4px);
+            top: calc(100% + 6px);
             right: 0;
-            min-width: 168px;
-            padding: 4px;
+            min-width: 180px;
+            padding: 5px;
             background: var(--bgColor-default, #fff);
             border: 1px solid var(--borderColor-default, #d0d7de);
-            border-radius: 8px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            border-radius: 10px;
+            box-shadow: 0 16px 40px rgba(11,26,49,0.3);
             z-index: 20;
         }
-
-        .dl-menu[hidden] {
-            display: none;
-        }
-
+        .dl-menu[hidden] { display: none; }
         .dl-menu-item {
             display: block;
             width: 100%;
             box-sizing: border-box;
-            padding: 6px 10px;
+            padding: 8px 11px;
             border: none;
-            border-radius: 6px;
+            border-radius: 7px;
             background: transparent;
             color: var(--fgColor-default, #1f2328);
-            font-family: inherit;
+            font-family: var(--font-body);
             font-size: 13px;
             text-align: left;
             text-decoration: none;
             white-space: nowrap;
             cursor: pointer;
         }
-
         .dl-menu-item:hover:not([aria-disabled="true"]),
         .dl-menu-item:focus-visible {
             background: var(--bgColor-muted, #f6f8fa);
+            color: var(--peekm-accent, #2f6fed);
             outline: none;
         }
+        .dl-menu-item[aria-disabled="true"] { color: var(--fgColor-muted, #656d76); cursor: default; }
+        .dl-menu-hint { color: var(--fgColor-muted, #656d76); font-size: 11px; }
 
-        .dl-menu-item[aria-disabled="true"] {
-            color: var(--fgColor-muted, #656d76);
-            cursor: default;
-        }
-
-        .dl-menu-hint {
-            color: var(--fgColor-muted, #656d76);
-            font-size: 11px;
-        }
-
-        .shared-content {
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 45px;
-            background: var(--bgColor-default, #fff);
+        /* ===== Document card (GitHub-faithful, overlapping the hero) ===== */
+        .s-doc-shell {
             flex: 1;
+            max-width: 980px;
+            width: 100%;
+            margin: -28px auto 0;
+            padding: 0 32px 70px;
+            box-sizing: border-box;
+            position: relative;
+            z-index: 2;
         }
+        .shared-content {
+            padding: 48px 56px;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            border-radius: 14px;
+            box-shadow: 0 30px 70px -34px rgba(11,26,49,0.5);
+        }
+
+        /* ===== Footer ===== */
+        .s-foot { text-align: center; padding: 0 32px 48px; }
+        .s-foot .made {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 16px;
+            background: var(--bgColor-default, #fff);
+            border: 1px solid var(--borderColor-default, #d0d7de);
+            border-radius: 30px;
+            font-size: 12.5px;
+            color: var(--fgColor-muted, #656d76);
+        }
+        .s-foot .made b { font-family: var(--font-display); color: var(--fgColor-default, #1f2328); }
+        .s-foot .made b span { color: var(--peekm-accent, #2f6fed); }
+        .s-foot .made a { color: var(--peekm-accent, #2f6fed); font-weight: 600; text-decoration: none; }
+        .s-foot .expires-note { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; color: var(--fgColor-muted, #656d76); opacity: 0.8; }
 
         .expired-message {
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 60vh;
+            min-height: 40vh;
             text-align: center;
             color: var(--fgColor-muted, #656d76);
         }
-
-        .expired-message h2 {
-            margin: 0 0 8px;
-            font-size: 20px;
-            color: var(--fgColor-default, #1f2328);
-        }
-
-        .expired-message p {
-            margin: 0;
-            font-size: 14px;
-        }
-
-        .expired-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
+        .expired-message h2 { margin: 0 0 8px; font-family: var(--font-display); font-size: 22px; color: var(--fgColor-default, #1f2328); }
+        .expired-message p { margin: 0; font-size: 14px; }
+        .expired-icon { margin-bottom: 16px; opacity: 0.5; }
 
         @media (max-width: 767px) {
-            .shared-content { padding: 15px; }
+            .s-doc-shell { padding-left: 16px; padding-right: 16px; }
+            .shared-content { padding: 26px 20px; }
         }
-
         @media (max-width: 480px) {
-            .shared-banner { padding: 8px 12px; }
-            .shared-banner-left strong { max-width: 180px; }
-            .shared-banner-sep, .shared-banner-link { display: none; }
+            .s-hero-wrap, .s-foot { padding-left: 18px; padding-right: 18px; }
+            .s-nav { margin-bottom: 26px; }
+            .s-badge { max-width: 70vw; }
             .dl-primary-label { display: none; }
-            .dl-primary { padding: 3px 9px; }
         }
 
         /* Touch: each split segment is an independent ≥44px tap target. */
         @media (hover: none) and (pointer: coarse) {
-            .dl-primary, .dl-caret {
-                min-height: 44px;
-                min-width: 44px;
-                justify-content: center;
-            }
-            .dl-menu-item {
-                display: flex;
-                align-items: center;
-                min-height: 44px;
-            }
+            .dl-primary, .dl-caret, .s-copy { min-height: 44px; min-width: 44px; justify-content: center; }
+            .dl-menu-item { display: flex; align-items: center; min-height: 44px; }
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -311,44 +361,147 @@
     </script>
 </head>
 <body>
-    <div class="shared-banner">
-        <div class="shared-banner-left">
-            <strong>{{.FileName}}</strong>
-            <span class="shared-banner-sep">·</span>
-            <a class="shared-banner-link" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener" aria-label="Shared via peekm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-                peekm
-            </a>
-        </div>
-        {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
-        {{else}}<div class="dl-split" id="dl-split">
-            <a class="dl-primary" id="dl-md-primary" href="/s/{{.Token}}/raw" download="{{.FileName}}" aria-label="Download Markdown source">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
-                <span class="dl-primary-label">Download .md</span>
-            </a>
-            <button type="button" class="dl-caret" id="dl-caret" aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu" aria-label="More download formats">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.78 6.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 7.28a.749.749 0 1 1 1.06-1.06L8 9.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
-            </button>
-            <div class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-caret" hidden>
-                <a class="dl-menu-item" role="menuitem" href="/s/{{.Token}}/raw" download="{{.FileName}}">Markdown (.md)</a>
-                <button type="button" class="dl-menu-item" role="menuitem" id="docx-menu-item" aria-disabled="true">Word (.docx)<span class="dl-menu-hint" id="docx-hint"> — preparing…</span></button>
+    <header class="s-hero">
+        <div class="s-hero-wrap">
+            <nav class="s-nav">
+                <a class="s-brand" href="https://github.com/razvandimescu/peekm" target="_blank" rel="noopener" aria-label="Shared via peekm">
+                    <span class="s-brand-mark">peek<b>m</b></span>
+                    <span class="s-brand-by">shared view</span>
+                </a>
+                <div class="s-nav-right">
+                    {{if .IsExpired}}<span class="expiry-badge expired"><span class="expiry-dot"></span> Expired</span>
+                    {{else}}<span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
+                    {{end}}
+                    <button type="button" class="s-theme-toggle" id="s-theme-toggle" aria-label="Switch theme"></button>
+                </div>
+            </nav>
+
+            <span class="s-badge"><span class="dot"></span><strong>{{.FileName}}</strong></span>
+            <h1>{{.TitleHead}}{{if .TitleTail}}<em>{{.TitleTail}}</em>{{end}}</h1>
+            <div class="s-meta">
+                <span>Read-only</span>
+                <span class="sep"></span>
+                <span>~{{.ReadMin}} min read</span>
             </div>
+
+            {{if not .IsExpired}}<div class="s-actions">
+                <div class="dl-split" id="dl-split">
+                    <a class="dl-primary" id="dl-md-primary" href="/s/{{.Token}}/raw" download="{{.FileName}}" aria-label="Download Markdown source">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
+                        <span class="dl-primary-label">Download .md</span>
+                    </a>
+                    <button type="button" class="dl-caret" id="dl-caret" aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu" aria-label="More download formats">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.78 6.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 7.28a.749.749 0 1 1 1.06-1.06L8 9.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+                    </button>
+                    <div class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-caret" hidden>
+                        <a class="dl-menu-item" role="menuitem" href="/s/{{.Token}}/raw" download="{{.FileName}}">Markdown (.md)</a>
+                        <button type="button" class="dl-menu-item" role="menuitem" id="docx-menu-item" aria-disabled="true">Word (.docx)<span class="dl-menu-hint" id="docx-hint"> — preparing…</span></button>
+                    </div>
+                </div>
+                <button type="button" class="s-copy" id="s-copy" aria-label="Copy share link">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"/></svg>
+                    <span class="s-copy-label">Copy link</span>
+                </button>
+            </div>{{end}}
         </div>
-        <span class="expiry-badge" id="expiry-badge"><span class="expiry-dot"></span> <span id="expiry-text">Loading...</span></span>
-        {{end}}
+    </header>
+
+    <div class="s-doc-shell">
+        <div class="markdown-body shared-content" id="shared-content">
+            {{if .IsExpired}}<div class="expired-message">
+                <div class="expired-icon"><svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z"/></svg></div>
+                <h2>Link Expired</h2>
+                <p>This shared link is no longer available. Ask the owner to share it again.</p>
+            </div>
+            {{else}}{{.Content}}
+            {{end}}
+        </div>
     </div>
 
-    <div class="markdown-body shared-content" id="shared-content">
-        {{if .IsExpired}}<div class="expired-message">
-            <div class="expired-icon"><svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor"><path d="m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z"/></svg></div>
-            <h2>Link Expired</h2>
-            <p>This shared link is no longer available. Ask the owner to share it again.</p>
-        </div>
-        {{else}}{{.Content}}
-        {{end}}
-    </div>
+    {{if not .IsExpired}}<footer class="s-foot">
+        <span class="made">Rendered with <b>peek<span>m</span></b> · <a href="https://peekm.dev" target="_blank" rel="noopener">peekm.dev</a></span>
+        <div class="expires-note">link expires automatically · nothing is stored on a server</div>
+    </footer>{{end}}
 
     <script>{{.ThemeManagerJS}}</script>
+    <script>
+        // Recipient-facing theme switch: starts on 'auto', pins light/dark once clicked.
+        (function() {
+            var SUN = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13ZM2.343 2.343a.75.75 0 0 1 1.061 0l1.06 1.061a.75.75 0 0 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm9.193 9.193a.75.75 0 0 1 1.06 0l1.061 1.06a.75.75 0 0 1-1.06 1.061l-1.061-1.06a.75.75 0 0 1 0-1.061ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 13 8ZM2.343 13.657a.75.75 0 0 1 0-1.06l1.06-1.061a.75.75 0 0 1 1.061 1.06l-1.06 1.061a.75.75 0 0 1-1.061 0Zm9.193-9.193a.75.75 0 0 1 0-1.06l1.061-1.061a.75.75 0 0 1 1.06 1.06l-1.06 1.061a.75.75 0 0 1-1.06 0Z"/></svg>';
+            var MOON = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.598 1.591a.749.749 0 0 1 .785-.175 7.001 7.001 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.221-7.832.749.749 0 0 1 0-.785v-.215Z"/></svg>';
+            var btn = document.getElementById('s-theme-toggle');
+            if (!btn) return;
+
+            function isDark() {
+                var mode = document.documentElement.getAttribute('data-color-mode');
+                if (mode === 'dark') return true;
+                if (mode === 'light') return false;
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+            function paint() {
+                var dark = isDark();
+                btn.innerHTML = dark ? SUN : MOON;
+                btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+                // #shared-content is a .markdown-body, so the same mechanism the main app
+                // uses to reach forced-theme content covers the card here too.
+                var mode = document.documentElement.getAttribute('data-color-mode');
+                applyThemeToContent(mode === 'light' || mode === 'dark' ? mode : 'auto');
+            }
+            btn.addEventListener('click', function() {
+                setTheme(isDark() ? 'light' : 'dark');
+                paint();
+                if (typeof mermaid !== 'undefined' && window.peekmMermaidSources) {
+                    document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el, i) {
+                        var src = window.peekmMermaidSources[i];
+                        if (!src) return;
+                        el.removeAttribute('data-processed');
+                        el.textContent = src;
+                    });
+                    mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose' });
+                    try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
+                    catch (e) { console.warn('[mermaid] re-render failed', e); }
+                }
+            });
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+            paint();
+        })();
+    </script>
+    <script>
+        // Copy the current share URL — the page the recipient is already on is the link to pass along.
+        (function() {
+            var btn = document.getElementById('s-copy');
+            if (!btn) return;
+            var label = btn.querySelector('.s-copy-label');
+            var original = label ? label.textContent : '';
+            var revert;
+            btn.addEventListener('click', function() {
+                var done = function() {
+                    btn.classList.add('copied');
+                    if (label) label.textContent = 'Copied!';
+                    clearTimeout(revert);
+                    revert = setTimeout(function() {
+                        btn.classList.remove('copied');
+                        if (label) label.textContent = original;
+                    }, 1800);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(location.href).then(done).catch(fallback);
+                } else {
+                    fallback();
+                }
+                function fallback() {
+                    var t = document.createElement('textarea');
+                    t.value = location.href;
+                    t.style.position = 'fixed';
+                    t.style.opacity = '0';
+                    document.body.appendChild(t);
+                    t.select();
+                    try { document.execCommand('copy'); done(); } catch (e) {}
+                    t.remove();
+                }
+            });
+        })();
+    </script>
     {{if not .IsExpired}}<script>
         (function() {
             var token = '{{.Token}}';
@@ -445,21 +598,18 @@
                 });
             }
 
-            // Lazy-load html-to-image (handles foreignObject) + html-docx-js, both with SRI.
+            // Lazy-load html-to-image (handles foreignObject) + html-docx-js. Both are
+            // vendored into the binary and served same-origin under /s/{token}/_vendor/,
+            // so the export needs no third-party CDN and no SRI to drift.
             // html-to-image is needed because mermaid uses <foreignObject> for HTML labels,
             // which a plain <img src="svg-blob"> + canvas pipeline can't rasterise.
             var libsPromise = null;
             function loadLibs() {
                 if (libsPromise) return libsPromise;
+                var vendor = '/s/{{.Token}}/_vendor/';
                 libsPromise = Promise.all([
-                    loadScript(
-                        'https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.min.js',
-                        'sha384-wNc5eWDV2JUK6HVVRPhI8Bfc08Br5nd66LmdO7jDYWK0fd5uNvfqKKS9QXEOLwfO'
-                    ),
-                    loadScript(
-                        'https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js',
-                        'sha384-T9phw4PsWkw02w0Oq523aDlYzJ5Q4v/BUJZ3tQhenX0My0kgUnxA7CNO64LxS+O3'
-                    )
+                    loadScript(vendor + 'html-to-image.min.js'),
+                    loadScript(vendor + 'html-docx.min.js')
                 ]).then(function() {
                     return { htmlToImage: window.htmlToImage, htmlDocx: window.htmlDocx };
                 }).catch(function(err) {
@@ -469,12 +619,10 @@
                 return libsPromise;
             }
 
-            function loadScript(src, integrity) {
+            function loadScript(src) {
                 return new Promise(function(resolve, reject) {
                     var s = document.createElement('script');
                     s.src = src;
-                    s.integrity = integrity;
-                    s.crossOrigin = 'anonymous';
                     s.onload = resolve;
                     s.onerror = function() { reject(new Error('Failed to load ' + src)); };
                     document.head.appendChild(s);

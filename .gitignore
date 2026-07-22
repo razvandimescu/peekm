@@ -18,6 +18,8 @@ go.work
 
 # Dependency directories
 vendor/
+# but theme/vendor holds embedded third-party assets, not Go module vendoring
+!theme/vendor/
 
 # IDE
 .idea/
