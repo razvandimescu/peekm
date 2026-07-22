@@ -38,7 +38,7 @@
                 {{if .Branch}}<span class="repo-info-branch">{{.Branch}}</span>{{end}}
                 <span class="standup-metrics">{{range $i, $m := .Metrics}}{{if $i}} · {{end}}{{$m}}{{end}}{{if or .Insertions .Deletions}}<span class="standup-churn">+{{.Insertions}} −{{.Deletions}}</span>{{end}}</span>
             </div>
-            {{if .Ribbon}}<div class="standup-ribbon" aria-hidden="true">{{range .Ribbon}}<span class="tl-cell tl-cell-{{.Tool}}" style="height:{{.Height}}%"></span>{{end}}</div>{{end}}
+            {{if .Ribbon}}<div class="standup-ribbon" aria-hidden="true" title="activity mix — green: write · amber: edit · blue: bash">{{range .Ribbon}}<span class="tl-cell tl-cell-{{.Tool}}" style="height:{{.Height}}%"></span>{{end}}</div>{{end}}
             {{if .HeadCommits}}
             <ul class="standup-commits">
                 {{range .HeadCommits}}<li>{{.Subject}}</li>{{end}}
