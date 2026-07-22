@@ -1517,9 +1517,6 @@ function initializeSidebar() {
 
     const viewType = content.dataset.view;
 
-    // Show hamburger button for all unified layout views
-    updateSidebarToggleButton();
-
     // Restore saved state or default to expanded (Persistent Navigation)
     const container = document.querySelector('.layout-container');
     if (!container) return;
@@ -1545,13 +1542,6 @@ function initializeSidebar() {
     if (viewType === 'file') {
         highlightCurrentFile();
     }
-}
-
-// Update hamburger button visibility
-function updateSidebarToggleButton() {
-    const toggleBtn = document.getElementById('sidebar-toggle');
-    if (!toggleBtn) return;
-    toggleBtn.style.display = 'inline-block';
 }
 
 // Note: syncSidebarContent() removed in unified layout
