@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -68,8 +69,16 @@ type timelineSession struct {
 	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
 	SessionType    string // "edit" or "conversation"
 	Events         []timelineEntry
+	Ribbon         []ribbonCell // spatial activity strip (chronological)
 	newestTime     time.Time
 	oldestTime     time.Time
+}
+
+// ribbonCell is one column of a session's activity ribbon: a tool-colored bar
+// whose height encodes relative edit volume at that point in the session.
+type ribbonCell struct {
+	Tool   string // "write" | "edit" | "bash" | "other" (CSS class suffix)
+	Height int    // 16..100 (percent of ribbon height)
 }
 
 type timelineDayGroup struct {
@@ -144,8 +153,15 @@ func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
 	return cache
 }
 
+// dirWithinBase reports whether dir is baseDir or lives under it.
+func dirWithinBase(dir, baseDir string) bool {
+	return filepath.Clean(dir) == filepath.Clean(baseDir) || isWithinDir(dir, baseDir)
+}
+
 // discoverTranscriptSessions scans Claude transcript files for sessions
 // not already tracked via events.jsonl (i.e. conversation-only sessions).
+// Every project under baseDir is scanned, matching how eventsForDir walks the
+// subtree — browsing a parent folder must still surface its projects' sessions.
 func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool) []timelineSession {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -153,9 +169,32 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 	}
 
 	projectsDir := filepath.Join(home, ".claude", "projects")
-	encodedDir := strings.ReplaceAll(baseDir, "/", "-")
-	sessionsDir := filepath.Join(projectsDir, encodedDir)
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
 
+	var sessions []timelineSession
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		projectDir := resolveProjectDir(entry.Name())
+		if projectDir == "" || !dirWithinBase(projectDir, baseDir) {
+			continue
+		}
+		sessions = append(sessions, transcriptSessionsIn(
+			filepath.Join(projectsDir, entry.Name()), projectDir, knownSessionIDs)...)
+	}
+	// Sort newest first for merge
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].newestTime.After(sessions[j].newestTime)
+	})
+	return sessions
+}
+
+// transcriptSessionsIn builds a session per transcript in one project's session directory.
+func transcriptSessionsIn(sessionsDir, projectDir string, knownSessionIDs map[string]bool) []timelineSession {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		return nil
@@ -190,7 +229,7 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 			SessionID:     truncateSessionID(sessionID),
 			FullSessionID: sessionID,
 			Summary:       summary,
-			Project:       filepath.Base(baseDir),
+			Project:       filepath.Base(projectDir),
 			HasTranscript: true,
 			SessionType:   "conversation",
 			newestTime:    newest,
@@ -198,10 +237,6 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 			Duration:      formatSessionDuration(newest.Sub(oldest)),
 		})
 	}
-	// Sort newest first for merge
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].newestTime.After(sessions[j].newestTime)
-	})
 	return sessions
 }
 
@@ -215,8 +250,19 @@ func parseTranscriptTimestamp(raw json.RawMessage) (time.Time, bool) {
 	return parseTimestamp(ts.Timestamp)
 }
 
+// transcriptHeadRecords bounds the head scan: summary and the opening timestamp
+// both live in the first handful of records.
+const transcriptHeadRecords = 50
+
+// transcriptTailBytes is the window read from the end of a transcript to find
+// its closing timestamp.
+const transcriptTailBytes = 64 << 10
+
+var transcriptTimestampRe = regexp.MustCompile(`"timestamp":"([^"]+)"`)
+
 // extractTranscriptMeta extracts summary, first timestamp, and last timestamp
-// from a transcript JSONL in a single pass.
+// from a transcript JSONL. Transcripts run to hundreds of megabytes in
+// aggregate, so it reads a bounded head and tail rather than the whole file.
 func extractTranscriptMeta(path string) (summary string, first, last time.Time) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -225,22 +271,44 @@ func extractTranscriptMeta(path string) (summary string, first, last time.Time) 
 	defer f.Close()
 
 	dec := json.NewDecoder(f)
-	for i := 0; ; i++ {
+	for i := 0; i < transcriptHeadRecords; i++ {
 		var raw json.RawMessage
 		if dec.Decode(&raw) != nil {
 			break
 		}
-		if t, ok := parseTranscriptTimestamp(raw); ok {
-			if first.IsZero() {
-				first = t
-			}
-			last = t
+		if t, ok := parseTranscriptTimestamp(raw); ok && first.IsZero() {
+			first = t
 		}
-		if summary == "" && i < 50 {
+		if summary == "" {
 			summary = extractSummaryFromRaw(raw)
 		}
 	}
-	return
+	return summary, first, lastTranscriptTimestamp(f)
+}
+
+// lastTranscriptTimestamp scans the tail of an open transcript for the newest
+// timestamp, matching on the raw text so a truncated leading record is harmless.
+func lastTranscriptTimestamp(f *os.File) time.Time {
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}
+	}
+	offset := info.Size() - transcriptTailBytes
+	if offset < 0 {
+		offset = 0
+	}
+	buf := make([]byte, info.Size()-offset)
+	if _, err := f.ReadAt(buf, offset); err != nil {
+		return time.Time{}
+	}
+
+	matches := transcriptTimestampRe.FindAllSubmatch(buf, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if t, ok := parseTimestamp(string(matches[i][1])); ok {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 type sessionBuild struct {
@@ -283,6 +351,71 @@ func appendOrMergeEntry(sb *sessionBuild, evt SessionEvent, baseDir string) {
 		newestTime: evt.Timestamp,
 		oldestTime: evt.Timestamp,
 	})
+}
+
+// ribbonClassNames are the four ribbon color groups, indexed by ribbonToolClass.
+var ribbonClassNames = [4]string{"write", "edit", "bash", "other"}
+
+// ribbonToolClass maps a tool name to a ribbonClassNames index.
+func ribbonToolClass(tool string) int {
+	switch tool {
+	case "Write":
+		return 0
+	case "Edit", "MultiEdit", "NotebookEdit":
+		return 1
+	case "Bash":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// ribbonMaxCells caps a ribbon's width so long sessions stay legible; events
+// beyond this are bucketed proportionally rather than truncated.
+const ribbonMaxCells = 48
+
+// buildRibbon turns a session's chronological (aggregated) events into a fixed
+// set of activity columns. Cell height is normalized to the busiest column;
+// cell color is the dominant tool in that column. Deterministic output.
+//
+// Bucket indices i*cells/n are surjective onto [0,cells), so every column gets
+// at least one event — no empty cells, no clamp needed (b.total <= maxTotal).
+func buildRibbon(events []timelineEntry) []ribbonCell {
+	n := len(events)
+	if n == 0 {
+		return nil
+	}
+	cells := min(n, ribbonMaxCells)
+	counts := make([][4]int, cells)
+	totals := make([]int, cells)
+	for i, e := range events {
+		edits := e.EditCount
+		if edits < 1 {
+			edits = 1
+		}
+		bi := i * cells / n
+		counts[bi][ribbonToolClass(e.ToolName)] += edits
+		totals[bi] += edits
+	}
+
+	maxTotal := 1
+	for _, t := range totals {
+		if t > maxTotal {
+			maxTotal = t
+		}
+	}
+
+	out := make([]ribbonCell, cells)
+	for i := range out {
+		dom, domN := 0, -1
+		for cls, c := range counts[i] {
+			if c > domN {
+				dom, domN = cls, c
+			}
+		}
+		out[i] = ribbonCell{Tool: ribbonClassNames[dom], Height: 16 + totals[i]*84/maxTotal}
+	}
+	return out
 }
 
 func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSession {
@@ -336,6 +469,7 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 		}
 		sort.Strings(toolNames)
 		s.Tools = toolNames
+		s.Ribbon = buildRibbon(s.Events)
 
 		sessions = append(sessions, *s)
 	}

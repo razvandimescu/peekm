@@ -25,26 +25,56 @@
 
 [data-theme="dark"] {
     color-scheme: dark !important;
-    --focus-outlineColor: #1f6feb !important;
-    --fgColor-default: #f0f6fc !important;
-    --fgColor-muted: #9198a1 !important;
-    --fgColor-accent: #4493f8 !important;
+    --focus-outlineColor: #3f7af0 !important;
+    /* Navy-tinted dark theme (peekm identity) — surfaces carry a blue cast
+       instead of GitHub's neutral near-black. Semantic colors stay GitHub's. */
+    --fgColor-default: #e8eef8 !important;
+    --fgColor-muted: #98a6c4 !important;
+    --fgColor-accent: #5b91ff !important;
     --fgColor-success: #3fb950 !important;
     --fgColor-attention: #d29922 !important;
     --fgColor-danger: #f85149 !important;
     --fgColor-done: #ab7df8 !important;
-    --bgColor-default: #0d1117 !important;
-    --bgColor-muted: #151b23 !important;
-    --bgColor-neutral-muted: #656c7633 !important;
+    --bgColor-default: #0f1a2c !important;
+    --bgColor-muted: #0a1220 !important;
+    --bgColor-neutral-muted: #5b91ff1f !important;
     --bgColor-attention-muted: #bb800926 !important;
-    --borderColor-default: #3d444d !important;
-    --borderColor-muted: #3d444db3 !important;
-    --borderColor-neutral-muted: #3d444db3 !important;
-    --borderColor-accent-emphasis: #1f6feb !important;
+    --borderColor-default: #273a55 !important;
+    --borderColor-muted: #1c2a44b3 !important;
+    --borderColor-neutral-muted: #1c2a44b3 !important;
+    --borderColor-accent-emphasis: #3f7af0 !important;
     --borderColor-success-emphasis: #238636 !important;
     --borderColor-attention-emphasis: #9e6a03 !important;
     --borderColor-danger-emphasis: #da3633 !important;
     --borderColor-done-emphasis: #8957e5 !important;
+}
+
+/* ============================================================
+   peekm design system (redesign)
+   House type: Space Grotesk (display) / DM Sans (body) / DM Mono (labels).
+   One blue action accent + amber "live/active" signal; green stays the
+   Write/success semantic so peekm's brand green keeps its meaning.
+   @font-face sources live in the file-browser shell head (local /assets/fonts
+   route); the shared view loads the same families from a CDN.
+   ============================================================ */
+:root {
+    --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+
+    --peekm-accent: #2f6fed;
+    --peekm-accent-strong: #1f57c8;
+    --peekm-amber: #e8952c;
+    --peekm-amber-soft: rgba(232, 149, 44, 0.14);
+    --peekm-amber-border: rgba(232, 149, 44, 0.32);
+    --peekm-green: #2ea44f;
+}
+[data-theme="dark"] {
+    --peekm-accent: #5b91ff;
+    --peekm-accent-strong: #3f7af0;
+    --peekm-amber: #f0a845;
+    --peekm-amber-soft: rgba(240, 168, 69, 0.16);
+    --peekm-amber-border: rgba(240, 168, 69, 0.34);
+    --peekm-green: #3fb950;
 }
 
 * {
@@ -54,12 +84,25 @@
 }
 
 body {
-    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-body);
     display: flex;
     justify-content: center;
     min-height: 100vh;
     padding: 20px;
     background-color: var(--bgColor-default);
+}
+
+/* Content stays GitHub-faithful for prose; only headings adopt the display
+   face so the reading surface keeps its familiar rhythm while feeling peekm. */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
 }
 
 /* Note: .container styles for unified layout are defined in file-browser.html */
@@ -284,13 +327,44 @@ body {
 /* Session cards */
 .timeline-session {
     border: 1px solid var(--borderColor-muted);
-    border-radius: 8px;
-    margin-bottom: 8px;
+    border-radius: 12px;
+    margin-bottom: 12px;
     overflow: hidden;
+    background: var(--bgColor-default);
+    box-shadow: 0 10px 30px -22px rgba(20, 30, 50, 0.5);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.timeline-session:hover {
+    transform: translateY(-2px);
+    border-color: var(--borderColor-default);
+    box-shadow: 0 18px 42px -26px rgba(20, 30, 50, 0.6);
 }
 .timeline-session-active {
     border-color: #2ea44f;
 }
+
+/* Activity ribbon — the spatial "shape of a session" at a glance */
+.timeline-ribbon {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 40px;
+    padding: 4px 16px 10px;
+    background: var(--bgColor-default);
+}
+.timeline-ribbon .tl-cell {
+    flex: 1;
+    min-width: 3px;
+    border-radius: 3px 3px 1px 1px;
+    opacity: 0.92;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.timeline-ribbon:hover .tl-cell { opacity: 0.6; }
+.timeline-ribbon .tl-cell:hover { opacity: 1; transform: scaleY(1.06); }
+.tl-cell-write { background: var(--peekm-green); }
+.tl-cell-edit  { background: var(--peekm-amber); }
+.tl-cell-bash  { background: var(--peekm-accent); }
+.tl-cell-other { background: var(--fgColor-muted); opacity: 0.45; }
 [data-theme="dark"] .timeline-session-active {
     border-color: #3fb950;
 }
@@ -729,6 +803,8 @@ a.timeline-session-id:hover {
 
 .transcript-text {
     line-height: 1.7;
+    background: transparent;
+    overflow-wrap: anywhere;
 }
 .transcript-text p:first-child { margin-top: 0; }
 .transcript-text p:last-child { margin-bottom: 0; }
