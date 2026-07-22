@@ -285,6 +285,46 @@ function toggleStandupLarge() {
     try { localStorage.setItem('peekm_standup_lg', on ? '1' : '0'); } catch (e) {}
 }
 
+// Standup: copy a plain-text digest for pasting into a Slack/GitHub thread —
+// the "hand a teammate who missed standup" path, without saving a file first.
+function copyRecap(btn) {
+    var lines = [];
+    var label = document.querySelector('.standup-date-label');
+    var summary = document.querySelector('.standup-summary');
+    lines.push('*Recap — ' + (label ? label.textContent.trim() : '') + '*'
+        + (summary ? '  ·  ' + summary.textContent.trim() : ''));
+    lines.push('');
+    document.querySelectorAll('.standup-project').forEach(function (p) {
+        var name = p.querySelector('.standup-project-name');
+        if (!name) return;
+        var metrics = p.querySelector('.standup-metrics');
+        var m = metrics ? metrics.textContent.replace(/\s+/g, ' ').trim() : '';
+        lines.push('• ' + name.textContent.trim() + (m ? ' — ' + m : ''));
+    });
+    var tail = document.querySelector('.standup-tail-items');
+    if (tail) { lines.push(''); lines.push('Also touched: ' + tail.textContent.replace(/\s+/g, ' ').trim()); }
+    var text = lines.join('\n');
+
+    var done = function () {
+        btn.classList.add('copied');
+        var orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.classList.remove('copied'); btn.textContent = orig; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { copyFallback(text, done); });
+    } else {
+        copyFallback(text, done);
+    }
+}
+function copyFallback(text, done) {
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    t.remove();
+}
+
 // Standup: write standup-YYYY-MM-DD.md into the browse dir, then open it.
 function saveStandup(date) {
     fetch('/standup/save', {

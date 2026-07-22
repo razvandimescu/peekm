@@ -2,7 +2,10 @@
     <div class="container standup">
         <div class="standup-head">
             <div class="standup-head-row">
-                <h1 class="standup-date-label">{{.Day.Label}}</h1>
+                <div class="standup-title">
+                    <span class="standup-eyebrow">Recap</span>
+                    <h1 class="standup-date-label">{{.Day.Label}}</h1>
+                </div>
                 <div class="standup-datenav">
                     <a href="/standup?d={{.Day.PrevDate}}" class="standup-arrow" aria-label="Previous day">‹</a>
                     <input type="date" class="standup-date-input" value="{{.Day.Date}}" max="{{if .Day.NextDate}}{{.Day.NextDate}}{{else}}{{.Day.Date}}{{end}}" onchange="if(this.value)location.href='/standup?d='+this.value" aria-label="Pick a day">
@@ -14,6 +17,7 @@
                 <div class="standup-summary">{{.Day.TotalActive}} active · {{.Day.TotalCommits}} commits · {{.Day.ProjectCount}} projects</div>
                 <div class="standup-actions">
                     <button class="standup-lg-toggle" onclick="toggleStandupLarge()" title="Larger text for reading aloud" aria-label="Toggle larger text">Aa</button>
+                    <button class="standup-copy" onclick="copyRecap(this)" title="Copy a plain-text summary for Slack">Copy for Slack</button>
                     <button class="standup-save" onclick="saveStandup('{{.Day.Date}}')">Save</button>
                 </div>
             </div>
@@ -34,6 +38,7 @@
                 {{if .Branch}}<span class="repo-info-branch">{{.Branch}}</span>{{end}}
                 <span class="standup-metrics">{{range $i, $m := .Metrics}}{{if $i}} · {{end}}{{$m}}{{end}}{{if or .Insertions .Deletions}}<span class="standup-churn">+{{.Insertions}} −{{.Deletions}}</span>{{end}}</span>
             </div>
+            {{if .Ribbon}}<div class="standup-ribbon" aria-hidden="true">{{range .Ribbon}}<span class="tl-cell tl-cell-{{.Tool}}" style="height:{{.Height}}%"></span>{{end}}</div>{{end}}
             {{if .HeadCommits}}
             <ul class="standup-commits">
                 {{range .HeadCommits}}<li>{{.Subject}}</li>{{end}}

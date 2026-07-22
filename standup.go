@@ -82,15 +82,26 @@ type standupProject struct {
 	Files         int
 	ActiveStr     string
 	Sessions      []standupSession
-	SessionRange  string   // combined earliest–latest, e.g. "08:13–18:34"
-	EvidenceFiles []string // top edited basenames (evidence rung 2)
-	MoreFiles     int      // distinct files beyond the shown basenames
-	Prompt        string   // opening prompt (evidence rung 3)
-	Metrics       []string // non-zero metric segments for the headline rail
-	TailSummary   string   // one-line metric summary for the "Also touched" strip
+	SessionRange  string       // combined earliest–latest, e.g. "08:13–18:34"
+	EvidenceFiles []string     // top edited basenames (evidence rung 2)
+	MoreFiles     int          // distinct files beyond the shown basenames
+	Prompt        string       // opening prompt (evidence rung 3)
+	Metrics       []string     // non-zero metric segments for the headline rail
+	TailSummary   string       // one-line metric summary for the "Also touched" strip
+	Ribbon        []ribbonCell // time-bucketed activity rhythm for the day
 
 	active time.Duration // ranking key, not rendered
 }
+
+// toolEvent is one write/edit/bash tool call, kept with its timestamp so the
+// activity ribbon can bucket work by clock time.
+type toolEvent struct {
+	Time  time.Time
+	Class int // ribbonClassNames index (0 write, 1 edit, 2 bash)
+}
+
+// standupRibbonCells is the fixed column count of the per-project activity ribbon.
+const standupRibbonCells = 28
 
 type standupDay struct {
 	Date               string // YYYY-MM-DD
@@ -140,6 +151,7 @@ type daySlice struct {
 	edits   int
 	files   map[string]bool
 	prompts []string
+	tools   []toolEvent // write/edit/bash calls, for the activity ribbon
 }
 
 // standupContent decodes a record's message.content, which is either a bare
@@ -195,6 +207,10 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 			}
 			if b.Input.FilePath != "" {
 				ds.files[b.Input.FilePath] = true
+			}
+			// The ribbon shows shipping rhythm: write/edit/bash only, not reads.
+			if cls := ribbonToolClass(b.Name); cls != 3 {
+				ds.tools = append(ds.tools, toolEvent{Time: t, Class: cls})
 			}
 		}
 	}
@@ -355,6 +371,7 @@ type projectAccum struct {
 	sessionEnd   time.Time
 	prompt       string
 	promptTime   time.Time
+	tools        []toolEvent
 }
 
 // collectProjectSlices walks every transcript under browseDir, gates each on a
@@ -431,6 +448,7 @@ func mergeSlice(accums map[string]*projectAccum, root, projectDir, sessionID str
 
 	a.active += activeTime(slice.stamps) // sorts slice.stamps ascending
 	a.edits += slice.edits
+	a.tools = append(a.tools, slice.tools...)
 	for fp := range slice.files {
 		a.files[fp] = true
 	}
@@ -514,7 +532,50 @@ func finalizeProject(a *projectAccum, dayStr string) standupProject {
 	fillEvidence(&p, a)
 	p.Metrics = headlineMetrics(&p)
 	p.TailSummary = tailSummary(&p)
+	p.Ribbon = buildStandupRibbon(a.tools)
 	return p
+}
+
+// buildStandupRibbon turns a project's chronological write/edit/bash calls into
+// fixed activity columns. Buckets are by event index, not clock time — the work
+// day is mostly idle wall-clock, so time-bucketing would read as grey; index
+// buckets show the shape of the shipping instead (matching the timeline ribbon).
+// Cell colour is by precedence (write > edit > bash) so a burst of editing reads
+// as editing even when bash calls out-number it; height tracks density.
+func buildStandupRibbon(events []toolEvent) []ribbonCell {
+	n := len(events)
+	if n == 0 {
+		return nil
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].Time.Before(events[j].Time) })
+
+	cells := min(n, standupRibbonCells)
+	counts := make([][3]int, cells)
+	totals := make([]int, cells)
+	for i, e := range events {
+		bi := i * cells / n
+		counts[bi][e.Class]++
+		totals[bi]++
+	}
+	maxTotal := 1
+	for _, t := range totals {
+		if t > maxTotal {
+			maxTotal = t
+		}
+	}
+
+	out := make([]ribbonCell, cells)
+	for i := range out {
+		dom := 2
+		for cls := 0; cls < 3; cls++ {
+			if counts[i][cls] > 0 {
+				dom = cls
+				break
+			}
+		}
+		out[i] = ribbonCell{Tool: ribbonClassNames[dom], Height: 40 + totals[i]*60/maxTotal}
+	}
+	return out
 }
 
 // fillEvidence applies the evidence ladder: commits, else edited basenames,

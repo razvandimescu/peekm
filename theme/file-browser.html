@@ -44,8 +44,7 @@
         }
 
         .tree {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe WPC",
-                         "Segoe UI Historic", Helvetica, "SF Pro Text", sans-serif;
+            font-family: var(--font-body);
             font-size: 13px;
             line-height: 22px;
             color: var(--fgColor-default);
@@ -320,7 +319,7 @@
             background: var(--bgColor-default);
             color: var(--fgColor-default);
             font-size: 13px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             transition: all 0.2s;
             outline: none;
         }
@@ -859,7 +858,7 @@
             background: var(--bgColor-default);
             color: var(--fgColor-default);
             font-size: 13px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             padding: 4px 10px;
             height: 26px;
             outline: none;
@@ -971,7 +970,7 @@
         }
 
         .breadcrumb {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             font-size: 11px;
             color: var(--fgColor-muted);
             white-space: nowrap;
@@ -1097,7 +1096,7 @@
             background: var(--bgColor-muted);
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: monospace;
+            font-family: var(--font-mono);
         }
 
         .empty-sidebar {
@@ -1566,8 +1565,20 @@
         /* ===== Standup — a dense, read-aloud digest ===== */
         .standup { max-width: 760px; }
         .standup-head { margin-bottom: 20px; }
-        .standup-head-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .standup-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .standup-eyebrow {
+            display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--fgColor-muted); margin-bottom: 2px;
+        }
         .standup-date-label { font-family: var(--font-display); font-size: 26px; letter-spacing: -0.5px; margin: 0; }
+        /* Activity ribbon: reuses the timeline's tl-cell-* colors; the day's rhythm. */
+        .standup-ribbon { display: flex; gap: 2px; align-items: flex-end; height: 24px; margin: 12px 0 2px; }
+        .standup-ribbon .tl-cell {
+            flex: 1; min-width: 3px; border-radius: 3px 3px 1px 1px; opacity: 0.92;
+            transition: transform 0.12s ease, opacity 0.12s ease;
+        }
+        .standup-ribbon:hover .tl-cell { opacity: 0.55; }
+        .standup-ribbon .tl-cell:hover { opacity: 1; transform: scaleY(1.08); }
         .standup-datenav { display: inline-flex; align-items: center; gap: 4px; }
         .standup-arrow {
             display: inline-flex; align-items: center; justify-content: center;
@@ -1585,14 +1596,15 @@
         .standup-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
         .standup-summary { font-family: var(--font-mono); font-size: 12.5px; color: var(--fgColor-muted); }
         .standup-actions { display: inline-flex; gap: 8px; }
-        .standup-lg-toggle, .standup-save {
+        .standup-lg-toggle, .standup-copy, .standup-save {
             font-family: var(--font-display); font-weight: 600; font-size: 13px; cursor: pointer;
             padding: 6px 12px; border-radius: 7px; border: 1px solid var(--borderColor-default);
             background: var(--bgColor-default); color: var(--fgColor-default);
         }
         .standup-save { background: var(--peekm-accent); border-color: var(--peekm-accent); color: #fff; }
         .standup-save:hover { background: var(--peekm-accent-strong); }
-        .standup-lg-toggle:hover { background: var(--bgColor-muted); }
+        .standup-lg-toggle:hover, .standup-copy:hover { background: var(--bgColor-muted); }
+        .standup-copy.copied { border-color: var(--peekm-green); color: var(--peekm-green); }
         body.standup-lg .standup-lg-toggle { border-color: var(--peekm-accent); color: var(--peekm-accent); }
 
         .standup-project { padding: 16px 0; border-top: 1px solid var(--borderColor-muted); }
