@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,64 @@ func TestToolIcon(t *testing.T) {
 		if icon == "" {
 			t.Errorf("toolIcon(%q) returned empty string", name)
 		}
+	}
+}
+
+func TestDiffOps(t *testing.T) {
+	toStr := func(ops []diffOp) string {
+		var b []byte
+		for _, op := range ops {
+			b = append(b, op.kind, ' ')
+			b = append(b, op.text...)
+			b = append(b, '\n')
+		}
+		return string(b)
+	}
+	tests := []struct {
+		name string
+		a, b []string
+		want string
+	}{
+		{
+			name: "shared context kept, single line changed",
+			a:    []string{"func f() {", "\treturn 1", "}"},
+			b:    []string{"func f() {", "\treturn 2", "}"},
+			want: "  func f() {\n- \treturn 1\n+ \treturn 2\n  }\n",
+		},
+		{
+			name: "pure addition (write)",
+			a:    nil,
+			b:    []string{"line a", "line b"},
+			want: "+ line a\n+ line b\n",
+		},
+		{
+			name: "pure removal",
+			a:    []string{"gone"},
+			b:    nil,
+			want: "- gone\n",
+		},
+		{
+			name: "insertion between context",
+			a:    []string{"a", "c"},
+			b:    []string{"a", "b", "c"},
+			want: "  a\n+ b\n  c\n",
+		},
+	}
+	for _, tt := range tests {
+		if got := toStr(diffOps(tt.a, tt.b)); got != tt.want {
+			t.Errorf("%s: diffOps() =\n%q\nwant\n%q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestLineDiffHTMLCap(t *testing.T) {
+	var lines []string
+	for i := 0; i < 100; i++ {
+		lines = append(lines, "x")
+	}
+	html := lineDiffHTML("", strings.Join(lines, "\n"), 60)
+	if !strings.Contains(html, "40 more lines") {
+		t.Errorf("expected overflow note '40 more lines', got: %s", html)
 	}
 }
 
