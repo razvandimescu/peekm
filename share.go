@@ -364,8 +364,55 @@ type sharedViewData struct {
 	ExpiresAt string
 	FileName  string
 	FilePath  string // relative path for SSE event filtering
+	TitleHead string // lead heading up to and including its separator (or the whole title)
+	TitleTail string // accented remainder after the last separator, empty when there is none
+	ReadMin   int    // estimated reading time in minutes
 	IsExpired bool
 	IsTunnel  bool // true when served via tunnel (suppresses SSE)
+}
+
+// headingSeparators split a title into a plain lead and an accented tail, longest first.
+var headingSeparators = []string{" — ", " – ", " - ", ": ", " · "}
+
+// headingInlineStripper removes emphasis/code markers so the hero title renders as plain text.
+var headingInlineStripper = strings.NewReplacer("`", "", "*", "")
+
+// firstMarkdownH1 returns the text of the first ATX H1, skipping fenced code blocks.
+// Returns "" when the document has no top-level heading.
+func firstMarkdownH1(src []byte) string {
+	inFence := false
+	for _, line := range strings.Split(string(src), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || !strings.HasPrefix(t, "# ") {
+			continue
+		}
+		cleaned := headingInlineStripper.Replace(strings.TrimPrefix(t, "# "))
+		return strings.Trim(cleaned, " #")
+	}
+	return ""
+}
+
+// splitHeading divides a title so the tail (after the last separator) can be accented.
+// The separator stays with the head so the template can render head + <em>tail</em>.
+func splitHeading(title string) (head, tail string) {
+	for _, sep := range headingSeparators {
+		if i := strings.LastIndex(title, sep); i >= 0 {
+			return title[:i+len(sep)], strings.TrimSpace(title[i+len(sep):])
+		}
+	}
+	return title, ""
+}
+
+// readingMinutes estimates reading time at 200 words/min, never below one minute.
+func readingMinutes(src []byte) int {
+	if m := len(strings.Fields(string(src))) / 200; m > 1 {
+		return m
+	}
+	return 1
 }
 
 func serveSharedFile(w http.ResponseWriter, r *http.Request) {
@@ -476,13 +523,22 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 		w.Write(buf.Bytes())
 		return
 	}
+	fileName := filepath.Base(entry.FilePath)
+	title := firstMarkdownH1(content)
+	if title == "" {
+		title = fileName
+	}
+	head, tail := splitHeading(title)
 	data := sharedViewData{
 		baseTemplateData: newBaseTemplateData(),
 		Content:          template.HTML(buf.String()),
 		Token:            token,
 		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
-		FileName:         filepath.Base(entry.FilePath),
+		FileName:         fileName,
 		FilePath:         entry.FilePath,
+		TitleHead:        head,
+		TitleTail:        tail,
+		ReadMin:          readingMinutes(content),
 		IsTunnel:         r.Header.Get("X-Tunnel") == "true",
 	}
 	var renderBuf bytes.Buffer

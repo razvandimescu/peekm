@@ -162,6 +162,14 @@ type browserTemplateData struct {
 	FilePath       string           // Relative path of displayed file (for edit/raw)
 	SessionData    *SessionMetadata // Claude Code session info for this file
 	IsPreview      bool             // true for HTML/SVG/TXT files (no edit mode)
+	FileCount      int              // whitelisted markdown files, shown in the sidebar header
+}
+
+// markdownFileCount returns the size of the current whitelist (thread-safe).
+func markdownFileCount() int {
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+	return len(markdownFiles)
 }
 
 // SessionMetadata contains complete Claude Code session information
@@ -1012,6 +1020,7 @@ func templateFuncMap() template.FuncMap {
 		"formatTimeAgo": formatTimeAgo,
 		"pathEscape":    pathEscapeSegments,
 		"toolIcon":      toolIcon,
+		"truncateSID":   truncateSessionID,
 		"formatTime": func(ts string) string {
 			if t, ok := parseTimestamp(ts); ok {
 				return t.Local().Format("15:04")
@@ -1869,6 +1878,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		ShowBackButton:   showBackButton,
 		BrowsePath:       currentBrowseDir,
 		FilePath:         filePath,
+		FileCount:        markdownFileCount(),
 	}
 
 	renderTemplate(w, r, data)
@@ -2425,6 +2435,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		BrowsePath:       currentBrowseDir,
 		SessionData:      sessionData,
 		IsPreview:        isPreview,
+		FileCount:        markdownFileCount(),
 	}
 
 	fileMutex.Lock()
@@ -3018,6 +3029,7 @@ func generateSmartFolderHTML(folders []smartFolder) string {
 			escapedHref := pathEscapeSegments(f.RelPath)
 			buf.WriteString(fmt.Sprintf(
 				`<div class="tree-item"><div class="tree-node"><span class="tree-file smart-folder-file">`+
+					treeFileIcon+
 					`<a href="/view/%s">%s</a>`+
 					`<span class="smart-folder-meta">`+
 					`<span class="session-operation-badge session-operation-%s">%s</span>`+
@@ -3041,6 +3053,9 @@ func pathEscapeSegments(s string) string {
 	}
 	return strings.Join(parts, "/")
 }
+
+// treeFileIcon is the per-file document glyph rendered before each leaf's link.
+const treeFileIcon = `<svg class="tree-file-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.56v2.19c0 .138.112.25.25.25h2.19Z"/></svg>`
 
 func generateTreeHTML() string {
 	// Get state snapshot (thread-safe)
@@ -3163,6 +3178,7 @@ func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoo
 			// File node (leaf)
 			buf.WriteString(fmt.Sprintf(`<div class="tree-node" draggable="true" data-file-path="%s"><span class="tree-file">`,
 				template.HTMLEscapeString(node.path)))
+			buf.WriteString(treeFileIcon)
 			buf.WriteString(fmt.Sprintf(`<a href="/view/%s" draggable="false">%s</a>`, pathEscapeSegments(node.path), template.HTMLEscapeString(node.name)))
 			buf.WriteString(`</span></div>`)
 		}

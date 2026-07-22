@@ -68,6 +68,13 @@
         <p class="subtitle">{{.Subtitle}}</p>
 
         {{if .SessionData}}
+        <div class="session-ribbon">
+            <span class="session-operation-badge session-operation-{{.SessionData.ToolName}}">{{.SessionData.ToolName}}</span>
+            <span class="session-ribbon-text">Last edited by session</span>
+            <code class="session-ribbon-sid">{{truncateSID .SessionData.SessionID}}</code>
+            <time class="session-ribbon-when" datetime="{{formatISO .SessionData.Timestamp}}">{{formatTimeAgo .SessionData.Timestamp}}</time>
+            <a class="session-ribbon-view" href="/transcript?session={{.SessionData.SessionID}}">View transcript →</a>
+        </div>
         {{template "session-info-panel" .}}
         {{end}}
 

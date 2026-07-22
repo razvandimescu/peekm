@@ -122,10 +122,18 @@
 
         .tree-file {
             color: var(--fgColor-default);
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             font-weight: 400;
             width: 100%;
             overflow: hidden;
+        }
+
+        .tree-file-icon {
+            flex-shrink: 0;
+            color: var(--fgColor-muted);
+            opacity: 0.6;
         }
 
         .tree-file a {
@@ -133,7 +141,8 @@
             text-decoration: none;
             transition: color 0.1s ease-out;
             opacity: 0.9;
-            display: block;
+            flex: 1;
+            min-width: 0;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1313,6 +1322,10 @@
                 min-width: 32px;
                 min-height: 28px;
             }
+            /* Reclaim width on small screens — icons carry the meaning here. */
+            .nav-btn-label {
+                display: none;
+            }
 
             .top-bar button {
                 min-width: 36px;
@@ -1500,6 +1513,51 @@
         }
 
         /* Session Info Button */
+        /* Inline session provenance ribbon — the ambient summary above the document.
+           The detailed panel stays behind the AI button; this is the one-line "who touched this". */
+        .session-ribbon {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 9px 14px;
+            margin-bottom: 24px;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-left: 3px solid var(--peekm-amber);
+            border-radius: 6px;
+            font-size: 12.5px;
+            color: var(--fgColor-muted);
+        }
+        .session-ribbon-text { white-space: nowrap; }
+        .session-ribbon-sid {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            font-size: 11.5px;
+            color: var(--fgColor-default);
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            padding: 1px 7px;
+            border-radius: 5px;
+        }
+        .session-ribbon-when {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 11.5px;
+            color: var(--fgColor-muted);
+            white-space: nowrap;
+        }
+        .session-ribbon-view {
+            color: var(--peekm-accent);
+            font-weight: 600;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .session-ribbon-view:hover { text-decoration: underline; }
+        @media (max-width: 480px) {
+            .session-ribbon-when { margin-left: 0; }
+        }
+
         .session-info-button {
             display: inline-flex;
             align-items: center;
@@ -1851,6 +1909,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            gap: 6px;
             text-decoration: none;
             background: transparent;
             border: none;
@@ -1862,6 +1921,12 @@
             color: var(--fgColor-muted);
             min-width: 36px;
             min-height: 32px;
+        }
+        .nav-btn-label {
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1;
         }
         .nav-btn:hover {
             background: var(--bgColor-default);
@@ -2174,6 +2239,15 @@
             text-transform: uppercase;
             color: var(--fgColor-muted);
         }
+        .sidebar-count {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.6px;
+            color: var(--fgColor-muted);
+            opacity: 0.7;
+        }
         /* The filename now lives in the breadcrumb; hide the in-content title
            to avoid duplication. The subtitle stays — it carries the file's
            absolute path, which the breadcrumb (dir-relative) does not. */
@@ -2294,12 +2368,15 @@
             <div class="top-bar-views" role="navigation" aria-label="View switcher">
                 <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
+                    <span class="nav-btn-label">Files</span>
                 </a>
                 {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline — tracks Claude Code sessions">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
+                    <span class="nav-btn-label">Timeline</span>
                 </a>{{end}}
                 <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4zM5 4h6v1.5H5V4zm0 3h6v1.5H5V7zm0 3h4v1.5H5V10z"/></svg>
+                    <span class="nav-btn-label">Memory</span>
                 </a>
             </div>
             <div class="theme-dropdown-container">
@@ -2374,6 +2451,7 @@
         <aside class="file-sidebar" aria-label="File tree" tabindex="-1">
             <div class="sidebar-header">
                 <span class="sidebar-eyebrow">Workspace</span>
+                {{if .FileCount}}<span class="sidebar-count">{{.FileCount}} files</span>{{end}}
                 <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 .8 1.6L10 9.267V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-4.733L1.2 2.6A1 1 0 0 1 1 2Z"/></svg>
                 </button>

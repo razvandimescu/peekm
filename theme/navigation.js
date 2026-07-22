@@ -287,6 +287,12 @@ function reinitializeScripts() {
         updateNavButtons();
         checkShareStatus();
 
+        // A swapped-in #content mints a fresh .markdown-body with no data-theme,
+        // so a forced theme must be re-stamped onto it (see applyThemeToContent).
+        if (typeof applyThemeToContent === 'function') {
+            applyThemeToContent(localStorage.getItem('theme') || 'auto');
+        }
+
         if (viewType === 'browser') {
             if (typeof setupCollapse === 'function') {
                 setupCollapse();
