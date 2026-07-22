@@ -1,0 +1,69 @@
+<main id="content" data-view="standup" data-path="{{.BrowsePath}}" class="content-area">
+    <div class="container standup">
+        <div class="standup-head">
+            <div class="standup-head-row">
+                <div class="standup-title">
+                    <span class="standup-eyebrow">Recap</span>
+                    <h1 class="standup-date-label">{{.Day.Label}}</h1>
+                </div>
+                <div class="standup-datenav">
+                    <a href="/standup?d={{.Day.PrevDate}}" class="standup-arrow" aria-label="Previous day">‹</a>
+                    <input type="date" class="standup-date-input" value="{{.Day.Date}}" max="{{if .Day.NextDate}}{{.Day.NextDate}}{{else}}{{.Day.Date}}{{end}}" onchange="if(this.value)location.href='/standup?d='+this.value" aria-label="Pick a day">
+                    {{if .Day.NextDate}}<a href="/standup?d={{.Day.NextDate}}" class="standup-arrow" aria-label="Next day">›</a>{{else}}<span class="standup-arrow disabled" aria-disabled="true">›</span>{{end}}
+                </div>
+            </div>
+            {{if not .Day.IsEmpty}}
+            <div class="standup-summary-row">
+                <div class="standup-summary">{{.Day.TotalActive}} active · {{.Day.TotalCommits}} commits · {{.Day.ProjectCount}} projects</div>
+                <div class="standup-actions">
+                    <button class="standup-lg-toggle" onclick="toggleStandupLarge()" title="Larger text for reading aloud" aria-label="Toggle larger text">Aa</button>
+                    <button class="standup-copy" onclick="copyRecap(this)" title="Copy a plain-text summary for Slack">Copy for Slack</button>
+                    <button class="standup-save" onclick="saveStandup('{{.Day.Date}}')">Save</button>
+                </div>
+            </div>
+            {{end}}
+        </div>
+
+        {{if .Day.IsEmpty}}
+        <div class="timeline-empty standup-empty">
+            <svg width="40" height="40" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
+            <p>No sessions on {{.Day.Label}}.</p>
+            {{if .Day.NearestActiveDate}}<p><a href="/standup?d={{.Day.NearestActiveDate}}">Nearest day with activity: {{.Day.NearestActiveLabel}} →</a></p>{{end}}
+        </div>
+        {{else}}
+        {{range .Day.Headline}}
+        <div class="standup-project">
+            <div class="standup-project-head">
+                <span class="standup-project-name">{{.Name}}</span>
+                {{if .Branch}}<span class="repo-info-branch">{{.Branch}}</span>{{end}}
+                <span class="standup-metrics">{{range $i, $m := .Metrics}}{{if $i}} · {{end}}{{$m}}{{end}}{{if or .Insertions .Deletions}}<span class="standup-churn">+{{.Insertions}} −{{.Deletions}}</span>{{end}}</span>
+            </div>
+            {{if .Ribbon}}<div class="standup-ribbon" aria-hidden="true" title="activity mix — green: write · amber: edit · blue: bash">{{range .Ribbon}}<span class="tl-cell tl-cell-{{.Tool}}" style="height:{{.Height}}%"></span>{{end}}</div>{{end}}
+            {{if .HeadCommits}}
+            <ul class="standup-commits">
+                {{range .HeadCommits}}<li>{{.Subject}}</li>{{end}}
+            </ul>
+            {{if .MoreCommits}}
+            <details class="standup-more">
+                <summary>{{len .MoreCommits}} more commit{{if ne (len .MoreCommits) 1}}s{{end}}</summary>
+                <ul>{{range .MoreCommits}}<li>{{.Subject}}</li>{{end}}</ul>
+            </details>
+            {{end}}
+            {{else if .EvidenceFiles}}
+            <div class="standup-evidence">{{range $i, $f := .EvidenceFiles}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}{{if gt .MoreFiles 0}} <span class="standup-more-count">+{{.MoreFiles}} more</span>{{end}}</div>
+            {{else if .Prompt}}
+            <div class="standup-evidence standup-prompt"><em>{{.Prompt}}</em></div>
+            {{end}}
+            <div class="standup-sessions">{{len .Sessions}} session{{if ne (len .Sessions) 1}}s{{end}} · {{.SessionRange}}</div>
+        </div>
+        {{end}}
+
+        {{if .Day.Tail}}
+        <div class="standup-tail">
+            <div class="standup-tail-label">Also touched</div>
+            <div class="standup-tail-items">{{range $i, $p := .Day.Tail}}{{if $i}}<span class="standup-tail-sep"> · </span>{{end}}<span class="standup-tail-item">{{$p.TailSummary}}</span>{{end}}</div>
+        </div>
+        {{end}}
+        {{end}}
+    </div>
+</main>

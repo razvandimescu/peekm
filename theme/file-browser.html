@@ -44,8 +44,7 @@
         }
 
         .tree {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe WPC",
-                         "Segoe UI Historic", Helvetica, "SF Pro Text", sans-serif;
+            font-family: var(--font-body);
             font-size: 13px;
             line-height: 22px;
             color: var(--fgColor-default);
@@ -122,10 +121,18 @@
 
         .tree-file {
             color: var(--fgColor-default);
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             font-weight: 400;
             width: 100%;
             overflow: hidden;
+        }
+
+        .tree-file-icon {
+            flex-shrink: 0;
+            color: var(--fgColor-muted);
+            opacity: 0.6;
         }
 
         .tree-file a {
@@ -133,7 +140,8 @@
             text-decoration: none;
             transition: color 0.1s ease-out;
             opacity: 0.9;
-            display: block;
+            flex: 1;
+            min-width: 0;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -311,7 +319,7 @@
             background: var(--bgColor-default);
             color: var(--fgColor-default);
             font-size: 13px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             transition: all 0.2s;
             outline: none;
         }
@@ -850,7 +858,7 @@
             background: var(--bgColor-default);
             color: var(--fgColor-default);
             font-size: 13px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             padding: 4px 10px;
             height: 26px;
             outline: none;
@@ -962,7 +970,7 @@
         }
 
         .breadcrumb {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--font-body);
             font-size: 11px;
             color: var(--fgColor-muted);
             white-space: nowrap;
@@ -1088,7 +1096,7 @@
             background: var(--bgColor-muted);
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: monospace;
+            font-family: var(--font-mono);
         }
 
         .empty-sidebar {
@@ -1313,6 +1321,10 @@
                 min-width: 32px;
                 min-height: 28px;
             }
+            /* Reclaim width on small screens — icons carry the meaning here. */
+            .nav-btn-label {
+                display: none;
+            }
 
             .top-bar button {
                 min-width: 36px;
@@ -1500,6 +1512,138 @@
         }
 
         /* Session Info Button */
+        /* Inline session provenance ribbon — the ambient summary above the document.
+           The detailed panel stays behind the AI button; this is the one-line "who touched this". */
+        .session-ribbon {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 9px 14px;
+            margin-bottom: 24px;
+            background: var(--bgColor-muted);
+            border: 1px solid var(--borderColor-default);
+            border-left: 3px solid var(--peekm-amber);
+            border-radius: 6px;
+            font-size: 12.5px;
+            color: var(--fgColor-muted);
+        }
+        .session-ribbon-text { white-space: nowrap; }
+        .session-ribbon-sid {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            font-size: 11.5px;
+            color: var(--fgColor-default);
+            background: var(--bgColor-default);
+            border: 1px solid var(--borderColor-default);
+            padding: 1px 7px;
+            border-radius: 5px;
+        }
+        .session-ribbon-when {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 11.5px;
+            color: var(--fgColor-muted);
+            white-space: nowrap;
+        }
+        .session-ribbon-view {
+            color: var(--peekm-accent);
+            font-weight: 600;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .session-ribbon-view:hover { text-decoration: underline; }
+
+        /* Timeline → Recap cross-link, beside the All/Edits toggle */
+        .timeline-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .timeline-recap-link {
+            color: var(--peekm-accent); font-family: var(--font-display); font-weight: 600;
+            font-size: 13px; text-decoration: none; white-space: nowrap;
+        }
+        .timeline-recap-link:hover { text-decoration: underline; }
+
+        /* ===== Standup — a dense, read-aloud digest ===== */
+        .standup { max-width: 760px; }
+        .standup-head { margin-bottom: 20px; }
+        .standup-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .standup-eyebrow {
+            display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--fgColor-muted); margin-bottom: 2px;
+        }
+        .standup-date-label { font-family: var(--font-display); font-size: 26px; letter-spacing: -0.5px; margin: 0; }
+        /* Activity ribbon: reuses the timeline's tl-cell-* colors; the day's rhythm. */
+        .standup-ribbon { display: flex; gap: 2px; align-items: flex-end; height: 24px; margin: 12px 0 2px; }
+        .standup-ribbon .tl-cell {
+            flex: 1; min-width: 3px; border-radius: 3px 3px 1px 1px; opacity: 0.92;
+            transition: transform 0.12s ease, opacity 0.12s ease;
+        }
+        .standup-ribbon:hover .tl-cell { opacity: 0.55; }
+        .standup-ribbon .tl-cell:hover { opacity: 1; transform: scaleY(1.08); }
+        .standup-datenav { display: inline-flex; align-items: center; gap: 4px; }
+        .standup-arrow {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 30px; height: 30px; border-radius: 7px; text-decoration: none;
+            color: var(--fgColor-muted); font-size: 18px; line-height: 1;
+            border: 1px solid var(--borderColor-default);
+        }
+        .standup-arrow:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
+        .standup-arrow.disabled { opacity: 0.35; pointer-events: none; }
+        .standup-date-input {
+            font-family: var(--font-mono); font-size: 12.5px; padding: 5px 8px;
+            border: 1px solid var(--borderColor-default); border-radius: 7px;
+            background: var(--bgColor-default); color: var(--fgColor-default);
+        }
+        .standup-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+        .standup-summary { font-family: var(--font-mono); font-size: 12.5px; color: var(--fgColor-muted); }
+        .standup-actions { display: inline-flex; gap: 8px; }
+        .standup-lg-toggle, .standup-copy, .standup-save {
+            font-family: var(--font-display); font-weight: 600; font-size: 13px; cursor: pointer;
+            padding: 6px 12px; border-radius: 7px; border: 1px solid var(--borderColor-default);
+            background: var(--bgColor-default); color: var(--fgColor-default);
+        }
+        .standup-save { background: var(--peekm-accent); border-color: var(--peekm-accent); color: #fff; }
+        .standup-save:hover { background: var(--peekm-accent-strong); }
+        .standup-lg-toggle:hover, .standup-copy:hover { background: var(--bgColor-muted); }
+        .standup-copy.copied { border-color: var(--peekm-green); color: var(--peekm-green); }
+        body.standup-lg .standup-lg-toggle { border-color: var(--peekm-accent); color: var(--peekm-accent); }
+
+        .standup-project { padding: 16px 0; border-top: 1px solid var(--borderColor-muted); }
+        .standup-project:first-of-type { border-top: none; }
+        .standup-project-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .standup-project-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+        .standup-metrics { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--fgColor-muted); text-align: right; }
+        .standup-churn { display: block; }
+        .standup-commits { list-style: none; margin: 10px 0 0; padding: 0; }
+        .standup-commits li { position: relative; padding-left: 16px; margin: 5px 0; font-size: 15px; line-height: 1.5; }
+        .standup-commits li::before { content: '•'; position: absolute; left: 2px; color: var(--peekm-accent); }
+        .standup-more { margin-top: 6px; font-size: 13px; }
+        .standup-more summary { cursor: pointer; color: var(--fgColor-muted); font-family: var(--font-mono); font-size: 12px; }
+        .standup-more ul { margin: 6px 0 0; padding-left: 18px; }
+        .standup-more li { margin: 4px 0; font-size: 14px; }
+        .standup-evidence { margin-top: 10px; font-size: 14px; color: var(--fgColor-default); }
+        .standup-evidence code { font-family: var(--font-mono); font-size: 12.5px; }
+        .standup-more-count { color: var(--fgColor-muted); }
+        .standup-prompt { color: var(--fgColor-muted); }
+        .standup-sessions { margin-top: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fgColor-muted); }
+
+        .standup-tail { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--borderColor-muted); }
+        .standup-tail-label {
+            font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase;
+            color: var(--fgColor-muted); margin-bottom: 8px;
+        }
+        .standup-tail-items { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
+        .standup-tail-sep { color: var(--borderColor-default); }
+        .standup-empty { color: var(--fgColor-muted); }
+        .standup-empty a { color: var(--peekm-accent); }
+
+        /* Read-aloud mode: larger body text, persisted with the theme preference. */
+        body.standup-lg .standup-commits li { font-size: 18px; line-height: 1.7; }
+        body.standup-lg .standup-evidence { font-size: 16px; }
+        body.standup-lg .standup-project-name { font-size: 19px; }
+        @media (max-width: 480px) {
+            .session-ribbon-when { margin-left: 0; }
+        }
+
         .session-info-button {
             display: inline-flex;
             align-items: center;
@@ -1851,6 +1995,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            gap: 6px;
             text-decoration: none;
             background: transparent;
             border: none;
@@ -1862,6 +2007,12 @@
             color: var(--fgColor-muted);
             min-width: 36px;
             min-height: 32px;
+        }
+        .nav-btn-label {
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1;
         }
         .nav-btn:hover {
             background: var(--bgColor-default);
@@ -2174,6 +2325,15 @@
             text-transform: uppercase;
             color: var(--fgColor-muted);
         }
+        .sidebar-count {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.6px;
+            color: var(--fgColor-muted);
+            opacity: 0.7;
+        }
         /* The filename now lives in the breadcrumb; hide the in-content title
            to avoid duplication. The subtitle stays — it carries the file's
            absolute path, which the breadcrumb (dir-relative) does not. */
@@ -2242,11 +2402,11 @@
     <!-- Unified Top Bar -->
     <header class="top-bar" role="banner">
         <div class="top-bar-left">
+            <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg></button>
             <a class="peekm-brand" href="/" aria-label="peekm home">
                 <span class="peekm-brand-mark">peek<b>m</b></span>
                 <span class="peekm-brand-dot" aria-hidden="true"></span>
             </a>
-            <button onclick="toggleSidebar()" id="sidebar-toggle" aria-label="Hide navigation sidebar" title="Hide navigation (Cmd/Ctrl+B)" style="display: none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg></button>
             <button onclick="openNavModal()" aria-label="Navigate to directory" title="Navigate to directory"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.75C0 1.784.784 1 1.75 1H5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1h6.75c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25Zm9.42 9.36 2.883-2.677a.25.25 0 0 0 0-.366L9.42 6.39a.249.249 0 0 0-.42.183V8.5H4.75a.75.75 0 0 0 0 1.5H9v1.927c0 .218.26.331.42.183Z"/></svg></button>
             <div class="connection-status" id="connection-status" role="status" aria-live="polite" title="{{if .AITrackingEnabled}}Live reload + AI tracking active{{else}}Live reload active{{end}}">
                 <span class="connection-dot" id="connection-dot"></span>
@@ -2294,12 +2454,19 @@
             <div class="top-bar-views" role="navigation" aria-label="View switcher">
                 <a href="/" id="files-btn" class="nav-btn" aria-label="Files" title="Files">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>
+                    <span class="nav-btn-label">Files</span>
                 </a>
                 {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline — tracks Claude Code sessions">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
+                    <span class="nav-btn-label">Timeline</span>
+                </a>
+                <a href="/standup" id="standup-btn" class="nav-btn" aria-label="Recap" title="Recap — what you shipped, ready to read at standup">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1h12.5c.966 0 1.75.784 1.75 1.75v9.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-9.5C0 1.784.784 1 1.75 1ZM1.5 2.75v9.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25ZM3.5 5.25A.75.75 0 0 1 4.25 4.5h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1-.75-.75Zm0 3A.75.75 0 0 1 4.25 7.5h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z"/></svg>
+                    <span class="nav-btn-label">Recap</span>
                 </a>{{end}}
                 <a href="/memory" id="memory-btn" class="nav-btn" aria-label="Memory Browser" title="Memory Browser">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 0h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4zM5 4h6v1.5H5V4zm0 3h6v1.5H5V7zm0 3h4v1.5H5V10z"/></svg>
+                    <span class="nav-btn-label">Memory</span>
                 </a>
             </div>
             <div class="theme-dropdown-container">
@@ -2374,6 +2541,7 @@
         <aside class="file-sidebar" aria-label="File tree" tabindex="-1">
             <div class="sidebar-header">
                 <span class="sidebar-eyebrow">Workspace</span>
+                {{if .FileCount}}<span class="sidebar-count">{{.FileCount}} files</span>{{end}}
                 <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 .8 1.6L10 9.267V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-4.733L1.2 2.6A1 1 0 0 1 1 2Z"/></svg>
                 </button>

@@ -126,6 +126,7 @@
             margin: 0 0 14px;
             word-break: break-word;
         }
+        .s-hero h1 em { font-style: normal; color: #5b91ff; }
         .s-meta {
             display: flex;
             align-items: center;
@@ -144,6 +145,24 @@
             flex-wrap: wrap;
             margin-top: 26px;
         }
+        .s-copy {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 13.5px;
+            cursor: pointer;
+            transition: background .15s, border-color .15s;
+        }
+        .s-copy:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.4); }
+        .s-copy svg { flex-shrink: 0; }
+        .s-copy.copied { color: #7ee2a0; border-color: rgba(126,226,160,0.5); background: rgba(126,226,160,0.12); }
 
         /* ===== Expiry pill (sits in hero nav, restyled for dark) ===== */
         .expiry-badge {
@@ -308,7 +327,7 @@
 
         /* Touch: each split segment is an independent ≥44px tap target. */
         @media (hover: none) and (pointer: coarse) {
-            .dl-primary, .dl-caret { min-height: 44px; min-width: 44px; justify-content: center; }
+            .dl-primary, .dl-caret, .s-copy { min-height: 44px; min-width: 44px; justify-content: center; }
             .dl-menu-item { display: flex; align-items: center; min-height: 44px; }
         }
     </style>
@@ -358,11 +377,11 @@
             </nav>
 
             <span class="s-badge"><span class="dot"></span><strong>{{.FileName}}</strong></span>
-            <h1>{{.FileName}}</h1>
+            <h1>{{.TitleHead}}{{if .TitleTail}}<em>{{.TitleTail}}</em>{{end}}</h1>
             <div class="s-meta">
                 <span>Read-only</span>
                 <span class="sep"></span>
-                <span>Shared via peekm</span>
+                <span>~{{.ReadMin}} min read</span>
             </div>
 
             {{if not .IsExpired}}<div class="s-actions">
@@ -379,6 +398,10 @@
                         <button type="button" class="dl-menu-item" role="menuitem" id="docx-menu-item" aria-disabled="true">Word (.docx)<span class="dl-menu-hint" id="docx-hint"> — preparing…</span></button>
                     </div>
                 </div>
+                <button type="button" class="s-copy" id="s-copy" aria-label="Copy share link">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"/></svg>
+                    <span class="s-copy-label">Copy link</span>
+                </button>
             </div>{{end}}
         </div>
     </header>
@@ -419,13 +442,10 @@
                 var dark = isDark();
                 btn.innerHTML = dark ? SUN : MOON;
                 btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
-                // .markdown-body redeclares the GitHub color vars from prefers-color-scheme,
-                // so a forced theme only reaches the card if the attribute lands on it too.
-                var card = document.getElementById('shared-content');
-                if (!card) return;
+                // #shared-content is a .markdown-body, so the same mechanism the main app
+                // uses to reach forced-theme content covers the card here too.
                 var mode = document.documentElement.getAttribute('data-color-mode');
-                if (mode === 'light' || mode === 'dark') card.setAttribute('data-theme', mode);
-                else card.removeAttribute('data-theme');
+                applyThemeToContent(mode === 'light' || mode === 'dark' ? mode : 'auto');
             }
             btn.addEventListener('click', function() {
                 setTheme(isDark() ? 'light' : 'dark');
@@ -444,6 +464,42 @@
             });
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
             paint();
+        })();
+    </script>
+    <script>
+        // Copy the current share URL — the page the recipient is already on is the link to pass along.
+        (function() {
+            var btn = document.getElementById('s-copy');
+            if (!btn) return;
+            var label = btn.querySelector('.s-copy-label');
+            var original = label ? label.textContent : '';
+            var revert;
+            btn.addEventListener('click', function() {
+                var done = function() {
+                    btn.classList.add('copied');
+                    if (label) label.textContent = 'Copied!';
+                    clearTimeout(revert);
+                    revert = setTimeout(function() {
+                        btn.classList.remove('copied');
+                        if (label) label.textContent = original;
+                    }, 1800);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(location.href).then(done).catch(fallback);
+                } else {
+                    fallback();
+                }
+                function fallback() {
+                    var t = document.createElement('textarea');
+                    t.value = location.href;
+                    t.style.position = 'fixed';
+                    t.style.opacity = '0';
+                    document.body.appendChild(t);
+                    t.select();
+                    try { document.execCommand('copy'); done(); } catch (e) {}
+                    t.remove();
+                }
+            });
         })();
     </script>
     {{if not .IsExpired}}<script>
