@@ -127,6 +127,7 @@ function connectSSE() {
                 }
             } else if (data.type === 'session_activity') {
                 scheduleTranscriptRefresh(data.session);
+                scheduleTimelineRefresh();
             } else if (data.type === 'connection_status') {
                 console.log('[SSE] Handling connection_status:', data.count);
                 updateConnectionStatus(data.count);
@@ -1278,8 +1279,27 @@ async function refreshTranscript() {
     content.querySelectorAll('.transcript-longtext-toggle > input').forEach(function(cb, i) {
         if (cb.checked) opened.push(i);
     });
-    const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
-    const scrollY = window.scrollY;
+    const openDetails = [];
+    content.querySelectorAll('details').forEach(function(d, i) {
+        if (d.open) openDetails.push(i);
+    });
+    // #content is the scroll container (body is overflow:hidden), and navigate()
+    // replaces it wholesale — the fresh element starts at scrollTop 0, so scroll
+    // must be captured here and re-applied to the new element.
+    const nearBottom = content.scrollTop + content.clientHeight >= content.scrollHeight - 120;
+    const scrollTop = content.scrollTop;
+
+    // Anchor to the topmost visible turn, not a pixel offset: new events append
+    // below and collapse states can change above, so an absolute scrollTop would
+    // land on different content. Turn indices are stable (appends only).
+    let anchorIndex = -1, anchorTop = 0;
+    if (!nearBottom) {
+        const turns = content.querySelectorAll('.transcript-turn');
+        for (let i = 0; i < turns.length; i++) {
+            const r = turns[i].getBoundingClientRect();
+            if (r.bottom > 0) { anchorIndex = i; anchorTop = r.top; break; }
+        }
+    }
 
     await navigate(window.location.pathname + window.location.search, false);
 
@@ -1287,14 +1307,55 @@ async function refreshTranscript() {
     if (!fresh) return;
     const toggles = fresh.querySelectorAll('.transcript-longtext-toggle > input');
     opened.forEach(function(i) { if (toggles[i]) toggles[i].checked = true; });
+    const freshDetails = fresh.querySelectorAll('details');
+    openDetails.forEach(function(i) { if (freshDetails[i]) freshDetails[i].open = true; });
     const freshInput = document.getElementById('reply-input');
     if (freshInput && draft) freshInput.value = draft;
     if (freshInput && hadFocus) freshInput.focus();
     if (nearBottom) {
-        window.scrollTo(0, document.body.scrollHeight);
-    } else {
-        window.scrollTo(0, scrollY);
+        fresh.scrollTop = fresh.scrollHeight;
+        return;
     }
+    const freshTurns = fresh.querySelectorAll('.transcript-turn');
+    if (anchorIndex >= 0 && freshTurns[anchorIndex]) {
+        fresh.scrollTop += freshTurns[anchorIndex].getBoundingClientRect().top - anchorTop;
+    } else {
+        fresh.scrollTop = scrollTop;
+    }
+}
+
+// Live timeline: refresh on SSE session activity so active pulses, last-tool
+// lines, and new events appear without a manual reload. Preserves expanded
+// session cards and scroll position (filter is restored by reinitializeScripts).
+let timelineRefreshTimer = null;
+function scheduleTimelineRefresh() {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'timeline') return;
+    clearTimeout(timelineRefreshTimer);
+    timelineRefreshTimer = setTimeout(refreshTimeline, 2000);
+}
+
+async function refreshTimeline() {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'timeline') return;
+
+    const expanded = new Set();
+    content.querySelectorAll('.timeline-session-header[aria-expanded="true"] .timeline-session-id').forEach(function(id) {
+        expanded.add(id.textContent.trim());
+    });
+    // #content is the scroll container and navigate() replaces it (fresh element
+    // starts at scrollTop 0), so capture and re-apply its scrollTop.
+    const scrollTop = content.scrollTop;
+
+    await navigate(window.location.pathname + window.location.search, false);
+
+    const fresh = document.getElementById('content');
+    if (!fresh) return;
+    fresh.querySelectorAll('.timeline-session-header').forEach(function(header) {
+        const id = header.querySelector('.timeline-session-id');
+        if (id && expanded.has(id.textContent.trim())) toggleTimelineSession(header);
+    });
+    fresh.scrollTop = scrollTop;
 }
 
 async function checkShareStatus() {
