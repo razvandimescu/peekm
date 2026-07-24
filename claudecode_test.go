@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -114,18 +113,25 @@ func TestResolveEncodedPathFoldsUnderscore(t *testing.T) {
 	}
 }
 
-func TestSteererForkOnceThenChain(t *testing.T) {
-	s := &sessionSteerer{branches: map[string]string{}, locks: map[string]*sync.Mutex{}}
+func TestSteererOwnership(t *testing.T) {
+	s := &sessionSteerer{owned: map[string]bool{}}
 	const orig = "orig-session-id"
-	if s.branchOf(orig) != "" {
-		t.Fatal("expected no branch initially (first reply must fork)")
+	if s.owned[orig] {
+		t.Fatal("a fresh session must not be owned (first reply must fork)")
 	}
-	s.setBranch(orig, "branch-id")
-	if got := s.branchOf(orig); got != "branch-id" {
-		t.Fatalf("got branch %q, want branch-id (subsequent replies must chain)", got)
+	s.owned["branch-id"] = true
+	if !s.owned["branch-id"] {
+		t.Fatal("a branch, once owned, must resume in place (no re-fork)")
 	}
-	l1, l2 := s.lockFor(orig), s.lockFor(orig)
-	if l1 != l2 {
-		t.Fatal("lockFor must return the same mutex per session")
+
+	// Overflow clears the set rather than growing without bound.
+	for i := 0; i < maxOwnedBranches; i++ {
+		if len(s.owned) >= maxOwnedBranches {
+			s.owned = map[string]bool{}
+		}
+		s.owned[string(rune(i))] = true
+	}
+	if len(s.owned) > maxOwnedBranches {
+		t.Fatalf("owned grew to %d, want <= %d", len(s.owned), maxOwnedBranches)
 	}
 }

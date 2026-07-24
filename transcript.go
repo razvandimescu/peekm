@@ -793,7 +793,7 @@ func splitDiffLines(s string) []string {
 	if s == "" {
 		return nil
 	}
-	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
 type diffOp struct {
@@ -945,6 +945,12 @@ func recordTextSize(block *contentBlock, rawText string) {
 // collapsed tool and thinking rows count ~2 rendered lines each.
 func markTurnCollapsible(turns []transcriptTurn) []transcriptTurn {
 	for i := range turns {
+		// A turn that is a single already-collapsible text block is handled by that
+		// block's own toggle; a turn-level clamp on top would render a second toggle
+		// that can't release the inner clamp (they bind to different containers).
+		if len(turns[i].Blocks) == 1 && turns[i].Blocks[0].Collapsible {
+			continue
+		}
 		chars, lines := 0, 0
 		for _, b := range turns[i].Blocks {
 			switch b.Type {

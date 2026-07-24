@@ -1232,10 +1232,14 @@ async function submitReply() {
             body: JSON.stringify({ session: session, text: text })
         });
         if (!resp.ok) throw new Error(await resp.text());
+        var data = await resp.json();
         input.value = '';
         showToast('Reply sent');
-        // Re-render the transcript so the new turns appear.
-        await navigate(window.location.pathname + window.location.search, false);
+        // The reply forks/continues a peekm-owned branch whose new turns land in a
+        // different transcript file, so switch the view to that branch id — otherwise
+        // the original session re-renders unchanged and the response never appears.
+        var branch = data && data.branch ? data.branch : session;
+        await navigate(window.location.pathname + '?session=' + encodeURIComponent(branch), true);
     } catch (err) {
         btn.disabled = false;
         input.disabled = false;

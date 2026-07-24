@@ -24,48 +24,29 @@ import (
 // that peekm-owned branch in place. A per-session lock serialises peekm against itself.
 
 const (
-	replyTimeout   = 5 * time.Minute
-	replyAllowed   = "Read Grep Glob Edit" // narrow toolset so nothing blocks on approval (v1)
+	replyTimeout = 5 * time.Minute
+	// Read-only toolset (v1): replies analyse and answer, they never mutate the
+	// filesystem. `claude -p` output isn't surfaced turn-by-turn, so silent Edits
+	// would be invisible and un-undoable — steering stays read-only until the
+	// transcript view can show and gate writes.
+	replyAllowed   = "Read Grep Glob"
 	maxReplyLength = 8000
+	// maxOwnedBranches bounds the set of peekm-owned branch ids. A personal tool
+	// never approaches this; the cap just keeps a long-lived process from growing
+	// without limit. Overflow clears the set — a stale branch merely re-forks.
+	maxOwnedBranches = 512
 )
 
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{7,}$`)
 
-// sessionSteerer tracks the peekm-owned branch for each original session and
-// serialises replies per session.
+// sessionSteerer serialises replies and tracks which session ids are peekm-owned
+// branches (safe to resume in place versus a session that may be live in a terminal).
 type sessionSteerer struct {
-	mu       sync.Mutex
-	branches map[string]string      // original session id -> peekm-owned branch id
-	locks    map[string]*sync.Mutex // per original session id
+	mu    sync.Mutex // serialises replies and guards owned
+	owned map[string]bool
 }
 
-var steerer = &sessionSteerer{
-	branches: map[string]string{},
-	locks:    map[string]*sync.Mutex{},
-}
-
-func (s *sessionSteerer) lockFor(id string) *sync.Mutex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if l, ok := s.locks[id]; ok {
-		return l
-	}
-	l := &sync.Mutex{}
-	s.locks[id] = l
-	return l
-}
-
-func (s *sessionSteerer) branchOf(id string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.branches[id]
-}
-
-func (s *sessionSteerer) setBranch(id, branch string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.branches[id] = branch
-}
+var steerer = &sessionSteerer{owned: map[string]bool{}}
 
 // deriveSessionCwd finds the project directory a session belongs to. The JSONL's parent
 // directory name is Claude Code's encoding of the project dir, where /, _ and . all collapse
@@ -163,31 +144,32 @@ func (s *sessionSteerer) runReply(cwd, resumeID, prompt string, fork bool) (newI
 	return newID, result, nil
 }
 
-// reply continues a session with fork-once-then-chain semantics: the first reply forks (the
-// original transcript is never written), later replies resume the peekm-owned branch in place.
-// Serialised per session. Returns the branch id and the assistant's final text.
+// reply continues a session with fork-once-then-chain semantics: a session that
+// isn't already a peekm-owned branch is forked (leaving a session that may be live
+// in a terminal untouched); a branch we own is resumed in place. The caller
+// re-renders the returned branch, so subsequent replies target that branch and
+// chain onto the same transcript. Serialised globally. Returns the branch id and
+// the assistant's final text.
 func (s *sessionSteerer) reply(cwd, session, text string) (branch, result string, err error) {
-	lock := s.lockFor(session)
-	lock.Lock()
-	defer lock.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	branch = s.branchOf(session)
-	fork := branch == ""
-	resumeID := session
-	if branch != "" {
-		resumeID = branch
-	}
-
-	newID, result, err := s.runReply(cwd, resumeID, text, fork)
+	fork := !s.owned[session]
+	newID, result, err := s.runReply(cwd, session, text, fork)
 	if err != nil {
 		return "", "", err
 	}
-	if fork && newID != "" {
-		s.setBranch(session, newID)
-		branch = newID
+	if newID == "" {
+		newID = session // resume-in-place keeps the id; guard a missing session_id
+	}
+	if fork {
+		if len(s.owned) >= maxOwnedBranches {
+			s.owned = map[string]bool{}
+		}
+		s.owned[newID] = true
 		log.Printf("reply: forked session %s -> branch %s", truncateSessionID(session), truncateSessionID(newID))
 	}
-	return branch, result, nil
+	return newID, result, nil
 }
 
 // handleTranscriptReply continues a session from the transcript page (fork-once-then-chain).
