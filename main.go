@@ -660,9 +660,22 @@ func preprocessMermaid(content []byte) []byte {
 	})
 }
 
-// newMarkdownRenderer creates a configured goldmark renderer
+// newMarkdownRenderer creates a configured goldmark renderer for the user's
+// own markdown files; raw HTML passes through so authored pages keep working.
 func newMarkdownRenderer() goldmark.Markdown {
-	return goldmark.New(
+	return buildMarkdownRenderer(true)
+}
+
+// newSafeMarkdownRenderer escapes raw HTML. Transcript conversation content
+// can quote arbitrary markup (web snippets, template/code fragments) that must
+// never become live DOM in the viewer — stray tags corrupt the page and
+// scripts would execute.
+func newSafeMarkdownRenderer() goldmark.Markdown {
+	return buildMarkdownRenderer(false)
+}
+
+func buildMarkdownRenderer(allowRawHTML bool) goldmark.Markdown {
+	opts := []goldmark.Option{
 		goldmark.WithExtensions(
 			extension.GFM,
 			extension.Typographer,
@@ -675,10 +688,11 @@ func newMarkdownRenderer() goldmark.Markdown {
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
 		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
-		),
-	)
+	}
+	if allowRawHTML {
+		opts = append(opts, goldmark.WithRendererOptions(html.WithUnsafe()))
+	}
+	return goldmark.New(opts...)
 }
 
 // withRecovery wraps an HTTP handler with panic recovery
@@ -711,6 +725,22 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 		}
 		log.Printf("CSRF: rejected cross-origin POST from %s", origin)
 		http.Error(w, "Forbidden: cross-origin request", http.StatusForbidden)
+	}
+}
+
+// isTunnelRequest reports whether a request arrived via the public tunnel relay.
+func isTunnelRequest(r *http.Request) bool {
+	return r.Header.Get("X-Tunnel") == "true"
+}
+
+// blockTunnel rejects requests that arrived via the public tunnel relay.
+func blockTunnel(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isTunnelRequest(r) {
+			http.Error(w, "Not available over tunnel", http.StatusForbidden)
+			return
+		}
+		next(w, r)
 	}
 }
 
@@ -791,6 +821,7 @@ func registerRoutes() {
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
+	http.HandleFunc("/transcript/reply", localOnly(withRecovery(withCSRFCheck(blockTunnel(handleTranscriptReply)))))
 	http.HandleFunc("/standup", localOnly(withRecovery(serveStandup)))
 	http.HandleFunc("/standup/save", localOnly(withRecovery(withCSRFCheck(handleStandupSave))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
@@ -1428,6 +1459,19 @@ func removeFromWhitelist(filePath string) {
 	}
 }
 
+// notifySessionActivity pushes a lightweight SSE event on every received hook
+// so an open transcript view can refresh while its session is active.
+func notifySessionActivity(sessionID, tool string) {
+	msgBytes, err := json.Marshal(map[string]string{
+		"type":    "session_activity",
+		"session": sessionID,
+		"tool":    tool,
+	})
+	if err == nil {
+		notifyClientsWithMessage(string(msgBytes))
+	}
+}
+
 // sendFileEvent sends a file event notification to clients
 func sendFileEvent(msg fileEventMessage) {
 	msgBytes, err := json.Marshal(msg)
@@ -1978,6 +2022,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
 	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
+	notifySessionActivity(req.SessionID, req.ToolName)
 	if req.FilePath == "" {
 		detail := req.Detail
 		if len(detail) > 80 {

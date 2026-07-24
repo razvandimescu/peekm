@@ -30,10 +30,12 @@ type transcriptTemplateData struct {
 
 // transcriptTurn represents a single user or assistant turn in the conversation
 type transcriptTurn struct {
-	Role      string // "user" or "assistant"
-	Blocks    []contentBlock
-	Model     string
-	Timestamp string
+	Role        string // "user" or "assistant"
+	Blocks      []contentBlock
+	Model       string
+	Timestamp   string
+	Collapsible bool // whole-turn clamp when accumulated content renders tall
+	LineCount   int  // estimated rendered lines for the toggle label
 }
 
 // imageData represents a base64-encoded image from a tool result
@@ -59,6 +61,14 @@ type contentBlock struct {
 	ToolInputHTML   template.HTML // structured rendering
 	ItemCount       int           // for context_summary
 	Images          []imageData   // for tool_result blocks containing images
+	textChars       int           // raw text size, for turn-level collapse accounting
+	textLines       int
+}
+
+// encodeProjectDir maps an absolute directory to the name Claude Code uses for its
+// project folder under ~/.claude/projects (slashes become dashes).
+func encodeProjectDir(dir string) string {
+	return strings.ReplaceAll(dir, "/", "-")
 }
 
 // resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
@@ -75,7 +85,7 @@ func resolveTranscriptPath(sessionID string) string {
 	fileMutex.RLock()
 	dir := browseDir
 	fileMutex.RUnlock()
-	candidate := filepath.Join(projectsDir, strings.ReplaceAll(dir, "/", "-"), fileName)
+	candidate := filepath.Join(projectsDir, encodeProjectDir(dir), fileName)
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}
@@ -261,7 +271,7 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	}
 	defer f.Close()
 
-	md := newMarkdownRenderer()
+	md := newSafeMarkdownRenderer()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
 
@@ -286,6 +296,8 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	turns = pairToolResults(turns)
 	turns = removeEmptyTurns(turns)
 	turns = mergeConsecutiveTurns(turns)
+	turns = markTurnCollapsible(turns)
+	turns = expandFinalTurn(turns)
 	return turns, nil
 }
 
@@ -325,7 +337,7 @@ func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults 
 		return transcriptTurn{}, true
 	}
 
-	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user")
+	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user", msg.Role == "assistant")
 	if len(blocks) == 0 {
 		return transcriptTurn{}, true
 	}
@@ -339,7 +351,7 @@ func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults 
 }
 
 // parseContentBlocks extracts content blocks from a message's content field
-func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults bool) []contentBlock {
+func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults, assistant bool) []contentBlock {
 	// Content can be a string (user prompt) or array of blocks
 	var str string
 	if err := json.Unmarshal(raw, &str); err == nil {
@@ -347,7 +359,8 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 			return nil
 		}
 		block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, str)}
-		markCollapsible(&block, str)
+		recordTextSize(&block, str)
+		markCollapsible(&block, str, assistant)
 		return []contentBlock{block}
 	}
 
@@ -363,7 +376,7 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 		}
 	}
 
-	return convertRawBlocks(rawBlocks, md)
+	return convertRawBlocks(rawBlocks, md, assistant)
 }
 
 // countToolResults counts tool_result blocks in a raw block list
@@ -393,7 +406,7 @@ type rawContentBlock struct {
 }
 
 // convertRawBlocks parses raw JSON blocks into contentBlock values
-func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []contentBlock {
+func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assistant bool) []contentBlock {
 	var blocks []contentBlock
 	for _, rb := range rawBlocks {
 		var peek rawContentBlock
@@ -403,9 +416,10 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown) []conte
 		switch peek.Type {
 		case "text":
 			if peek.Text != "" {
-				// Assistant prose is the signal we want read in full; only the
-				// plain-string user prompt path collapses (see parseContentBlocks).
-				blocks = append(blocks, contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)})
+				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
+				recordTextSize(&block, peek.Text)
+				markCollapsible(&block, peek.Text, assistant)
+				blocks = append(blocks, block)
 			}
 		case "thinking":
 			if peek.Thinking != "" {
@@ -494,7 +508,7 @@ func toolIcon(name string) string {
 		return "\u25B6" // ▶
 	case "Read":
 		return "\u2630" // ☰
-	case "Edit":
+	case "Edit", "MultiEdit":
 		return "\u270E" // ✎
 	case "Write":
 		return "\u2714" // ✔
@@ -550,6 +564,8 @@ func formatStructuredFromMap(toolName string, m map[string]interface{}) template
 		return formatReadInput(m)
 	case "Edit":
 		return formatEditInput(m)
+	case "MultiEdit":
+		return formatMultiEditInput(m)
 	case "Write":
 		return formatWriteInput(m)
 	case "Grep":
@@ -568,7 +584,7 @@ func toolSummaryFromMap(toolName string, m map[string]interface{}) string {
 	switch toolName {
 	case "Bash":
 		return bashSummary(m)
-	case "Read", "Edit", "Write":
+	case "Read", "Edit", "MultiEdit", "Write":
 		return toolInputStr(m, "file_path")
 	case "Grep":
 		return grepSummary(m)
@@ -678,26 +694,29 @@ func formatEditInput(m map[string]interface{}) template.HTML {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`<div class="transcript-structured-input" title="`)
-	b.WriteString(esc(fp))
-	b.WriteString(`"><span>`)
-	b.WriteString(esc(filepath.Base(fp)))
-	b.WriteString(`</span>`)
-	old := toolInputStr(m, "old_string")
-	new := toolInputStr(m, "new_string")
-	if old != "" || new != "" {
-		b.WriteString(`<pre class="transcript-mini-diff">`)
-		if old != "" {
-			b.WriteString(`<span class="diff-remove">- `)
-			b.WriteString(esc(truncateString(old, 200)))
-			b.WriteString("</span>\n")
+	writeFileLabel(&b, fp, "")
+	b.WriteString(lineDiffHTML(toolInputStr(m, "old_string"), toolInputStr(m, "new_string"), diffMaxLines))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+func formatMultiEditInput(m map[string]interface{}) template.HTML {
+	fp := toolInputStr(m, "file_path")
+	if fp == "" {
+		return ""
+	}
+	edits, ok := m["edits"].([]interface{})
+	if !ok || len(edits) == 0 {
+		return formatEditInput(m)
+	}
+	var b strings.Builder
+	writeFileLabel(&b, fp, fmt.Sprintf("%d edits", len(edits)))
+	for _, e := range edits {
+		em, ok := e.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		if new != "" {
-			b.WriteString(`<span class="diff-add">+ `)
-			b.WriteString(esc(truncateString(new, 200)))
-			b.WriteString(`</span>`)
-		}
-		b.WriteString(`</pre>`)
+		b.WriteString(lineDiffHTML(toolInputStr(em, "old_string"), toolInputStr(em, "new_string"), diffMaxLines))
 	}
 	b.WriteString(`</div>`)
 	return template.HTML(b.String())
@@ -714,7 +733,133 @@ func formatWriteInput(m map[string]interface{}) template.HTML {
 	if lines != 1 {
 		label += "s"
 	}
-	return template.HTML(`<span class="transcript-structured-input" title="` + esc(fp) + `">` + esc(filepath.Base(fp)) + ` <span class="transcript-structured-range">(` + label + `)</span></span>`)
+	var b strings.Builder
+	writeFileLabel(&b, fp, label)
+	b.WriteString(lineDiffHTML("", content, diffMaxLines))
+	b.WriteString(`</div>`)
+	return template.HTML(b.String())
+}
+
+// writeFileLabel opens a structured-input container with a file-name badge and
+// an optional muted meta note (e.g. edit count or line count). Caller closes </div>.
+func writeFileLabel(b *strings.Builder, fp, meta string) {
+	b.WriteString(`<div class="transcript-structured-input" title="`)
+	b.WriteString(esc(fp))
+	b.WriteString(`"><span>`)
+	b.WriteString(esc(filepath.Base(fp)))
+	b.WriteString(`</span>`)
+	if meta != "" {
+		b.WriteString(` <span class="transcript-structured-range">(` + esc(meta) + `)</span>`)
+	}
+}
+
+// diffMaxLines caps rendered diff lines per hunk; the whole tool call already
+// sits behind a collapsed <details>, so this only guards against pathological
+// full-file writes, not routine edits.
+const diffMaxLines = 60
+
+// lineDiffHTML renders a line-level red/green diff preserving shared context,
+// so the shape of a change is visible at a glance. Empty when both sides blank.
+func lineDiffHTML(oldStr, newStr string, maxLines int) string {
+	if oldStr == "" && newStr == "" {
+		return ""
+	}
+	old := splitDiffLines(oldStr)
+	neu := splitDiffLines(newStr)
+	ops := diffOps(old, neu)
+
+	var b strings.Builder
+	b.WriteString(`<pre class="transcript-mini-diff">`)
+	for i, op := range ops {
+		if i >= maxLines {
+			b.WriteString(fmt.Sprintf(`<span class="diff-meta">… %d more %s</span>`,
+				len(ops)-i, plural(len(ops)-i, "line")))
+			break
+		}
+		switch op.kind {
+		case '-':
+			b.WriteString(`<span class="diff-remove">- ` + esc(op.text) + `</span>`)
+		case '+':
+			b.WriteString(`<span class="diff-add">+ ` + esc(op.text) + `</span>`)
+		default:
+			b.WriteString(`<span class="diff-context">  ` + esc(op.text) + `</span>`)
+		}
+	}
+	b.WriteString(`</pre>`)
+	return b.String()
+}
+
+func splitDiffLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
+}
+
+type diffOp struct {
+	kind byte // ' ' context, '-' removed, '+' added
+	text string
+}
+
+// diffOps computes a line-level diff via LCS, keeping unchanged lines as
+// context. For pathologically large inputs it degrades to remove-then-add
+// rather than allocating an O(n*m) table.
+func diffOps(a, b []string) []diffOp {
+	if len(a) == 0 || len(b) == 0 || len(a)*len(b) > 250_000 {
+		return flatDiff(a, b)
+	}
+	return lcsDiff(a, b)
+}
+
+// flatDiff renders every line of a as removed then every line of b as added.
+func flatDiff(a, b []string) []diffOp {
+	ops := make([]diffOp, 0, len(a)+len(b))
+	for _, l := range a {
+		ops = append(ops, diffOp{'-', l})
+	}
+	for _, l := range b {
+		ops = append(ops, diffOp{'+', l})
+	}
+	return ops
+}
+
+// lcsDiff builds an LCS table and backtracks it into context/-/+ ops.
+func lcsDiff(a, b []string) []diffOp {
+	n, m := len(a), len(b)
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	var ops []diffOp
+	i, j := 0, 0
+	for i < n && j < m {
+		switch {
+		case a[i] == b[j]:
+			ops = append(ops, diffOp{' ', a[i]})
+			i++
+			j++
+		case dp[i+1][j] >= dp[i][j+1]:
+			ops = append(ops, diffOp{'-', a[i]})
+			i++
+		default:
+			ops = append(ops, diffOp{'+', b[j]})
+			j++
+		}
+	}
+	ops = append(ops, flatDiff(a[i:], b[j:])...)
+	return ops
 }
 
 func formatGrepInput(m map[string]interface{}) template.HTML {
@@ -774,11 +919,80 @@ func extractToolResultContent(content json.RawMessage) (string, []imageData) {
 	return "", nil
 }
 
-func markCollapsible(block *contentBlock, rawText string) {
-	if len(rawText) > 1500 {
+// markCollapsible flags text blocks that render clamped with an expand toggle.
+// Assistant prose is the payload readers skim for, so it gets a higher trigger
+// than pasted user logs; the line-count check catches tall structured markdown
+// (tables, lists) that a char threshold misses.
+func markCollapsible(block *contentBlock, rawText string, assistant bool) {
+	long := len(rawText) > 1500
+	if assistant {
+		long = len(rawText) > 2500 || strings.Count(rawText, "\n") > 30
+	}
+	if long {
 		block.Collapsible = true
 		block.LineCount = strings.Count(rawText, "\n") + 1
 	}
+}
+
+func recordTextSize(block *contentBlock, rawText string) {
+	block.textChars = len(rawText)
+	block.textLines = strings.Count(rawText, "\n") + 1
+}
+
+// markTurnCollapsible clamps turns whose accumulated content renders tall.
+// Merged turns stitch many short text blocks and tool rows together, so
+// per-block thresholds never fire even when the turn dominates the page;
+// collapsed tool and thinking rows count ~2 rendered lines each.
+func markTurnCollapsible(turns []transcriptTurn) []transcriptTurn {
+	for i := range turns {
+		// A turn that is a single already-collapsible text block is handled by that
+		// block's own toggle; a turn-level clamp on top would render a second toggle
+		// that can't release the inner clamp (they bind to different containers).
+		if len(turns[i].Blocks) == 1 && turns[i].Blocks[0].Collapsible {
+			continue
+		}
+		chars, lines := 0, 0
+		for _, b := range turns[i].Blocks {
+			switch b.Type {
+			case "text":
+				chars += b.textChars
+				lines += b.textLines
+			case "tool_use", "thinking":
+				lines += 2
+			}
+		}
+		long := chars > 1500 || lines > 30
+		if turns[i].Role == "assistant" {
+			long = chars > 2500 || lines > 30
+		}
+		if long {
+			turns[i].Collapsible = true
+			turns[i].LineCount = lines
+		}
+	}
+	return turns
+}
+
+// expandFinalTurn keeps the conversation's live tail fully visible: the last
+// turn, and — when the session ends on a user message awaiting a reply — the
+// assistant turn before it. That tail is the hinge the reply composer answers;
+// collapsing it would hide what the reader is responding to.
+func expandFinalTurn(turns []transcriptTurn) []transcriptTurn {
+	n := len(turns)
+	if n == 0 {
+		return turns
+	}
+	expand := func(t *transcriptTurn) {
+		t.Collapsible = false
+		for i := range t.Blocks {
+			t.Blocks[i].Collapsible = false
+		}
+	}
+	expand(&turns[n-1])
+	if turns[n-1].Role == "user" && n > 1 {
+		expand(&turns[n-2])
+	}
+	return turns
 }
 
 // truncateString truncates a string to maxLen runes, adding "..." if truncated.

@@ -33,21 +33,23 @@
         </div>
         {{else if .Turns}}
         <div class="transcript-conversation">
-            {{range .Turns}}
+            {{range $turn := .Turns}}
             <div class="transcript-turn transcript-{{.Role}}">
                 <div class="transcript-turn-header">
                     <span class="transcript-role-badge transcript-role-{{.Role}}">{{if eq .Role "user"}}You{{else}}Claude{{end}}</span>
                     {{if .Timestamp}}<span class="transcript-timestamp">{{formatTime .Timestamp}}</span>{{end}}
                 </div>
                 <div class="transcript-turn-body">
+                    {{if .Collapsible}}<div class="transcript-longtext lt-turn{{if eq .Role "assistant"}} lt-assistant{{end}}">{{end}}
+                    <div class="transcript-turn-blocks">
                     {{range .Blocks}}
                     {{if eq .Type "text"}}
                     {{if .Collapsible}}
-                    <div class="transcript-longtext">
+                    <div class="transcript-longtext{{if eq $turn.Role "assistant"}} lt-assistant{{end}}">
                         <div class="transcript-text markdown-body">{{.HTML}}</div>
                         <label class="transcript-longtext-toggle">
                             <input type="checkbox" hidden>
-                            <span class="lt-more">Show full message &middot; {{.LineCount}} lines</span>
+                            <span class="lt-more">Show full {{if eq $turn.Role "assistant"}}response{{else}}message{{end}} &middot; {{.LineCount}} lines</span>
                             <span class="lt-less">Show less</span>
                         </label>
                     </div>
@@ -96,11 +98,26 @@
                     </div>
                     {{end}}
                     {{end}}
+                    </div>
+                    {{if .Collapsible}}<label class="transcript-longtext-toggle">
+                        <input type="checkbox" hidden>
+                        <span class="lt-more">Show full {{if eq .Role "assistant"}}response{{else}}message{{end}} &middot; {{.LineCount}} lines</span>
+                        <span class="lt-less">Show less</span>
+                    </label></div>{{end}}
                 </div>
             </div>
             {{end}}
         </div>
         <div id="transcript-bottom"></div>
+        {{if .SessionID}}
+        <div class="transcript-reply" data-session="{{.SessionID}}">
+            <textarea id="reply-input" class="transcript-reply-input" rows="3" placeholder="Reply to this session&hellip;" aria-label="Reply to this session"></textarea>
+            <div class="transcript-reply-actions">
+                <span class="transcript-reply-hint">Continues on a safe branch <span class="transcript-reply-keys"><kbd>&#8984;</kbd><kbd>&#9166;</kbd></span> to send</span>
+                <button id="reply-send" class="transcript-reply-btn" onclick="submitReply()">Send</button>
+            </div>
+        </div>
+        {{end}}
         <div id="transcript-lightbox" class="transcript-lightbox" hidden><img src="" alt=""></div>
         {{else}}
         <div class="transcript-empty">

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,153 @@ func TestToolIcon(t *testing.T) {
 		if icon == "" {
 			t.Errorf("toolIcon(%q) returned empty string", name)
 		}
+	}
+}
+
+func TestMarkCollapsible(t *testing.T) {
+	long := strings.Repeat("x", 1600)
+	veryLong := strings.Repeat("x", 2600)
+	tall := strings.Repeat("line\n", 35)
+	tests := []struct {
+		name      string
+		text      string
+		assistant bool
+		want      bool
+	}{
+		{"user over 1500", long, false, true},
+		{"user under 1500", "short", false, false},
+		{"assistant 1600 chars stays open", long, true, false},
+		{"assistant over 2500 chars", veryLong, true, true},
+		{"assistant over 30 lines", tall, true, true},
+		{"assistant short", "short", true, false},
+	}
+	for _, tt := range tests {
+		var b contentBlock
+		markCollapsible(&b, tt.text, tt.assistant)
+		if b.Collapsible != tt.want {
+			t.Errorf("%s: Collapsible = %v, want %v", tt.name, b.Collapsible, tt.want)
+		}
+	}
+}
+
+func TestExpandFinalTurn(t *testing.T) {
+	collapsed := func(role string) transcriptTurn {
+		return transcriptTurn{Role: role, Collapsible: true,
+			Blocks: []contentBlock{{Type: "text", Collapsible: true}}}
+	}
+
+	t.Run("ends on assistant: only last turn expands", func(t *testing.T) {
+		turns := expandFinalTurn([]transcriptTurn{collapsed("user"), collapsed("assistant"), collapsed("assistant")})
+		if !turns[0].Collapsible || !turns[1].Collapsible {
+			t.Error("earlier turns should keep Collapsible")
+		}
+		if turns[2].Collapsible || turns[2].Blocks[0].Collapsible {
+			t.Error("final turn should be fully expanded")
+		}
+	})
+
+	t.Run("ends on user: preceding assistant turn expands too", func(t *testing.T) {
+		turns := expandFinalTurn([]transcriptTurn{collapsed("assistant"), collapsed("assistant"), collapsed("user")})
+		if !turns[0].Collapsible {
+			t.Error("earlier assistant turn should keep Collapsible")
+		}
+		if turns[1].Collapsible || turns[1].Blocks[0].Collapsible {
+			t.Error("last assistant turn before trailing user message should expand")
+		}
+		if turns[2].Collapsible {
+			t.Error("final user turn should expand")
+		}
+	})
+
+	if out := expandFinalTurn(nil); out != nil {
+		t.Error("nil turns should pass through")
+	}
+}
+
+func TestMarkTurnCollapsible(t *testing.T) {
+	text := func(chars, lines int) contentBlock {
+		return contentBlock{Type: "text", textChars: chars, textLines: lines}
+	}
+	tool := contentBlock{Type: "tool_use"}
+	tests := []struct {
+		name string
+		turn transcriptTurn
+		want bool
+	}{
+		{"assistant many short blocks accumulate chars", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(1000, 5), text(1000, 5), text(1000, 5)}}, true},
+		{"assistant tool rows push over line budget", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(200, 2), tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool, tool}}, true},
+		{"assistant modest turn stays open", transcriptTurn{Role: "assistant",
+			Blocks: []contentBlock{text(800, 8), tool, tool}}, false},
+		{"user pasted log collapses", transcriptTurn{Role: "user",
+			Blocks: []contentBlock{text(1600, 10)}}, true},
+		{"user short stays open", transcriptTurn{Role: "user",
+			Blocks: []contentBlock{text(300, 3)}}, false},
+	}
+	for _, tt := range tests {
+		out := markTurnCollapsible([]transcriptTurn{tt.turn})
+		if out[0].Collapsible != tt.want {
+			t.Errorf("%s: Collapsible = %v, want %v", tt.name, out[0].Collapsible, tt.want)
+		}
+	}
+}
+
+func TestDiffOps(t *testing.T) {
+	toStr := func(ops []diffOp) string {
+		var b []byte
+		for _, op := range ops {
+			b = append(b, op.kind, ' ')
+			b = append(b, op.text...)
+			b = append(b, '\n')
+		}
+		return string(b)
+	}
+	tests := []struct {
+		name string
+		a, b []string
+		want string
+	}{
+		{
+			name: "shared context kept, single line changed",
+			a:    []string{"func f() {", "\treturn 1", "}"},
+			b:    []string{"func f() {", "\treturn 2", "}"},
+			want: "  func f() {\n- \treturn 1\n+ \treturn 2\n  }\n",
+		},
+		{
+			name: "pure addition (write)",
+			a:    nil,
+			b:    []string{"line a", "line b"},
+			want: "+ line a\n+ line b\n",
+		},
+		{
+			name: "pure removal",
+			a:    []string{"gone"},
+			b:    nil,
+			want: "- gone\n",
+		},
+		{
+			name: "insertion between context",
+			a:    []string{"a", "c"},
+			b:    []string{"a", "b", "c"},
+			want: "  a\n+ b\n  c\n",
+		},
+	}
+	for _, tt := range tests {
+		if got := toStr(diffOps(tt.a, tt.b)); got != tt.want {
+			t.Errorf("%s: diffOps() =\n%q\nwant\n%q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestLineDiffHTMLCap(t *testing.T) {
+	var lines []string
+	for i := 0; i < 100; i++ {
+		lines = append(lines, "x")
+	}
+	html := lineDiffHTML("", strings.Join(lines, "\n"), 60)
+	if !strings.Contains(html, "40 more lines") {
+		t.Errorf("expected overflow note '40 more lines', got: %s", html)
 	}
 }
 

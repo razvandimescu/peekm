@@ -539,7 +539,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 		TitleHead:        head,
 		TitleTail:        tail,
 		ReadMin:          readingMinutes(content),
-		IsTunnel:         r.Header.Get("X-Tunnel") == "true",
+		IsTunnel:         isTunnelRequest(r),
 	}
 	var renderBuf bytes.Buffer
 	if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
