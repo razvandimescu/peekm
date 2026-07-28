@@ -394,6 +394,7 @@ function reinitializeScripts() {
         if (viewType === 'transcript') {
             initTranscriptLightbox();
             initReplyBox();
+            revealHashTarget();
         }
 
         // Re-render mermaid diagrams after SPA content swap
@@ -405,6 +406,37 @@ function reinitializeScripts() {
     } catch (error) {
         console.error('[Reinit] Error during script initialization:', error);
         // Don't crash - graceful degradation
+    }
+}
+
+// Reveal the element addressed by location.hash even when it sits inside
+// collapsed <details> (e.g. the recap's #tool-<id> transcript deep links):
+// open the ancestor chain, scroll it into view, flash it. Lives here, not in
+// the partial — inline scripts don't run on SPA content swaps.
+function revealHashTarget() {
+    if (!location.hash) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (!el) return;
+    for (let d = el; d; d = d.parentElement) {
+        if (d.tagName === 'DETAILS') d.open = true;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('anchor-flash');
+    setTimeout(function() { el.classList.remove('anchor-flash'); }, 1800);
+}
+
+// Copy button on the recap's file rows (defined here for the same SPA reason).
+function copyStandupPath(e, btn, path) {
+    e.preventDefault();
+    e.stopPropagation();
+    var done = function() {
+        btn.classList.add('copied');
+        setTimeout(function() { btn.classList.remove('copied'); }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(path).then(done).catch(function() { copyFallback(path, done); });
+    } else {
+        copyFallback(path, done);
     }
 }
 

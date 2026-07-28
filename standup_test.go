@@ -114,17 +114,22 @@ func TestSplitHeadlineTailEditThreshold(t *testing.T) {
 func TestFillEvidenceLadder(t *testing.T) {
 	// Rung 1: commits win.
 	p := standupProject{Commits: []standupCommit{{Subject: "a"}, {Subject: "b"}, {Subject: "c"}}}
-	fillEvidence(&p, &projectAccum{files: map[string]bool{}})
+	fillEvidence(&p)
 	if len(p.HeadCommits) != 2 || len(p.MoreCommits) != 1 {
 		t.Errorf("commits rung: head=%d more=%d, want 2/1", len(p.HeadCommits), len(p.MoreCommits))
 	}
 
-	// Rung 2: no commits, edits → basenames + MoreFiles.
-	p2 := standupProject{Edits: 5, Files: 4}
-	acc := &projectAccum{files: map[string]bool{"/a/x.go": true, "/a/y.go": true, "/a/z.go": true, "/a/w.go": true}}
-	fillEvidence(&p2, acc)
+	// Rung 2: no commits, edits → first FileRows basenames (already most-edited
+	// first) + MoreFiles.
+	p2 := standupProject{Edits: 5, FileRows: []standupFile{
+		{Base: "y.go"}, {Base: "z.go"}, {Base: "w.go"}, {Base: "x.go"},
+	}}
+	fillEvidence(&p2)
 	if len(p2.EvidenceFiles) != 3 || p2.MoreFiles != 1 {
 		t.Errorf("edits rung: files=%v more=%d, want 3 files +1", p2.EvidenceFiles, p2.MoreFiles)
+	}
+	if p2.EvidenceFiles[0] != "y.go" || p2.EvidenceFiles[1] != "z.go" || p2.EvidenceFiles[2] != "w.go" {
+		t.Errorf("evidence files = %v, want FileRows order [y.go z.go w.go]", p2.EvidenceFiles)
 	}
 	if len(p2.HeadCommits) != 0 {
 		t.Error("edits rung must not populate commits")
@@ -132,7 +137,7 @@ func TestFillEvidenceLadder(t *testing.T) {
 
 	// Rung 3: no commits, no edits → neither commits nor files (prompt used as-is).
 	p3 := standupProject{Prompt: "let's investigate"}
-	fillEvidence(&p3, &projectAccum{files: map[string]bool{}})
+	fillEvidence(&p3)
 	if len(p3.HeadCommits) != 0 || len(p3.EvidenceFiles) != 0 {
 		t.Error("discussion rung must render nothing but the prompt")
 	}
@@ -243,8 +248,8 @@ func TestSliceTranscriptDayMidnight(t *testing.T) {
 	if ds.edits != 1 {
 		t.Errorf("edits = %d, want 1", ds.edits)
 	}
-	if !ds.files["/a/x.go"] {
-		t.Error("expected /a/x.go in files")
+	if fs := ds.files["/a/x.go"]; fs == nil || fs.edits != 1 || fs.tools["Edit"] != 1 {
+		t.Errorf("files[/a/x.go] = %+v, want 1 Edit", ds.files["/a/x.go"])
 	}
 	if len(ds.prompts) != 1 || ds.prompts[0] != "work on it" {
 		t.Errorf("prompts = %v, want [work on it]", ds.prompts)
@@ -363,5 +368,67 @@ func TestComputeGitCommitsAuthorAndDepBumps(t *testing.T) {
 	other := computeGitCommits(dir, day)
 	if len(other.commits) != 0 {
 		t.Errorf("mismatched author should yield 0 commits, got %d", len(other.commits))
+	}
+}
+
+func TestBuildFileRowsRanking(t *testing.T) {
+	a := &projectAccum{root: "/repo", files: map[string]*fileStat{
+		"/repo/theme/app.js": {edits: 7, tools: map[string]int{"Edit": 7}, last: time.Date(2026, 7, 20, 16, 38, 0, 0, time.Local), toolID: "tu_2", sessionID: "s2"},
+		"/repo/main.go":      {edits: 12, tools: map[string]int{"Edit": 9, "Write": 3}, last: time.Date(2026, 7, 20, 16, 41, 0, 0, time.Local), toolID: "tu_1", sessionID: "s1"},
+		"/repo/new.go":       {edits: 4, tools: map[string]int{"Write": 4}, last: time.Date(2026, 7, 20, 14, 57, 0, 0, time.Local), toolID: "tu_3", sessionID: "s1"},
+	}}
+	rows := buildFileRows(a, "2026-07-20") // past day: no dirty lookup
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
+	}
+	if rows[0].Base != "main.go" || rows[1].Base != "app.js" || rows[2].Base != "new.go" {
+		t.Errorf("order = %s, %s, %s; want most-edited first", rows[0].Base, rows[1].Base, rows[2].Base)
+	}
+	if rows[0].Tools != "Edit, Write" || rows[0].Dot != "edit" {
+		t.Errorf("main.go tools=%q dot=%q, want dominant Edit first", rows[0].Tools, rows[0].Dot)
+	}
+	if rows[2].Dot != "write" {
+		t.Errorf("new.go dot=%q, want write", rows[2].Dot)
+	}
+	if rows[1].Dir != "theme/" || rows[1].Base != "app.js" {
+		t.Errorf("app.js dir=%q base=%q, want theme/ split", rows[1].Dir, rows[1].Base)
+	}
+	if rows[0].SessionID != "s1" || rows[0].ToolID != "tu_1" {
+		t.Errorf("main.go anchor = %s/%s, want s1/tu_1", rows[0].SessionID, rows[0].ToolID)
+	}
+}
+
+func TestDirtyFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "committed.go"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "init")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "dirty.go"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "committed.go"), []byte("changed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dirty := dirtyFiles(dir, []string{"sub/dirty.go", "committed.go"})
+	if !dirty["sub/dirty.go"] || !dirty["committed.go"] {
+		t.Errorf("dirty = %v, want sub/dirty.go and committed.go", dirty)
 	}
 }

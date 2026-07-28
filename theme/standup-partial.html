@@ -49,10 +49,23 @@
                 <ul>{{range .MoreCommits}}<li>{{.Subject}}</li>{{end}}</ul>
             </details>
             {{end}}
-            {{else if .EvidenceFiles}}
-            <div class="standup-evidence">{{range $i, $f := .EvidenceFiles}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}{{if gt .MoreFiles 0}} <span class="standup-more-count">+{{.MoreFiles}} more</span>{{end}}</div>
-            {{else if .Prompt}}
+            {{else if and (not .FileRows) .Prompt}}
             <div class="standup-evidence standup-prompt"><em>{{.Prompt}}</em></div>
+            {{end}}
+            {{if .FileRows}}
+            <details class="standup-files">
+                <summary><span class="standup-files-tri">▶</span> <b>{{len .FileRows}} file{{if ne (len .FileRows) 1}}s{{end}}</b> AI edited</summary>
+                <div class="standup-filelist">
+                    {{range $f := .FileRows}}<a class="standup-frow{{if $f.Extra}} standup-frow-extra{{end}}" href="{{if $f.ViewPath}}/view/{{pathEscape $f.ViewPath}}{{else}}/transcript?session={{$f.SessionID}}{{if $f.ToolID}}#tool-{{$f.ToolID}}{{end}}{{end}}" title="{{if $f.ViewPath}}Open in viewer{{else}}Open the transcript at this edit{{end}}">
+                        <span class="standup-fdot tl-cell-{{$f.Dot}}" aria-hidden="true"></span>
+                        <span class="standup-fpath"><bdi>{{if $f.Dir}}<span class="standup-fdir">{{$f.Dir}}</span>{{end}}<span class="standup-fbase">{{$f.Base}}</span></bdi></span>
+                        <span class="standup-fmeta">{{if $f.Uncommitted}}<span class="standup-fpill">uncommitted</span>{{end}}{{if $f.ViewPath}}<span class="standup-fpill standup-fpill-md">md</span>{{end}}<span class="standup-fcount">×{{$f.Edits}}</span><span class="standup-ftools">{{$f.Tools}}</span><span class="standup-ftime">{{$f.Last}}</span></span>
+                        <button class="standup-fcopy" aria-label="Copy file path" title="Copy path" onclick="copyStandupPath(event,this,'{{$f.AbsPath}}')">⧉</button>
+                    </a>
+                    {{end}}
+                    {{if .MoreFileRows}}<button class="standup-fmore" onclick="this.closest('.standup-filelist').classList.add('expanded')">+ {{.MoreFileRows}} more file{{if ne .MoreFileRows 1}}s{{end}}</button>{{end}}
+                </div>
+            </details>
             {{end}}
             <div class="standup-sessions">{{len .Sessions}} session{{if ne (len .Sessions) 1}}s{{end}} · {{.SessionRange}}</div>
         </div>
