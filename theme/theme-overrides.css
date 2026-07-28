@@ -708,7 +708,6 @@ a.timeline-session-id:hover {
     font-size: 1.35em;
     font-weight: 600;
     letter-spacing: -0.01em;
-    color: var(--fgColor-default);
     border-bottom: none;
     padding-bottom: 0;
     margin-bottom: 4px;
@@ -740,8 +739,10 @@ a.timeline-session-id:hover {
 }
 
 /* Floating composer: sticks to the bottom of the scroll area so the
-   reply box is always at hand, like a chat input (matches site demo). */
+   reply box is always at hand, like a chat input (matches site demo).
+   z-index 6: above .transcript-nav (5), below all app chrome. */
 .transcript-reply {
+    --reply-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.3);
     position: sticky;
     bottom: 12px;
     z-index: 6;
@@ -750,12 +751,12 @@ a.timeline-session-id:hover {
     border: 1px solid var(--borderColor-default);
     border-radius: 12px;
     background: var(--bgColor-muted);
-    box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.3);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: var(--reply-shadow);
+    transition: border-color 0.15s ease;
 }
 .transcript-reply:focus-within {
     border-color: var(--peekm-accent);
-    box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.3),
+    box-shadow: var(--reply-shadow),
                 0 0 0 3px color-mix(in srgb, var(--peekm-accent) 15%, transparent);
 }
 .transcript-reply-input {
@@ -826,13 +827,12 @@ a.timeline-session-id:hover {
 .transcript-stats {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
     font-size: 12px;
     color: var(--fgColor-muted);
     margin-top: 8px;
 }
-.transcript-stats .stat-sep { opacity: 0.5; }
 .transcript-conversation {
     display: flex;
     flex-direction: column;
