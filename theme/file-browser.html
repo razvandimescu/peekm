@@ -898,6 +898,28 @@
         .tree-item.filtered-out {
             display: none;
         }
+
+        /* Recent mode: the tree flattened chronologically under sticky day headers. */
+        .tree-day-header {
+            position: sticky; top: 0; z-index: 1;
+            background: var(--bgColor-default);
+            font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+            letter-spacing: 1.2px; text-transform: uppercase; color: var(--fgColor-muted);
+            padding: 8px 8px 4px;
+        }
+        .tree-file-recent { display: flex; align-items: center; min-width: 0; }
+        .tree-file-recent a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tree-recent-dir { color: var(--fgColor-muted); }
+        .tree-recent-time {
+            flex: none; margin-left: auto; padding-left: 8px;
+            font-family: var(--font-mono); font-size: 10px; color: var(--fgColor-muted);
+        }
+        .tree-recent-more {
+            display: block; width: 100%; padding: 6px 8px; margin-top: 4px;
+            border: none; background: none; text-align: left; cursor: pointer;
+            font-family: var(--font-mono); font-size: 10.5px; color: var(--fgColor-muted);
+        }
+        .tree-recent-more:hover { color: var(--fgColor-default); background: rgba(128, 128, 128, 0.1); }
         .dir-name .filter-match {
             background: rgba(9, 105, 218, 0.15);
             border-radius: 2px;
@@ -2615,6 +2637,9 @@
             <div class="sidebar-header">
                 <span class="sidebar-eyebrow">Workspace</span>
                 {{if .FileCount}}<span class="sidebar-count">{{.FileCount}} files</span>{{end}}
+                <button class="folder-filter-btn" id="tree-sort-toggle" onclick="toggleTreeSort()" title="Toggle recent-first list" aria-label="Sort files by most recent">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25a.75.75 0 0 0-1.5 0v3.5c0 .27.144.518.378.65l2.5 1.43a.75.75 0 1 0 .744-1.302L8.5 7.815Z"/></svg>
+                </button>
                 <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 .8 1.6L10 9.267V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-4.733L1.2 2.6A1 1 0 0 1 1 2Z"/></svg>
                 </button>
