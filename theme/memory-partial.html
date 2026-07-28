@@ -20,7 +20,7 @@
             <div class="memory-card" onclick="navigate('{{.FirstLink}}')" tabindex="0" role="link" onkeydown="if(event.key==='Enter') navigate('{{.FirstLink}}')">
                 <div class="memory-card-header">
                     <span class="memory-card-name">{{.Name}}</span>
-                    <span class="memory-card-meta">{{.LineCount}} lines &middot; {{.LastMod}}</span>
+                    <span class="memory-card-meta"{{if .LastModTitle}} title="{{.LastModTitle}}"{{end}}>{{.LineCount}} lines{{if .LastMod}} &middot; {{.LastMod}}{{end}}</span>
                 </div>
                 {{if .Snippet}}
                 <div class="memory-card-snippet">{{.Snippet}}</div>
@@ -31,7 +31,8 @@
                 </div>
                 {{end}}
                 <div class="memory-card-files">
-                    {{range .Files}}<a href="{{.Link}}" class="memory-card-file" onclick="event.stopPropagation(); event.preventDefault(); navigate('{{.Link}}');">{{.Name}}</a>{{end}}
+                    {{range .Files}}<a href="{{.Link}}" class="memory-card-file{{if .Pinned}} pinned{{end}}{{if .Stale}} stale{{end}}{{if .Over}} over{{end}}"{{if .Title}} title="{{.Title}}"{{end}} onclick="event.stopPropagation(); event.preventDefault(); navigate('{{.Link}}');">{{.Name}}</a>{{end}}
+                    {{if .MoreCount}}<button type="button" class="memory-card-more" onclick="event.stopPropagation(); this.closest('.memory-card-files').classList.toggle('expanded')" onkeydown="event.stopPropagation()"><span class="more-label">+{{.MoreCount}} more</span><span class="less-label">show less</span></button>{{end}}
                 </div>
             </div>
             {{end}}

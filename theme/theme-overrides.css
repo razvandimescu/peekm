@@ -1287,6 +1287,50 @@ a.timeline-session-id:hover {
     color: var(--fgColor-accent);
 }
 
+.memory-card-file.pinned {
+    color: var(--fgColor-accent);
+    background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+}
+
+/* stale (>30d): recede via transparent background — color alone, not opacity,
+   so it stays legible in dark mode */
+.memory-card-file.stale {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--borderColor-muted);
+}
+
+.memory-card-file.over {
+    display: none;
+}
+
+.memory-card-files.expanded .memory-card-file.over {
+    display: inline-block;
+}
+
+.memory-card-more {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 1px 6px;
+    border: 1px dashed var(--borderColor-default);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fgColor-accent);
+    cursor: pointer;
+}
+
+.memory-card-more:hover {
+    background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+}
+
+.memory-card-more .less-label,
+.memory-card-files.expanded .memory-card-more .more-label {
+    display: none;
+}
+
+.memory-card-files.expanded .memory-card-more .less-label {
+    display: inline;
+}
+
 .memory-empty {
     text-align: center;
     padding: 80px 20px;

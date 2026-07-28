@@ -224,12 +224,7 @@ async function navigate(url, addToHistory = true) {
             const newSidebarTree = doc.getElementById('sidebar-tree');
             const oldSidebarTree = document.getElementById('sidebar-tree');
             if (newSidebarTree && oldSidebarTree) {
-                if (url === '/' && treeSortMode() === 'recent') {
-                    // The server payload carries the A–Z tree; re-fetch Recent instead.
-                    refreshTree();
-                } else {
-                    oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
-                }
+                oldSidebarTree.innerHTML = newSidebarTree.innerHTML;
             }
         }
 
@@ -542,12 +537,13 @@ document.addEventListener('DOMContentLoaded', function() {
     var initialURL = window.location.pathname + window.location.search;
     history.replaceState({ url: initialURL }, '', initialURL);
 
-    // Sidebar sort preference: the server always ships the A–Z tree, so a
-    // persisted Recent mode swaps it in on load (memory view keeps its own tree).
+    // Sidebar sort preference: the cookie normally lets the server ship the
+    // right sidebar; re-sync it and refetch only if this payload predates the
+    // cookie (the .tree-recent wrapper marks an already-Recent sidebar).
     updateTreeSortButton();
-    var initContent = document.getElementById('content');
-    if (treeSortMode() === 'recent' && (!initContent || initContent.dataset.view !== 'memory')) {
-        refreshTree();
+    if (treeSortMode() === 'recent') {
+        setTreeSortCookie('recent');
+        if (!document.querySelector('.sidebar-tree .tree-recent')) refreshTree();
     }
 
     console.log('[SPA] Initialization complete');
@@ -1046,17 +1042,27 @@ function expandParentDirectories(filePath) {
 
 // Refresh tree from server (self-healing mechanism)
 // Sidebar sort mode: 'name' (the tree) or 'recent' (flat, newest edit first).
+// The cookie mirrors localStorage so the server ships the right sidebar on
+// full-page loads instead of an A–Z tree the client would discard.
 function treeSortMode() {
     try { return localStorage.getItem('peekm_tree_sort') === 'recent' ? 'recent' : 'name'; } catch (e) { return 'name'; }
 }
 
+function setTreeSortCookie(mode) {
+    document.cookie = 'peekm_tree_sort=' + mode + '; path=/; max-age=31536000; SameSite=Lax';
+}
+
+// Whether Recent mode shows files beyond the server's day window; reset on
+// toggle so re-entering the mode starts windowed again.
+var treeShowAll = false;
+
 function toggleTreeSort() {
     var next = treeSortMode() === 'recent' ? 'name' : 'recent';
     try { localStorage.setItem('peekm_tree_sort', next); } catch (e) {}
+    setTreeSortCookie(next);
+    treeShowAll = false;
     updateTreeSortButton();
-    // The memory view owns its sidebar tree; the preference applies on return.
-    var content = document.getElementById('content');
-    if (!content || content.dataset.view !== 'memory') refreshTree();
+    refreshTree();
 }
 
 function updateTreeSortButton() {
@@ -1065,20 +1071,21 @@ function updateTreeSortButton() {
 }
 
 // "+N older files" expander in Recent mode — the windowed payload only counts
-// older files, so expanding fetches the unwindowed list.
+// older files, so expanding refetches unwindowed. The flag lives here (not in
+// the button) so the expansion survives SSE-driven refreshes.
 function showOlderFiles(btn) {
     btn.disabled = true;
-    fetch('/tree-html?sort=recent&all=1', { headers: { 'Cache-Control': 'no-cache' } })
-        .then(function (r) { return r.text(); })
-        .then(function (html) {
-            var fileTree = document.querySelector('.sidebar-tree');
-            if (fileTree) fileTree.innerHTML = html;
-        })
-        .catch(function () { btn.disabled = false; });
+    treeShowAll = true;
+    refreshTree();
 }
 
 async function refreshTree() {
     try {
+        // The memory view owns its sidebar tree — never clobber it with the
+        // workspace tree. Guarded here so every caller is safe by default.
+        const view = document.getElementById('content');
+        if (view && view.dataset.view === 'memory') return;
+
         const fileTree = document.querySelector('.sidebar-tree');
         if (!fileTree) {
             console.log('[refreshTree] No sidebar-tree element found, skipping');
@@ -1093,7 +1100,8 @@ async function refreshTree() {
 
         // 2. Fetch fresh tree HTML from server
         const recent = treeSortMode() === 'recent';
-        const response = await fetch(recent ? '/tree-html?sort=recent' : '/tree-html', {
+        const url = recent ? '/tree-html?sort=recent' + (treeShowAll ? '&all=1' : '') : '/tree-html';
+        const response = await fetch(url, {
             headers: {
                 'Cache-Control': 'no-cache'
             }

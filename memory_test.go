@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestFormatNumber(t *testing.T) {
 	tests := []struct {
@@ -24,15 +27,34 @@ func TestFormatNumber(t *testing.T) {
 	}
 }
 
-func TestMemoryFilePriority(t *testing.T) {
-	claude := memoryFilePriority("CLAUDE.md")
-	memory := memoryFilePriority("MEMORY.md")
-	other := memoryFilePriority("feedback.md")
+func TestMemoryFileLess(t *testing.T) {
+	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := older.AddDate(0, 0, 10)
 
-	if claude >= memory {
-		t.Errorf("CLAUDE.md priority (%q) should be < MEMORY.md (%q)", claude, memory)
+	claude := memoryFile{path: "/p/CLAUDE.md", mod: older}
+	memory := memoryFile{path: "/p/MEMORY.md", mod: older}
+	fresh := memoryFile{path: "/p/z_fresh.md", mod: newer}
+	stale := memoryFile{path: "/p/a_stale.md", mod: older}
+	tieA := memoryFile{path: "/p/a_tie.md", mod: older}
+	tieB := memoryFile{path: "/p/b_tie.md", mod: older}
+
+	tests := []struct {
+		name string
+		a, b memoryFile
+		want bool
+	}{
+		{"CLAUDE.md pinned before newer file", claude, fresh, true},
+		{"CLAUDE.md before MEMORY.md", claude, memory, true},
+		{"MEMORY.md pinned before newer file", memory, fresh, true},
+		{"newer file before older", fresh, stale, true},
+		{"older file not before newer", stale, fresh, false},
+		{"equal mtime falls back to name", tieA, tieB, true},
+		{"name fallback is asymmetric", tieB, tieA, false},
 	}
-	if memory >= other {
-		t.Errorf("MEMORY.md priority (%q) should be < feedback.md (%q)", memory, other)
+	for _, tt := range tests {
+		if got := memoryFileLess(tt.a, tt.b); got != tt.want {
+			t.Errorf("%s: memoryFileLess(%s, %s) = %v, want %v",
+				tt.name, tt.a.path, tt.b.path, got, tt.want)
+		}
 	}
 }
