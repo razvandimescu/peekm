@@ -301,7 +301,13 @@ function copyRecap(btn) {
         var name = p.querySelector('.standup-project-name');
         if (!name) return;
         var metrics = p.querySelector('.standup-metrics');
-        var m = metrics ? metrics.textContent.replace(/\s+/g, ' ').trim() : '';
+        var m = '';
+        if (metrics) {
+            // Token counts stay in the live view — never in the Slack paste.
+            var clone = metrics.cloneNode(true);
+            clone.querySelectorAll('.standup-tokens').forEach(function (n) { n.remove(); });
+            m = clone.textContent.replace(/\s+/g, ' ').trim();
+        }
         lines.push('• ' + name.textContent.trim() + (m ? ' — ' + m : ''));
     });
     var tail = document.querySelector('.standup-tail-items');

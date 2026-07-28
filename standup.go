@@ -90,6 +90,9 @@ type standupProject struct {
 	Metrics       []string     // non-zero metric segments for the headline rail
 	TailSummary   string       // one-line metric summary for the "Also touched" strip
 	Ribbon        []ribbonCell // time-bucketed activity rhythm for the day
+	OutputTokens  int          // deduped assistant output tokens (live view only, never exported)
+	CacheWrite    int          // cache_creation tokens, tooltip breakdown only
+	CacheRead     int          // cache_read tokens, tooltip breakdown only
 
 	active time.Duration // ranking key, not rendered
 }
@@ -132,6 +135,12 @@ type standupRecord struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	Message   struct {
+		ID    string `json:"id"`
+		Usage *struct {
+			OutputTokens        int `json:"output_tokens"`
+			CacheCreationTokens int `json:"cache_creation_input_tokens"`
+			CacheReadTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
@@ -147,11 +156,14 @@ type standupBlock struct {
 
 // daySlice holds the per-day metrics extracted from one transcript.
 type daySlice struct {
-	stamps  []time.Time
-	edits   int
-	files   map[string]bool
-	prompts []string
-	tools   []toolEvent // write/edit/bash calls, for the activity ribbon
+	stamps     []time.Time
+	edits      int
+	files      map[string]bool
+	prompts    []string
+	tools      []toolEvent // write/edit/bash calls, for the activity ribbon
+	outTokens  int
+	cacheWrite int
+	cacheRead  int
 }
 
 // standupContent decodes a record's message.content, which is either a bare
@@ -179,6 +191,7 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 	defer f.Close()
 
 	ds := &daySlice{files: map[string]bool{}}
+	seen := map[string]bool{} // message IDs whose usage is already counted
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for sc.Scan() {
@@ -191,6 +204,7 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 			continue
 		}
 		ds.stamps = append(ds.stamps, t)
+		addUsage(ds, &rec, seen)
 
 		text, blocks := standupContent(rec.Message.Content)
 		if rec.Type == "user" {
@@ -218,6 +232,20 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 		return nil
 	}
 	return ds
+}
+
+// addUsage sums a record's token usage once per assistant message. Claude Code
+// writes one JSONL record per content block, each repeating the same usage —
+// summing without deduping by message ID over-counts ~2.5x.
+func addUsage(ds *daySlice, rec *standupRecord, seen map[string]bool) {
+	u := rec.Message.Usage
+	if rec.Type != "assistant" || u == nil || rec.Message.ID == "" || seen[rec.Message.ID] {
+		return
+	}
+	seen[rec.Message.ID] = true
+	ds.outTokens += u.OutputTokens
+	ds.cacheWrite += u.CacheCreationTokens
+	ds.cacheRead += u.CacheReadTokens
 }
 
 // standupPromptLine returns the first line of a user prompt, filtered of system
@@ -354,6 +382,9 @@ type projectAccum struct {
 	prompt       string
 	promptTime   time.Time
 	tools        []toolEvent
+	outTokens    int
+	cacheWrite   int
+	cacheRead    int
 }
 
 // collectProjectSlices walks every transcript under browseDir, gates each on a
@@ -431,6 +462,9 @@ func mergeSlice(accums map[string]*projectAccum, root, projectDir, sessionID str
 	a.active += activeTime(slice.stamps) // sorts slice.stamps ascending
 	a.edits += slice.edits
 	a.tools = append(a.tools, slice.tools...)
+	a.outTokens += slice.outTokens
+	a.cacheWrite += slice.cacheWrite
+	a.cacheRead += slice.cacheRead
 	for fp := range slice.files {
 		a.files[fp] = true
 	}
@@ -498,6 +532,9 @@ func finalizeProject(a *projectAccum, dayStr string) standupProject {
 		Files:        len(a.files),
 		Prompt:       a.prompt,
 		Sessions:     a.sessions,
+		OutputTokens: a.outTokens,
+		CacheWrite:   a.cacheWrite,
+		CacheRead:    a.cacheRead,
 		active:       a.active,
 		ActiveStr:    formatActive(a.active),
 		SessionRange: a.sessionStart.Local().Format("15:04") + "–" + a.sessionEnd.Local().Format("15:04"),
@@ -668,6 +705,20 @@ func sumActive(projects []standupProject) time.Duration {
 
 func formatActive(d time.Duration) string {
 	return fmt.Sprintf("%.1fh", d.Hours())
+}
+
+// formatCompact renders token magnitudes tersely: 840, 4.2k, 98k, 1.2M.
+func formatCompact(n int) string {
+	switch {
+	case n < 1000:
+		return strconv.Itoa(n)
+	case n < 10000:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1000), ".0") + "k"
+	case n < 1000000:
+		return strconv.Itoa(n/1000) + "k"
+	default:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e6), ".0") + "M"
+	}
 }
 
 // nearestActiveDay finds the most recent day on or before `before`-1 with any

@@ -1054,6 +1054,8 @@ func templateFuncMap() template.FuncMap {
 			return t.Format(time.RFC3339)
 		},
 		"formatTimeAgo": formatTimeAgo,
+		"formatNumber":  formatNumber,
+		"formatCompact": formatCompact,
 		"pathEscape":    pathEscapeSegments,
 		"toolIcon":      toolIcon,
 		"truncateSID":   truncateSessionID,

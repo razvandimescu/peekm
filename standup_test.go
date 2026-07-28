@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -253,6 +254,65 @@ func TestSliceTranscriptDayMidnight(t *testing.T) {
 func recordLine(ts time.Time, typ, content string) string {
 	return `{"type":"` + typ + `","timestamp":"` + ts.Format(time.RFC3339) +
 		`","message":{"content":` + content + `}}`
+}
+
+func usageLine(ts time.Time, id string, out, cacheWrite, cacheRead int) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":"%s","message":{"id":"%s","usage":{"output_tokens":%d,"cache_creation_input_tokens":%d,"cache_read_input_tokens":%d},"content":[{"type":"text","text":"x"}]}}`,
+		ts.Format(time.RFC3339), id, out, cacheWrite, cacheRead)
+}
+
+func TestSliceTranscriptDayTokenDedup(t *testing.T) {
+	// Claude Code writes one record per content block, each repeating the same
+	// usage — a message ID seen five times must be counted exactly once.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	day := time.Date(2026, 7, 20, 10, 0, 0, 0, time.Now().Location())
+	var lines []string
+	for i := 0; i < 5; i++ {
+		lines = append(lines, usageLine(day.Add(time.Duration(i)*time.Minute), "msg_a", 464, 43269, 100))
+	}
+	lines = append(lines,
+		usageLine(day.Add(10*time.Minute), "msg_b", 100, 0, 7),
+		recordLine(day.Add(11*time.Minute), "user", `"no usage on user records"`),
+	)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ds := sliceTranscriptDay(path, "2026-07-20")
+	if ds == nil {
+		t.Fatal("expected a slice for 2026-07-20")
+	}
+	if ds.outTokens != 564 {
+		t.Errorf("outTokens = %d, want 564 (464 counted once + 100)", ds.outTokens)
+	}
+	if ds.cacheWrite != 43269 {
+		t.Errorf("cacheWrite = %d, want 43269", ds.cacheWrite)
+	}
+	if ds.cacheRead != 107 {
+		t.Errorf("cacheRead = %d, want 107", ds.cacheRead)
+	}
+}
+
+func TestFormatCompact(t *testing.T) {
+	cases := map[int]string{
+		0:        "0",
+		840:      "840",
+		999:      "999",
+		1000:     "1k",
+		4200:     "4.2k",
+		9999:     "10k",
+		98000:    "98k",
+		295400:   "295k",
+		999999:   "999k",
+		1000000:  "1M",
+		1200000:  "1.2M",
+		13546517: "13.5M",
+	}
+	for n, want := range cases {
+		if got := formatCompact(n); got != want {
+			t.Errorf("formatCompact(%d) = %q, want %q", n, got, want)
+		}
+	}
 }
 
 func toolUse(name, filePath string) string {
