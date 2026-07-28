@@ -1886,7 +1886,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	fileMutex.RUnlock()
 
 	// Generate tree HTML for sidebar
-	treeHTML := generateTreeHTML()
+	treeHTML := sidebarTreeHTML(r)
 
 	// Smart file selection for unified layout
 	defaultFile := selectDefaultFile(currentMarkdownFiles)
@@ -2477,7 +2477,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 
 	var treeHTML string
 	if !isPartialRequest(r) {
-		treeHTML = generateTreeHTML()
+		treeHTML = sidebarTreeHTML(r)
 	}
 
 	var sessionData *SessionMetadata
@@ -3118,19 +3118,35 @@ func pathEscapeSegments(s string) string {
 // treeFileIcon is the per-file document glyph rendered before each leaf's link.
 const treeFileIcon = `<svg class="tree-file-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.56v2.19c0 .138.112.25.25.25h2.19Z"/></svg>`
 
-func generateTreeHTML() string {
-	// Get state snapshot (thread-safe)
+// snapshotBrowseState returns a thread-safe copy of the browse dir (raw and
+// absolute) and the markdown whitelist, shared by the tree generators.
+func snapshotBrowseState() (dir, absDir string, files []string) {
 	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	currentMarkdownFiles := make([]string, len(markdownFiles))
-	copy(currentMarkdownFiles, markdownFiles)
+	dir = browseDir
+	files = make([]string, len(markdownFiles))
+	copy(files, markdownFiles)
 	fileMutex.RUnlock()
 
-	// Make browse directory absolute for proper relative path calculation
-	absDir, err := filepath.Abs(currentBrowseDir)
-	if err != nil {
-		absDir = currentBrowseDir
+	absDir = dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		absDir = abs
 	}
+	return dir, absDir, files
+}
+
+// sidebarTreeHTML picks the sidebar generator from the sort preference cookie
+// (mirrored from localStorage by toggleTreeSort), so full-page loads in Recent
+// mode ship the right list instead of an A–Z tree the client would discard
+// and refetch.
+func sidebarTreeHTML(r *http.Request) string {
+	if c, err := r.Cookie("peekm_tree_sort"); err == nil && c.Value == "recent" {
+		return generateRecentTreeHTML(false)
+	}
+	return generateTreeHTML()
+}
+
+func generateTreeHTML() string {
+	_, absDir, currentMarkdownFiles := snapshotBrowseState()
 
 	root := &fileNode{name: ".", isDir: true}
 	dirNodes := make(map[string]*fileNode)
@@ -3208,16 +3224,7 @@ const recentTreeDays = 30
 // holds thousands of stale files; shipping them on every refresh is the tree
 // bloat PR #24 removed).
 func generateRecentTreeHTML(all bool) string {
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	currentMarkdownFiles := make([]string, len(markdownFiles))
-	copy(currentMarkdownFiles, markdownFiles)
-	fileMutex.RUnlock()
-
-	absDir, err := filepath.Abs(currentBrowseDir)
-	if err != nil {
-		absDir = currentBrowseDir
-	}
+	currentBrowseDir, absDir, currentMarkdownFiles := snapshotBrowseState()
 
 	eventTimes := map[string]time.Time{}
 	if globalEventLog != nil {
@@ -3252,6 +3259,8 @@ func generateRecentTreeHTML(all bool) string {
 
 	cutoff := time.Now().AddDate(0, 0, -recentTreeDays)
 	var buf bytes.Buffer
+	// The .tree-recent wrapper doubles as the client's marker that the shipped
+	// sidebar already is Recent mode (see the DOMContentLoaded init).
 	buf.WriteString(`<div class="tree-recent">`)
 	day, older := "", 0
 	for _, r := range rows {
@@ -3261,7 +3270,7 @@ func generateRecentTreeHTML(all bool) string {
 		}
 		if d := dayLabel(r.mod.Local()); d != day {
 			day = d
-			buf.WriteString(`<div class="tree-day-header">` + template.HTMLEscapeString(d) + `</div>`)
+			buf.WriteString(`<div class="tree-day-header sidebar-eyebrow">` + template.HTMLEscapeString(d) + `</div>`)
 		}
 		writeRecentRow(&buf, r.rel, r.mod)
 	}

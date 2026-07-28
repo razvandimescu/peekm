@@ -580,7 +580,7 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 
 	data := timelineTemplateData{
 		baseTemplateData: newBaseTemplateData(),
-		TreeHTML:         template.HTML(generateTreeHTML()),
+		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
 		Title:            "AI Timeline",
 		Subtitle:         fmt.Sprintf("Session history for %s", currentBrowseDir),
 		BrowsePath:       currentBrowseDir,

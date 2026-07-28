@@ -899,12 +899,11 @@
             display: none;
         }
 
-        /* Recent mode: the tree flattened chronologically under sticky day headers. */
+        /* Recent mode: the tree flattened chronologically under sticky day headers.
+           Typography comes from .sidebar-eyebrow (set server-side on the div). */
         .tree-day-header {
             position: sticky; top: 0; z-index: 1;
             background: var(--bgColor-default);
-            font-family: var(--font-mono); font-size: 10px; font-weight: 500;
-            letter-spacing: 1.2px; text-transform: uppercase; color: var(--fgColor-muted);
             padding: 8px 8px 4px;
         }
         .tree-file-recent { display: flex; align-items: center; min-width: 0; }
@@ -914,12 +913,8 @@
             flex: none; margin-left: auto; padding-left: 8px;
             font-family: var(--font-mono); font-size: 10px; color: var(--fgColor-muted);
         }
-        .tree-recent-more {
-            display: block; width: 100%; padding: 6px 8px; margin-top: 4px;
-            border: none; background: none; text-align: left; cursor: pointer;
-            font-family: var(--font-mono); font-size: 10.5px; color: var(--fgColor-muted);
-        }
-        .tree-recent-more:hover { color: var(--fgColor-default); background: rgba(128, 128, 128, 0.1); }
+        /* Shares the .standup-fmore expander recipe (defined with it below). */
+        .tree-recent-more { padding: 6px 8px; margin-top: 4px; font-size: 10.5px; }
         .dir-name .filter-match {
             background: rgba(9, 105, 218, 0.15);
             border-radius: 2px;
@@ -1714,12 +1709,13 @@
         .standup-fcopy.copied { color: var(--peekm-green); opacity: 1; }
         .standup-frow-extra { display: none; }
         .standup-filelist.expanded .standup-frow-extra { display: flex; }
-        .standup-fmore {
-            display: block; width: 100%; padding: 6px 12px; border: none; border-top: 1px solid var(--borderColor-muted);
-            background: none; font-family: var(--font-mono); font-size: 11px; color: var(--fgColor-muted);
+        .standup-fmore, .tree-recent-more {
+            display: block; width: 100%; border: none; background: none;
+            font-family: var(--font-mono); color: var(--fgColor-muted);
             cursor: pointer; text-align: left;
         }
-        .standup-fmore:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
+        .standup-fmore { padding: 6px 12px; border-top: 1px solid var(--borderColor-muted); font-size: 11px; }
+        .standup-fmore:hover, .tree-recent-more:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
         .standup-filelist.expanded .standup-fmore { display: none; }
         @media (max-width: 480px) {
             .standup-frow { flex-wrap: wrap; row-gap: 2px; padding: 9px 12px; }
