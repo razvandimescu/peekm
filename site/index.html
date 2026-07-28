@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>peekm — See what AI coding agents do across all your projects</title>
-    <meta name="description" content="Real-time AI session tracking for Claude Code. Timeline, transcripts, memory browser, and sharing — in a single binary.">
-    <meta property="og:title" content="peekm — AI coding agent observer">
-    <meta property="og:description" content="See what AI coding agents do across all your projects. Real-time timeline, transcripts, memory browser, and sharing.">
-    <meta property="og:image" content="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif">
+    <title>peekm — Read, review, and continue what Claude Code did</title>
+    <meta name="description" content="A local dashboard that turns every Claude Code session into something you can read — the full conversation, line-level diffs, and what the AI learned. Reply to continue a session, or share any file it produced. Single binary.">
+    <meta property="og:title" content="peekm — read, review & continue any Claude Code session">
+    <meta property="og:description" content="Every Claude Code session, rendered so you can read it: the conversation, line-level diffs, and what the AI learned — across all your projects. Reply to continue, or share what it built. Local, open source.">
+    <meta property="og:image" content="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero.png">
     <meta property="og:url" content="https://peekm.dev">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary_large_image">
@@ -267,11 +267,33 @@
             margin-bottom: 80px;
         }
 
-        .demo img {
+        .demo img,
+        .demo iframe {
             width: 100%;
             border-radius: 12px;
             border: 1px solid var(--border);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(68, 147, 248, 0.1);
+        }
+        .demo iframe {
+            height: 660px;
+            display: block;
+            background: #fbfcfe;
+            color-scheme: light;
+        }
+        .demo-caption {
+            text-align: center;
+            margin-top: 14px;
+            font-size: 0.9rem;
+            color: #59636e;
+        }
+        .demo-caption a {
+            color: #2f6fed;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .demo-caption a:hover { text-decoration: underline; }
+        @media (max-width: 720px) {
+            .demo iframe { height: 580px; }
         }
 
         @media (prefers-color-scheme: light) {
@@ -685,11 +707,11 @@
 <section class="hero">
     <div class="container">
         <div class="hero-badge animate">Works with Claude Code</div>
-        <h1 class="animate animate-d1">See what AI agents do<br><span>across all your projects</span></h1>
+        <h1 class="animate animate-d1">Read, review, and continue<br><span>what Claude Code did</span></h1>
         <p class="hero-subtitle animate animate-d2">
-            AI coding agents run dozens of operations per session — but you only see the final diff.
-            peekm shows you every session, every file change, every conversation.
-            Share any document instantly — LAN or public link, no account needed.
+            peekm turns every Claude Code session into something you can read — the full conversation,
+            the line-level diffs, and what the AI learned about each project. Reply to continue a session,
+            or share any file it produced. All local, no account.
         </p>
 
         <div class="install-block animate animate-d3">
@@ -709,7 +731,10 @@
 
 <section class="demo animate animate-d4">
     <div class="container">
-        <img src="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero-demo.gif" alt="peekm demo — AI session timeline, transcript viewer, and markdown browsing" loading="lazy">
+        <div id="demo">
+            <iframe src="demo.html" title="peekm — interactive demo: a live Claude Code transcript with line diffs and a reply box" loading="lazy"></iframe>
+            <p class="demo-caption">↑ This one's live — open a diff, expand a response, or hit Send. <a href="demo.html" target="_blank" rel="noopener">Open full demo →</a></p>
+        </div>
     </div>
 </section>
 
