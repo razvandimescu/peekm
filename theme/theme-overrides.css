@@ -703,42 +703,61 @@ a.timeline-session-id:hover {
 
 /* --- Transcript page styles --- */
 .transcript-header { margin-bottom: 24px; }
+.transcript-header h1 {
+    font-family: var(--font-display);
+    font-size: 1.35em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 4px;
+}
+.transcript-header .subtitle { margin-bottom: 0; }
 
 .transcript-nav {
     display: flex;
     align-items: center;
     gap: 16px;
-    font-size: 0.85em;
+    font-size: 12px;
     position: sticky;
     top: 0;
     z-index: 5;
-    margin-top: 12px;
+    margin-top: 14px;
     padding: 10px 0;
     background: var(--bgColor-default);
     border-bottom: 1px solid var(--borderColor-muted);
 }
 .transcript-nav a {
-    color: var(--fgColor-accent);
+    color: var(--fgColor-muted);
     text-decoration: none;
 }
-.transcript-nav a:hover { text-decoration: underline; }
+.transcript-nav a:hover { color: var(--peekm-accent); }
 .transcript-nav-jumps {
     margin-left: auto;
     display: flex;
     gap: 16px;
 }
 
+/* Floating composer: sticks to the bottom of the scroll area so the
+   reply box is always at hand, like a chat input (matches site demo).
+   z-index 6: above .transcript-nav (5), below all app chrome. */
 .transcript-reply {
+    --reply-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.3);
+    position: sticky;
+    bottom: 12px;
+    z-index: 6;
     margin: 28px 0 8px;
     padding: 14px 14px 12px;
     border: 1px solid var(--borderColor-default);
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--bgColor-muted);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: var(--reply-shadow);
+    transition: border-color 0.15s ease;
 }
 .transcript-reply:focus-within {
     border-color: var(--peekm-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--peekm-accent) 15%, transparent);
+    box-shadow: var(--reply-shadow),
+                0 0 0 3px color-mix(in srgb, var(--peekm-accent) 15%, transparent);
 }
 .transcript-reply-input {
     width: 100%;
@@ -813,30 +832,19 @@ a.timeline-session-id:hover {
     font-size: 12px;
     color: var(--fgColor-muted);
     margin-top: 8px;
-    padding: 8px 12px;
-    background: var(--bgColor-muted);
-    border-radius: 6px;
-    border: 1px solid var(--borderColor-muted);
 }
 .transcript-conversation {
     display: flex;
     flex-direction: column;
 }
 
+/* Flat, reading-focused turns: role badges carry the who, a hairline
+   separator carries the where — no colored blocks (matches site demo). */
 .transcript-turn {
-    padding: 20px 24px;
-    border-left: 3px solid transparent;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--borderColor-muted);
 }
-
-.transcript-user {
-    background: var(--bgColor-muted);
-    border-left-color: var(--fgColor-accent);
-}
-
-.transcript-assistant {
-    background: var(--bgColor-default);
-    border-left-color: var(--fgColor-success, #2da44e);
-}
+.transcript-turn:last-of-type { border-bottom: none; }
 
 .transcript-turn-header {
     display: flex;
@@ -862,7 +870,6 @@ a.timeline-session-id:hover {
     color: var(--fgColor-success, #2da44e);
 }
 .transcript-timestamp {
-    margin-left: auto;
     font-size: 0.75em;
     color: var(--fgColor-muted);
     font-family: var(--font-mono);
@@ -915,12 +922,13 @@ a.timeline-session-id:hover {
 .transcript-longtext-toggle {
     display: inline-flex;
     margin-top: 8px;
-    padding: 4px 10px;
-    font-size: 0.85em;
-    color: var(--fgColor-accent);
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--peekm-accent);
     background: var(--bgColor-default);
     border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
+    border-radius: 999px;
     cursor: pointer;
     user-select: none;
 }
