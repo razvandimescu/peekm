@@ -1631,8 +1631,12 @@
             font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase;
             color: var(--fgColor-muted); margin-bottom: 8px;
         }
-        .standup-tail-items { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
-        .standup-tail-sep { color: var(--borderColor-default); }
+        .standup-tail-item { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
+        .standup-tail > .standup-tail-item { padding: 3px 8px 3px 4px; }
+        /* Tail entries with file rows reuse the disclosure; the summary wears the
+           tail's quieter body type instead of the headline's mono label. */
+        .standup-tail-files { margin-top: 0; }
+        .standup-tail-files > summary { font-family: var(--font-body); font-size: 13.5px; }
         .standup-empty { color: var(--fgColor-muted); }
         .standup-empty a { color: var(--peekm-accent); }
 

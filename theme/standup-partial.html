@@ -1,3 +1,15 @@
+{{define "standup-filelist"}}
+<div class="standup-filelist">
+    {{range $f := .FileRows}}<a class="standup-frow{{if $f.Extra}} standup-frow-extra{{end}}" href="{{if $f.ViewPath}}/view/{{pathEscape $f.ViewPath}}{{else}}/transcript?session={{$f.SessionID}}{{if $f.ToolID}}#tool-{{$f.ToolID}}{{end}}{{end}}" title="{{if $f.ViewPath}}Open in viewer{{else}}Open the transcript at this edit{{end}}">
+        <span class="standup-fdot tl-cell-{{$f.Dot}}" aria-hidden="true"></span>
+        <span class="standup-fpath"><bdi>{{if $f.Dir}}<span class="standup-fdir">{{$f.Dir}}</span>{{end}}<span class="standup-fbase">{{$f.Base}}</span></bdi></span>
+        <span class="standup-fmeta">{{if $f.Uncommitted}}<span class="standup-fpill">uncommitted</span>{{end}}{{if $f.ViewPath}}<span class="standup-fpill standup-fpill-md">md</span>{{end}}<span class="standup-fcount">×{{$f.Edits}}</span><span class="standup-ftools">{{$f.Tools}}</span><span class="standup-ftime">{{$f.Last}}</span></span>
+        <button class="standup-fcopy" aria-label="Copy file path" title="Copy path" onclick="copyStandupPath(event,this,'{{$f.AbsPath}}')">⧉</button>
+    </a>
+    {{end}}
+    {{if .MoreFileRows}}<button class="standup-fmore" onclick="this.closest('.standup-filelist').classList.add('expanded')">+ {{.MoreFileRows}} more file{{if ne .MoreFileRows 1}}s{{end}}</button>{{end}}
+</div>
+{{end}}
 <main id="content" data-view="standup" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container standup">
         <div class="standup-head">
@@ -55,16 +67,7 @@
             {{if .FileRows}}
             <details class="standup-files">
                 <summary><span class="standup-files-tri">▶</span> <b>{{len .FileRows}} file{{if ne (len .FileRows) 1}}s{{end}}</b> AI edited</summary>
-                <div class="standup-filelist">
-                    {{range $f := .FileRows}}<a class="standup-frow{{if $f.Extra}} standup-frow-extra{{end}}" href="{{if $f.ViewPath}}/view/{{pathEscape $f.ViewPath}}{{else}}/transcript?session={{$f.SessionID}}{{if $f.ToolID}}#tool-{{$f.ToolID}}{{end}}{{end}}" title="{{if $f.ViewPath}}Open in viewer{{else}}Open the transcript at this edit{{end}}">
-                        <span class="standup-fdot tl-cell-{{$f.Dot}}" aria-hidden="true"></span>
-                        <span class="standup-fpath"><bdi>{{if $f.Dir}}<span class="standup-fdir">{{$f.Dir}}</span>{{end}}<span class="standup-fbase">{{$f.Base}}</span></bdi></span>
-                        <span class="standup-fmeta">{{if $f.Uncommitted}}<span class="standup-fpill">uncommitted</span>{{end}}{{if $f.ViewPath}}<span class="standup-fpill standup-fpill-md">md</span>{{end}}<span class="standup-fcount">×{{$f.Edits}}</span><span class="standup-ftools">{{$f.Tools}}</span><span class="standup-ftime">{{$f.Last}}</span></span>
-                        <button class="standup-fcopy" aria-label="Copy file path" title="Copy path" onclick="copyStandupPath(event,this,'{{$f.AbsPath}}')">⧉</button>
-                    </a>
-                    {{end}}
-                    {{if .MoreFileRows}}<button class="standup-fmore" onclick="this.closest('.standup-filelist').classList.add('expanded')">+ {{.MoreFileRows}} more file{{if ne .MoreFileRows 1}}s{{end}}</button>{{end}}
-                </div>
+                {{template "standup-filelist" .}}
             </details>
             {{end}}
             <div class="standup-sessions">{{len .Sessions}} session{{if ne (len .Sessions) 1}}s{{end}} · {{.SessionRange}}</div>
@@ -74,7 +77,16 @@
         {{if .Day.Tail}}
         <div class="standup-tail">
             <div class="standup-tail-label">Also touched</div>
-            <div class="standup-tail-items">{{range $i, $p := .Day.Tail}}{{if $i}}<span class="standup-tail-sep"> · </span>{{end}}<span class="standup-tail-item">{{$p.TailSummary}}</span>{{end}}</div>
+            {{range .Day.Tail}}
+            {{if .FileRows}}
+            <details class="standup-files standup-tail-files">
+                <summary><span class="standup-files-tri">▶</span> <span class="standup-tail-item">{{.TailSummary}}</span></summary>
+                {{template "standup-filelist" .}}
+            </details>
+            {{else}}
+            <div class="standup-tail-item">{{.TailSummary}}</div>
+            {{end}}
+            {{end}}
         </div>
         {{end}}
         {{end}}

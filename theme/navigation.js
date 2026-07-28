@@ -310,8 +310,12 @@ function copyRecap(btn) {
         }
         lines.push('• ' + name.textContent.trim() + (m ? ' — ' + m : ''));
     });
-    var tail = document.querySelector('.standup-tail-items');
-    if (tail) { lines.push(''); lines.push('Also touched: ' + tail.textContent.replace(/\s+/g, ' ').trim()); }
+    var tailItems = document.querySelectorAll('.standup-tail .standup-tail-item');
+    if (tailItems.length) {
+        var parts = [].map.call(tailItems, function (n) { return n.textContent.replace(/\s+/g, ' ').trim(); });
+        lines.push('');
+        lines.push('Also touched: ' + parts.join(' · '));
+    }
     var text = lines.join('\n');
 
     var done = function () {
