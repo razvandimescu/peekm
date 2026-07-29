@@ -3176,13 +3176,7 @@
 
         // Copy to Clipboard with Visual Feedback
         function copyToClipboard(text) {
-            if (!navigator.clipboard) {
-                console.warn('Clipboard API not available');
-                return;
-            }
-            navigator.clipboard.writeText(text).catch(err => {
-                console.error('Failed to copy:', err);
-            });
+            copyText(text);
         }
 
         // Format ISO timestamp to relative time
