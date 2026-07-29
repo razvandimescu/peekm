@@ -716,7 +716,8 @@ func buildFileRows(a *projectAccum, dayStr string) []standupFile {
 			row.Dir = filepath.ToSlash(d) + "/"
 		}
 		if isWhitelistedFile(fp) {
-			row.ViewPath = fp
+			// /view/ resolves against browseDir — absolute paths 404.
+			row.ViewPath = getRelativePath(fp)
 		}
 		rows = append(rows, row)
 	}
@@ -775,11 +776,22 @@ func dominantToolClass(tools map[string]int) string {
 // dirtyFiles returns which of the given root-relative paths have uncommitted
 // changes, per `git status --porcelain -uall` limited to those pathspecs (a
 // handful of stats instead of a full-tree walk). Rename targets included.
-// Status codes are cut by trimming to the first space — gitOutput trims the
-// leading space off the first line, so a fixed-column parse would be off by one.
+// Absolute rels (edits outside root, e.g. ~/.claude writes) are skipped — one
+// outside-repo pathspec fails the whole git call. Status codes are cut by
+// trimming to the first space — gitOutput trims the leading space off the
+// first line, so a fixed-column parse would be off by one.
 func dirtyFiles(root string, rels []string) map[string]bool {
-	args := append([]string{"status", "--porcelain", "-uall", "--"}, rels...)
 	out := map[string]bool{}
+	var specs []string
+	for _, rel := range rels {
+		if !filepath.IsAbs(rel) {
+			specs = append(specs, rel)
+		}
+	}
+	if len(specs) == 0 {
+		return out
+	}
+	args := append([]string{"status", "--porcelain", "-uall", "--"}, specs...)
 	for _, line := range strings.Split(gitOutput(root, args...), "\n") {
 		_, p, ok := strings.Cut(strings.TrimSpace(line), " ")
 		if !ok {

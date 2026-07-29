@@ -398,6 +398,30 @@ func TestBuildFileRowsRanking(t *testing.T) {
 	}
 }
 
+func TestBuildFileRowsViewPathBrowseRelative(t *testing.T) {
+	origFiles, origDir := markdownFiles, browseDir
+	markdownFiles, browseDir = []string{"/repo/docs/notes.md"}, "/repo"
+	defer func() { markdownFiles, browseDir = origFiles, origDir }()
+
+	a := &projectAccum{root: "/repo", files: map[string]*fileStat{
+		"/repo/docs/notes.md": {edits: 2, tools: map[string]int{"Edit": 2}},
+		"/repo/main.go":       {edits: 1, tools: map[string]int{"Edit": 1}},
+	}}
+	rows := buildFileRows(a, "2026-07-20")
+	for _, row := range rows {
+		switch row.Base {
+		case "notes.md":
+			if row.ViewPath != "docs/notes.md" {
+				t.Errorf("notes.md ViewPath = %q, want browse-relative docs/notes.md", row.ViewPath)
+			}
+		case "main.go":
+			if row.ViewPath != "" {
+				t.Errorf("main.go ViewPath = %q, want empty (not whitelisted)", row.ViewPath)
+			}
+		}
+	}
+}
+
 func TestDirtyFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -427,8 +451,12 @@ func TestDirtyFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "committed.go"), []byte("changed"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	dirty := dirtyFiles(dir, []string{"sub/dirty.go", "committed.go"})
+	// The outside-repo path would fail the whole git call if not skipped.
+	dirty := dirtyFiles(dir, []string{"sub/dirty.go", "committed.go", "/outside/repo.md"})
 	if !dirty["sub/dirty.go"] || !dirty["committed.go"] {
 		t.Errorf("dirty = %v, want sub/dirty.go and committed.go", dirty)
+	}
+	if len(dirtyFiles(dir, []string{"/outside/repo.md"})) != 0 {
+		t.Error("all-absolute rels must yield no dirty files, not a git error")
 	}
 }
