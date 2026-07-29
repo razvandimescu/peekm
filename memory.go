@@ -23,26 +23,43 @@ type memoryTemplateData struct {
 }
 
 type memoryProjectCard struct {
-	Name      string
-	Files     []memoryFileEntry
-	LastMod   string
-	FirstLink string
-	Sections  []string // H2 headings across all files
-	LineCount int      // total lines across all files
-	Snippet   string   // preview text from first meaningful content
+	Name         string
+	Files        []memoryFileEntry
+	LastMod      string
+	LastModTitle string // absolute date for the meta tooltip
+	MoreCount    int    // files hidden behind the "+N more" expander
+	FirstLink    string
+	Sections     []string // H2 headings across all files
+	LineCount    int      // total lines across all files
+	Snippet      string   // preview text from first meaningful content
 }
 
 type memoryFileEntry struct {
-	Name string
-	Link string
+	Name   string
+	Link   string
+	Title  string // absolute modification date (tooltip)
+	Pinned bool   // CLAUDE.md / MEMORY.md entry points
+	Stale  bool   // not modified within memoryStaleAfter
+	Over   bool   // beyond memoryFileCap, hidden until expanded
+}
+
+type memoryFile struct {
+	path string
+	mod  time.Time
 }
 
 type memoryProject struct {
 	encoded   string
 	decoded   string
-	files     []string
+	files     []memoryFile
 	newestMod time.Time
 }
+
+const (
+	memoryFileCap    = 8
+	memoryStaleAfter = 30 * 24 * time.Hour
+	memoryDateFormat = "2 Jan 2006, 15:04"
+)
 
 func serveMemory(w http.ResponseWriter, r *http.Request) {
 	memFiles, projectIndex := collectMemoryFiles("")
@@ -55,23 +72,35 @@ func serveMemory(w http.ResponseWriter, r *http.Request) {
 
 	projects := groupMemoryByProject(memFiles, projectsDir, projectIndex)
 	treeHTML := buildMemoryTreeHTML(projects, urlBase, "")
+	now := time.Now()
 	var cards []memoryProjectCard
 	for _, p := range projects {
 		sections, lineCount, snippet := extractMemoryInsights(p.files)
 		card := memoryProjectCard{
 			Name:      p.decoded,
-			LastMod:   formatTimeAgo(p.newestMod),
 			Sections:  sections,
 			LineCount: lineCount,
 			Snippet:   snippet,
 		}
-		for _, f := range p.files {
-			relPath := tildeRelPath(f, urlBase)
-			card.Files = append(card.Files, memoryFileEntry{
-				Name: filepath.Base(f),
-				Link: "/view/" + pathEscapeSegments(relPath),
-			})
+		if !p.newestMod.IsZero() {
+			card.LastMod = formatTimeAgo(p.newestMod)
+			card.LastModTitle = p.newestMod.Format(memoryDateFormat)
 		}
+		for i, f := range p.files {
+			relPath := tildeRelPath(f.path, urlBase)
+			entry := memoryFileEntry{
+				Name:   filepath.Base(f.path),
+				Link:   "/view/" + pathEscapeSegments(relPath),
+				Pinned: memoryFilePinned(f.path),
+				Over:   i >= memoryFileCap,
+			}
+			if !f.mod.IsZero() {
+				entry.Title = f.mod.Format(memoryDateFormat)
+				entry.Stale = now.Sub(f.mod) > memoryStaleAfter
+			}
+			card.Files = append(card.Files, entry)
+		}
+		card.MoreCount = max(0, len(card.Files)-memoryFileCap)
 		if len(card.Files) > 0 {
 			card.FirstLink = card.Files[0].Link
 		}
@@ -211,17 +240,31 @@ func collectMemoryFiles(filter string) ([]string, map[string]string) {
 	return files, projectIndex
 }
 
-// groupMemoryByProject groups memory files by their parent project directory,
-// memoryFilePriority returns sort order: CLAUDE.md=0, MEMORY.md=1, others by name.
-func memoryFilePriority(path string) string {
+// memoryFileRank pins entry points: CLAUDE.md=0, MEMORY.md=1, everything else=2.
+func memoryFileRank(path string) int {
 	switch filepath.Base(path) {
 	case "CLAUDE.md":
-		return "\x00"
+		return 0
 	case "MEMORY.md":
-		return "\x01"
+		return 1
 	default:
-		return filepath.Base(path)
+		return 2
 	}
+}
+
+func memoryFilePinned(path string) bool {
+	return memoryFileRank(path) < 2
+}
+
+// memoryFileLess orders pinned entry points first, then newest-first, then by name.
+func memoryFileLess(a, b memoryFile) bool {
+	if ra, rb := memoryFileRank(a.path), memoryFileRank(b.path); ra != rb {
+		return ra < rb
+	}
+	if !a.mod.Equal(b.mod) {
+		return a.mod.After(b.mod)
+	}
+	return filepath.Base(a.path) < filepath.Base(b.path)
 }
 
 func formatMemorySubtitle(cards []memoryProjectCard) string {
@@ -247,10 +290,10 @@ func formatNumber(n int) string {
 
 // extractMemoryInsights scans markdown files for a project and returns
 // H2 section headers, total line count, and a content snippet.
-func extractMemoryInsights(files []string) (sections []string, lineCount int, snippet string) {
+func extractMemoryInsights(files []memoryFile) (sections []string, lineCount int, snippet string) {
 	seen := make(map[string]bool)
 	for _, f := range files {
-		file, err := os.Open(f)
+		file, err := os.Open(f.path)
 		if err != nil {
 			continue
 		}
@@ -274,6 +317,7 @@ func extractMemoryInsights(files []string) (sections []string, lineCount int, sn
 	return
 }
 
+// groupMemoryByProject groups memory files by their parent project directory,
 // decodes project names, and returns them sorted by most recent modification.
 // Files under baseDir (memory files) are grouped by their first path component.
 // Files outside baseDir (e.g. project CLAUDE.md) are matched via projectIndex.
@@ -304,21 +348,28 @@ func groupMemoryByProject(files []string, baseDir string, projectIndex map[strin
 			continue
 		}
 
-		g.files = append(g.files, f)
-		if info, err := os.Stat(f); err == nil && info.ModTime().After(g.newestMod) {
-			g.newestMod = info.ModTime()
+		var mod time.Time
+		if info, err := os.Stat(f); err == nil {
+			mod = info.ModTime()
+			if mod.After(g.newestMod) {
+				g.newestMod = mod
+			}
 		}
+		g.files = append(g.files, memoryFile{path: f, mod: mod})
 	}
 
 	sorted := make([]*memoryProject, 0, len(groups))
 	for _, g := range groups {
 		sort.Slice(g.files, func(i, j int) bool {
-			return memoryFilePriority(g.files[i]) < memoryFilePriority(g.files[j])
+			return memoryFileLess(g.files[i], g.files[j])
 		})
 		sorted = append(sorted, g)
 	}
 	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].newestMod.After(sorted[j].newestMod)
+		if !sorted[i].newestMod.Equal(sorted[j].newestMod) {
+			return sorted[i].newestMod.After(sorted[j].newestMod)
+		}
+		return sorted[i].decoded < sorted[j].decoded
 	})
 	return sorted
 }
@@ -335,9 +386,9 @@ func buildMemoryTreeHTML(projects []*memoryProject, urlBaseDir, activeFile strin
 		projNode := &fileNode{name: g.decoded, path: g.encoded, isDir: true}
 		hasActive := false
 		for _, f := range g.files {
-			relPath := tildeRelPath(f, urlBaseDir)
-			projNode.children = append(projNode.children, &fileNode{name: filepath.Base(f), path: relPath})
-			if f == activeFile {
+			relPath := tildeRelPath(f.path, urlBaseDir)
+			projNode.children = append(projNode.children, &fileNode{name: filepath.Base(f.path), path: relPath})
+			if f.path == activeFile {
 				hasActive = true
 			}
 		}

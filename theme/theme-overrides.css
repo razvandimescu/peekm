@@ -974,6 +974,14 @@ a.timeline-session-id:hover {
     border-radius: 6px;
     font-size: 0.85em;
 }
+/* Deep-link target flash: revealHashTarget() stamps this on whatever element
+   the hash addresses (today the recap's #tool-<id> transcript anchors). */
+.anchor-flash {
+    outline: 2px solid var(--peekm-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--peekm-accent) 15%, transparent);
+}
 .transcript-tool summary {
     padding: 8px 12px;
     cursor: pointer;
@@ -1285,6 +1293,50 @@ a.timeline-session-id:hover {
 .memory-card-file:hover {
     background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
     color: var(--fgColor-accent);
+}
+
+.memory-card-file.pinned {
+    color: var(--fgColor-accent);
+    background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+}
+
+/* stale (>30d): recede via transparent background — color alone, not opacity,
+   so it stays legible in dark mode */
+.memory-card-file.stale {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--borderColor-muted);
+}
+
+.memory-card-file.over {
+    display: none;
+}
+
+.memory-card-files.expanded .memory-card-file.over {
+    display: inline-block;
+}
+
+.memory-card-more {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 1px 6px;
+    border: 1px dashed var(--borderColor-default);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--fgColor-accent);
+    cursor: pointer;
+}
+
+.memory-card-more:hover {
+    background: var(--bgColor-accent-muted, rgba(56, 139, 253, 0.1));
+}
+
+.memory-card-more .less-label,
+.memory-card-files.expanded .memory-card-more .more-label {
+    display: none;
+}
+
+.memory-card-files.expanded .memory-card-more .less-label {
+    display: inline;
 }
 
 .memory-empty {

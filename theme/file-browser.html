@@ -898,6 +898,23 @@
         .tree-item.filtered-out {
             display: none;
         }
+
+        /* Recent mode: the tree flattened chronologically under sticky day headers.
+           Typography comes from .sidebar-eyebrow (set server-side on the div). */
+        .tree-day-header {
+            position: sticky; top: 0; z-index: 1;
+            background: var(--bgColor-default);
+            padding: 8px 8px 4px;
+        }
+        .tree-file-recent { display: flex; align-items: center; min-width: 0; }
+        .tree-file-recent a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tree-recent-dir { color: var(--fgColor-muted); }
+        .tree-recent-time {
+            flex: none; margin-left: auto; padding-left: 8px;
+            font-family: var(--font-mono); font-size: 10px; color: var(--fgColor-muted);
+        }
+        /* Shares the .standup-fmore expander recipe (defined with it below). */
+        .tree-recent-more { padding: 6px 8px; margin-top: 4px; font-size: 10.5px; }
         .dir-name .filter-match {
             background: rgba(9, 105, 218, 0.15);
             border-radius: 2px;
@@ -1631,10 +1648,84 @@
             font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase;
             color: var(--fgColor-muted); margin-bottom: 8px;
         }
-        .standup-tail-items { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
-        .standup-tail-sep { color: var(--borderColor-default); }
+        .standup-tail-item { font-size: 13.5px; color: var(--fgColor-muted); line-height: 1.7; }
+        .standup-tail > .standup-tail-item { padding: 3px 8px 3px 4px; }
+        /* Tail entries with file rows reuse the disclosure; the summary wears the
+           tail's quieter body type instead of the headline's mono label. */
+        .standup-tail-files { margin-top: 0; }
+        .standup-tail-files > summary { font-family: var(--font-body); font-size: 13.5px; }
         .standup-empty { color: var(--fgColor-muted); }
         .standup-empty a { color: var(--peekm-accent); }
+
+        /* Files AI edited — the reviewer's disclosure. Rows link to the viewer
+           (markdown) or to the transcript anchored at the edit (everything else). */
+        .standup-files { margin-top: 12px; }
+        .standup-files > summary {
+            cursor: pointer; display: inline-flex; align-items: center; gap: 7px; list-style: none;
+            font-family: var(--font-mono); font-size: 12px; color: var(--fgColor-muted);
+            padding: 3px 8px 3px 4px; border-radius: 6px; user-select: none;
+        }
+        .standup-files > summary::-webkit-details-marker { display: none; }
+        .standup-files > summary:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
+        .standup-files > summary b { font-weight: 500; color: var(--fgColor-default); }
+        .standup-files-tri { font-size: 9px; color: var(--fgColor-muted); transition: transform 0.15s; }
+        .standup-files[open] .standup-files-tri { transform: rotate(90deg); }
+        .standup-filelist {
+            margin-top: 8px; border: 1px solid var(--borderColor-default); border-radius: 10px;
+            background: var(--bgColor-default); overflow: hidden;
+        }
+        .standup-frow {
+            display: flex; align-items: center; gap: 10px; padding: 7px 12px; min-height: 36px;
+            font-family: var(--font-mono); font-size: 12.5px; color: var(--fgColor-default);
+            text-decoration: none; border-top: 1px solid var(--borderColor-muted);
+        }
+        .standup-frow:first-child { border-top: none; }
+        .standup-frow:hover { background: var(--bgColor-muted); }
+        /* Dot color comes from the shared tl-cell-* classes; only shape lives here. */
+        .standup-fdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+        /* Head-truncate so the basename survives: …/theme/standup-partial.html */
+        .standup-fpath { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+        .standup-fpath bdi { direction: ltr; unicode-bidi: isolate; }
+        .standup-fdir { color: var(--fgColor-muted); }
+        .standup-fbase { font-weight: 500; }
+        .standup-fmeta { display: flex; align-items: center; gap: 12px; flex: none; font-size: 11px; color: var(--fgColor-muted); }
+        .standup-fcount { color: var(--fgColor-default); font-weight: 500; }
+        .standup-fpill {
+            font-size: 9.5px; letter-spacing: 0.4px; text-transform: uppercase; font-weight: 500;
+            color: var(--peekm-amber); background: color-mix(in srgb, var(--peekm-amber) 12%, transparent);
+            border: 1px solid color-mix(in srgb, var(--peekm-amber) 30%, transparent);
+            padding: 1px 6px; border-radius: 4px;
+        }
+        .standup-fpill-md {
+            color: var(--peekm-accent); background: color-mix(in srgb, var(--peekm-accent) 8%, transparent);
+            border-color: color-mix(in srgb, var(--peekm-accent) 22%, transparent);
+        }
+        .standup-fcopy {
+            width: 26px; height: 26px; flex: none; border: none; background: none; border-radius: 6px;
+            cursor: pointer; color: var(--fgColor-muted); font-size: 12px; opacity: 0; transition: opacity 0.12s;
+        }
+        .standup-frow:hover .standup-fcopy { opacity: 1; }
+        .standup-fcopy:hover { background: var(--borderColor-default); color: var(--fgColor-default); }
+        .standup-fcopy.copied { color: var(--peekm-green); opacity: 1; }
+        .standup-frow-extra { display: none; }
+        .standup-filelist.expanded .standup-frow-extra { display: flex; }
+        .standup-fmore, .tree-recent-more {
+            display: block; width: 100%; border: none; background: none;
+            font-family: var(--font-mono); color: var(--fgColor-muted);
+            cursor: pointer; text-align: left;
+        }
+        .standup-fmore { padding: 6px 12px; border-top: 1px solid var(--borderColor-muted); font-size: 11px; }
+        .standup-fmore:hover, .tree-recent-more:hover { background: var(--bgColor-muted); color: var(--fgColor-default); }
+        .standup-filelist.expanded .standup-fmore { display: none; }
+        @media (max-width: 480px) {
+            .standup-frow { flex-wrap: wrap; row-gap: 2px; padding: 9px 12px; }
+            .standup-fpath { flex-basis: calc(100% - 60px); }
+            .standup-fmeta { width: 100%; padding-left: 17px; font-size: 10.5px; gap: 8px; }
+            .standup-fcopy { opacity: 1; margin-left: auto; }
+        }
+        @media (hover: none) and (pointer: coarse) {
+            .standup-fcopy { opacity: 1; }
+        }
 
         /* Read-aloud mode: larger body text, persisted with the theme preference. */
         body.standup-lg .standup-commits li { font-size: 18px; line-height: 1.7; }
@@ -2542,6 +2633,9 @@
             <div class="sidebar-header">
                 <span class="sidebar-eyebrow">Workspace</span>
                 {{if .FileCount}}<span class="sidebar-count">{{.FileCount}} files</span>{{end}}
+                <button class="folder-filter-btn" id="tree-sort-toggle" onclick="toggleTreeSort()" title="Toggle recent-first list" aria-label="Sort files by most recent">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25a.75.75 0 0 0-1.5 0v3.5c0 .27.144.518.378.65l2.5 1.43a.75.75 0 1 0 .744-1.302L8.5 7.815Z"/></svg>
+                </button>
                 <button class="folder-filter-btn" id="folder-filter-toggle" onclick="toggleFolderFilter()" title="Filter folders (Cmd/Ctrl+Shift+F)" aria-label="Filter folders">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 .8 1.6L10 9.267V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-4.733L1.2 2.6A1 1 0 0 1 1 2Z"/></svg>
                 </button>

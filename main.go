@@ -1854,8 +1854,13 @@ func serveTreeHTML(w http.ResponseWriter, r *http.Request) {
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
 
-	// Generate tree HTML
-	treeHTML := generateTreeHTML()
+	// Generate tree HTML (Recent mode flattens the tree chronologically)
+	var treeHTML string
+	if r.URL.Query().Get("sort") == "recent" {
+		treeHTML = generateRecentTreeHTML(r.URL.Query().Get("all") == "1")
+	} else {
+		treeHTML = generateTreeHTML()
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1881,7 +1886,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	fileMutex.RUnlock()
 
 	// Generate tree HTML for sidebar
-	treeHTML := generateTreeHTML()
+	treeHTML := sidebarTreeHTML(r)
 
 	// Smart file selection for unified layout
 	defaultFile := selectDefaultFile(currentMarkdownFiles)
@@ -2472,7 +2477,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 
 	var treeHTML string
 	if !isPartialRequest(r) {
-		treeHTML = generateTreeHTML()
+		treeHTML = sidebarTreeHTML(r)
 	}
 
 	var sessionData *SessionMetadata
@@ -3113,19 +3118,35 @@ func pathEscapeSegments(s string) string {
 // treeFileIcon is the per-file document glyph rendered before each leaf's link.
 const treeFileIcon = `<svg class="tree-file-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.56v2.19c0 .138.112.25.25.25h2.19Z"/></svg>`
 
-func generateTreeHTML() string {
-	// Get state snapshot (thread-safe)
+// snapshotBrowseState returns a thread-safe copy of the browse dir (raw and
+// absolute) and the markdown whitelist, shared by the tree generators.
+func snapshotBrowseState() (dir, absDir string, files []string) {
 	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	currentMarkdownFiles := make([]string, len(markdownFiles))
-	copy(currentMarkdownFiles, markdownFiles)
+	dir = browseDir
+	files = make([]string, len(markdownFiles))
+	copy(files, markdownFiles)
 	fileMutex.RUnlock()
 
-	// Make browse directory absolute for proper relative path calculation
-	absDir, err := filepath.Abs(currentBrowseDir)
-	if err != nil {
-		absDir = currentBrowseDir
+	absDir = dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		absDir = abs
 	}
+	return dir, absDir, files
+}
+
+// sidebarTreeHTML picks the sidebar generator from the sort preference cookie
+// (mirrored from localStorage by toggleTreeSort), so full-page loads in Recent
+// mode ship the right list instead of an A–Z tree the client would discard
+// and refetch.
+func sidebarTreeHTML(r *http.Request) string {
+	if c, err := r.Cookie("peekm_tree_sort"); err == nil && c.Value == "recent" {
+		return generateRecentTreeHTML(false)
+	}
+	return generateTreeHTML()
+}
+
+func generateTreeHTML() string {
+	_, absDir, currentMarkdownFiles := snapshotBrowseState()
 
 	root := &fileNode{name: ".", isDir: true}
 	dirNodes := make(map[string]*fileNode)
@@ -3188,6 +3209,98 @@ func generateTreeHTML() string {
 
 	generateTreeHTMLRecursive(root, "", true, true, 0, false, &buf)
 	return buf.String()
+}
+
+// recentTreeDays bounds the Recent sidebar mode; files older than this hide
+// behind a "+N older" expander so a big workspace doesn't render as a wall.
+const recentTreeDays = 30
+
+// generateRecentTreeHTML renders the sidebar's Recent mode: whitelisted
+// markdown files as flat rows, newest edit first, grouped under day headers.
+// An AI event's timestamp wins over mtime when one exists — git checkouts
+// rewrite mtimes wholesale, and the event log is immune to that. Unless all
+// is set, files older than recentTreeDays are only counted, not rendered —
+// the "+N older" expander fetches the full list on demand (a big workspace
+// holds thousands of stale files; shipping them on every refresh is the tree
+// bloat PR #24 removed).
+func generateRecentTreeHTML(all bool) string {
+	currentBrowseDir, absDir, currentMarkdownFiles := snapshotBrowseState()
+
+	eventTimes := map[string]time.Time{}
+	if globalEventLog != nil {
+		for path, fi := range aggregateFileEvents(globalEventLog.eventsForDir(currentBrowseDir)) {
+			if fi.hasAIEvent {
+				eventTimes[path] = fi.event.Timestamp
+			}
+		}
+	}
+
+	type recentFile struct {
+		rel string
+		mod time.Time
+	}
+	rows := make([]recentFile, 0, len(currentMarkdownFiles))
+	for _, path := range currentMarkdownFiles {
+		absPath := path
+		if !filepath.IsAbs(path) {
+			absPath, _ = filepath.Abs(path)
+		}
+		mod, ok := eventTimes[absPath]
+		if !ok {
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			mod = info.ModTime()
+		}
+		rows = append(rows, recentFile{rel: tildeRelPath(absPath, absDir), mod: mod})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].mod.After(rows[j].mod) })
+
+	cutoff := time.Now().AddDate(0, 0, -recentTreeDays)
+	var buf bytes.Buffer
+	// The .tree-recent wrapper doubles as the client's marker that the shipped
+	// sidebar already is Recent mode (see the DOMContentLoaded init).
+	buf.WriteString(`<div class="tree-recent">`)
+	day, older := "", 0
+	for _, r := range rows {
+		if !all && r.mod.Before(cutoff) {
+			older++
+			continue
+		}
+		if d := dayLabel(r.mod.Local()); d != day {
+			day = d
+			buf.WriteString(`<div class="tree-day-header sidebar-eyebrow">` + template.HTMLEscapeString(d) + `</div>`)
+		}
+		writeRecentRow(&buf, r.rel, r.mod)
+	}
+	if older > 0 {
+		buf.WriteString(fmt.Sprintf(`<button class="tree-recent-more" onclick="showOlderFiles(this)">+ %d older %s</button>`,
+			older, plural(older, "file")))
+	}
+	buf.WriteString(`</div>`)
+	return buf.String()
+}
+
+// writeRecentRow emits one Recent-mode row: the standard tree-file markup (so
+// SPA navigation and selection keep working) plus a dimmed directory prefix
+// and a right-aligned edit time.
+func writeRecentRow(buf *bytes.Buffer, rel string, mod time.Time) {
+	dir := ""
+	if d := filepath.Dir(rel); d != "." {
+		dir = filepath.ToSlash(d) + "/"
+	}
+	buf.WriteString(fmt.Sprintf(`<div class="tree-item"><div class="tree-node" data-file-path="%s"><span class="tree-file tree-file-recent">`,
+		template.HTMLEscapeString(rel)))
+	buf.WriteString(treeFileIcon)
+	buf.WriteString(fmt.Sprintf(`<a href="/view/%s" draggable="false" title="%s">`,
+		pathEscapeSegments(rel), template.HTMLEscapeString(rel)))
+	if dir != "" {
+		buf.WriteString(`<span class="tree-recent-dir">` + template.HTMLEscapeString(dir) + `</span>`)
+	}
+	buf.WriteString(template.HTMLEscapeString(filepath.Base(rel)) + `</a>`)
+	buf.WriteString(`<span class="tree-recent-time">` + mod.Local().Format("15:04") + `</span>`)
+	buf.WriteString(`</span></div></div>`)
 }
 
 func generateTreeHTMLRecursive(node *fileNode, prefix string, isLast bool, isRoot bool, depth int, parentCollapsed bool, buf *bytes.Buffer) {

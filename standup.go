@@ -54,6 +54,10 @@ const standupTailEditThreshold = 10
 
 var standupEditTools = map[string]bool{"Edit": true, "Write": true, "NotebookEdit": true}
 
+// standupFileRowsShown caps the visible rows of the "files AI edited" list; the
+// remainder is marked Extra and hides behind "+N more".
+const standupFileRowsShown = 8
+
 // depBumpRe matches dependency-bump commit subjects, collapsed to a count so a
 // bot commit never occupies an evidence bullet.
 var depBumpRe = regexp.MustCompile(`(?i)^(chore\(deps\)|build\(deps\)|bump )`)
@@ -70,6 +74,35 @@ type standupSession struct {
 	Range string // "14:21–22:27"
 }
 
+// fileStat accumulates one file's edit activity across a day, first per
+// transcript slice, then merged per project.
+type fileStat struct {
+	edits     int
+	tools     map[string]int // tool name → call count
+	last      time.Time
+	toolID    string // tool_use id of the latest edit, anchors the transcript view
+	sessionID string // session owning the latest edit (set on merge)
+}
+
+// standupFile is one rendered row of the "files AI edited" disclosure.
+type standupFile struct {
+	Dir         string // root-relative directory prefix incl. trailing "/", dimmed
+	Base        string
+	AbsPath     string
+	ViewPath    string // non-empty when whitelisted markdown → links to /view
+	SessionID   string
+	ToolID      string
+	Edits       int
+	Tools       string // "Edit, Write" — dominant first
+	Last        string // "16:41"
+	Dot         string // dominant tool's ribbonClassNames entry, colors the row dot
+	Extra       bool   // beyond standupFileRowsShown, hidden until "+N more"
+	Uncommitted bool   // AI-edited but still dirty in the working tree (today only)
+
+	rel   string    // root-relative slash path, keys the dirty lookup
+	lastT time.Time // sort key; Last is its display form
+}
+
 type standupProject struct {
 	Name          string
 	Branch        string
@@ -83,16 +116,18 @@ type standupProject struct {
 	Files         int
 	ActiveStr     string
 	Sessions      []standupSession
-	SessionRange  string       // combined earliest–latest, e.g. "08:13–18:34"
-	EvidenceFiles []string     // top edited basenames (evidence rung 2)
-	MoreFiles     int          // distinct files beyond the shown basenames
-	Prompt        string       // opening prompt (evidence rung 3)
-	Metrics       []string     // non-zero metric segments for the headline rail
-	TailSummary   string       // one-line metric summary for the "Also touched" strip
-	Ribbon        []ribbonCell // time-bucketed activity rhythm for the day
-	OutputTokens  int          // deduped assistant output tokens (live view only, never exported)
-	CacheWrite    int          // cache_creation tokens, tooltip breakdown only
-	CacheRead     int          // cache_read tokens, tooltip breakdown only
+	SessionRange  string        // combined earliest–latest, e.g. "08:13–18:34"
+	EvidenceFiles []string      // top edited basenames (evidence rung 2)
+	MoreFiles     int           // distinct files beyond the shown basenames
+	Prompt        string        // opening prompt (evidence rung 3)
+	FileRows      []standupFile // per-file rows for the disclosure, most-edited first
+	MoreFileRows  int           // rows beyond standupFileRowsShown, hidden until expanded
+	Metrics       []string      // non-zero metric segments for the headline rail
+	TailSummary   string        // one-line metric summary for the "Also touched" strip
+	Ribbon        []ribbonCell  // time-bucketed activity rhythm for the day
+	OutputTokens  int           // deduped assistant output tokens (live view only, never exported)
+	CacheWrite    int           // cache_creation tokens, tooltip breakdown only
+	CacheRead     int           // cache_read tokens, tooltip breakdown only
 
 	active time.Duration // ranking key, not rendered
 }
@@ -149,6 +184,7 @@ type standupBlock struct {
 	Type  string `json:"type"`
 	Text  string `json:"text"`
 	Name  string `json:"name"`
+	ID    string `json:"id"` // tool_use id, kept for transcript anchors
 	Input struct {
 		FilePath string `json:"file_path"`
 	} `json:"input"`
@@ -158,7 +194,7 @@ type standupBlock struct {
 type daySlice struct {
 	stamps     []time.Time
 	edits      int
-	files      map[string]bool
+	files      map[string]*fileStat // edited files only — reads never register
 	prompts    []string
 	tools      []toolEvent // write/edit/bash calls, for the activity ribbon
 	outTokens  int
@@ -190,7 +226,7 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 	}
 	defer f.Close()
 
-	ds := &daySlice{files: map[string]bool{}}
+	ds := &daySlice{files: map[string]*fileStat{}}
 	seen := map[string]bool{} // message IDs whose usage is already counted
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -218,9 +254,7 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 			}
 			if standupEditTools[b.Name] {
 				ds.edits++
-			}
-			if b.Input.FilePath != "" {
-				ds.files[b.Input.FilePath] = true
+				recordFileEdit(ds, &b, t)
 			}
 			// The ribbon shows shipping rhythm: write/edit/bash only, not reads.
 			if cls := ribbonToolClass(b.Name); cls != 3 {
@@ -232,6 +266,26 @@ func sliceTranscriptDay(path string, dayStr string) *daySlice {
 		return nil
 	}
 	return ds
+}
+
+// recordFileEdit folds one edit-tool call into the slice's per-file stats,
+// keeping the latest call's tool_use id as the transcript anchor.
+func recordFileEdit(ds *daySlice, b *standupBlock, t time.Time) {
+	fp := b.Input.FilePath
+	if fp == "" {
+		return
+	}
+	fs := ds.files[fp]
+	if fs == nil {
+		fs = &fileStat{tools: map[string]int{}}
+		ds.files[fp] = fs
+	}
+	fs.edits++
+	fs.tools[b.Name]++
+	if t.After(fs.last) {
+		fs.last = t
+		fs.toolID = b.ID
+	}
 }
 
 // addUsage sums a record's token usage once per assistant message. Claude Code
@@ -375,7 +429,7 @@ type projectAccum struct {
 	root         string
 	active       time.Duration
 	edits        int
-	files        map[string]bool
+	files        map[string]*fileStat
 	sessions     []standupSession
 	sessionStart time.Time
 	sessionEnd   time.Time
@@ -452,7 +506,7 @@ func spansDay(first, last time.Time, dayStr string) bool {
 func mergeSlice(accums map[string]*projectAccum, root, projectDir, sessionID string, slice *daySlice) {
 	a := accums[root]
 	if a == nil {
-		a = &projectAccum{name: filepath.Base(root), root: root, files: map[string]bool{}}
+		a = &projectAccum{name: filepath.Base(root), root: root, files: map[string]*fileStat{}}
 		if ri := detectRepoInfo(root); ri != nil {
 			a.branch = ri.Branch
 		}
@@ -465,8 +519,21 @@ func mergeSlice(accums map[string]*projectAccum, root, projectDir, sessionID str
 	a.outTokens += slice.outTokens
 	a.cacheWrite += slice.cacheWrite
 	a.cacheRead += slice.cacheRead
-	for fp := range slice.files {
-		a.files[fp] = true
+	for fp, fs := range slice.files {
+		af := a.files[fp]
+		if af == nil {
+			af = &fileStat{tools: map[string]int{}}
+			a.files[fp] = af
+		}
+		af.edits += fs.edits
+		for tool, n := range fs.tools {
+			af.tools[tool] += n
+		}
+		if fs.last.After(af.last) {
+			af.last = fs.last
+			af.toolID = fs.toolID
+			af.sessionID = sessionID
+		}
 	}
 	start, end := slice.stamps[0], slice.stamps[len(slice.stamps)-1]
 	a.sessions = append(a.sessions, standupSession{
@@ -547,7 +614,11 @@ func finalizeProject(a *projectAccum, dayStr string) standupProject {
 	p.Insertions = cr.insertions
 	p.Deletions = cr.deletions
 
-	fillEvidence(&p, a)
+	p.FileRows = buildFileRows(a, dayStr)
+	if len(p.FileRows) > standupFileRowsShown {
+		p.MoreFileRows = len(p.FileRows) - standupFileRowsShown
+	}
+	fillEvidence(&p)
 	p.Metrics = headlineMetrics(&p)
 	p.TailSummary = tailSummary(&p)
 	p.Ribbon = buildStandupRibbon(a.tools)
@@ -596,9 +667,11 @@ func buildStandupRibbon(events []toolEvent) []ribbonCell {
 	return out
 }
 
-// fillEvidence applies the evidence ladder: commits, else edited basenames,
-// else the opening prompt already on p.Prompt.
-func fillEvidence(p *standupProject, a *projectAccum) {
+// fillEvidence applies the evidence ladder: commits, else edited basenames (the
+// markdown export's "Edited:" line — the live view renders FileRows), else the
+// opening prompt already on p.Prompt. FileRows must be built first: its ranking
+// is the single source of "top files".
+func fillEvidence(p *standupProject) {
 	if len(p.Commits) > 0 {
 		if len(p.Commits) > 2 {
 			p.HeadCommits = p.Commits[:2]
@@ -608,22 +681,129 @@ func fillEvidence(p *standupProject, a *projectAccum) {
 		}
 		return
 	}
-	if p.Edits > 0 {
-		p.EvidenceFiles = topBasenames(a.files, 3)
-		p.MoreFiles = p.Files - len(p.EvidenceFiles)
+	for _, row := range p.FileRows[:min(len(p.FileRows), 3)] {
+		p.EvidenceFiles = append(p.EvidenceFiles, row.Base)
 	}
+	p.MoreFiles = len(p.FileRows) - len(p.EvidenceFiles)
 }
 
-func topBasenames(files map[string]bool, n int) []string {
-	names := make([]string, 0, len(files))
-	for fp := range files {
-		names = append(names, filepath.Base(fp))
+// buildFileRows turns a project's per-file stats into rendered rows, most-edited
+// first. Uncommitted markers come from the working tree, so only today qualifies
+// — past days are immutable but the tree is not, hence no caching.
+func buildFileRows(a *projectAccum, dayStr string) []standupFile {
+	if len(a.files) == 0 {
+		return nil
 	}
-	sort.Strings(names)
-	if len(names) > n {
-		names = names[:n]
+	rows := make([]standupFile, 0, len(a.files))
+	for fp, fs := range a.files {
+		rel := fp
+		if r, err := filepath.Rel(a.root, fp); err == nil && !strings.HasPrefix(r, "..") {
+			rel = r
+		}
+		row := standupFile{
+			AbsPath:   fp,
+			Base:      filepath.Base(rel),
+			Edits:     fs.edits,
+			Tools:     toolMix(fs.tools),
+			Last:      fs.last.Local().Format("15:04"),
+			Dot:       dominantToolClass(fs.tools),
+			SessionID: fs.sessionID,
+			ToolID:    fs.toolID,
+			rel:       filepath.ToSlash(rel),
+			lastT:     fs.last,
+		}
+		if d := filepath.Dir(rel); d != "." && d != string(filepath.Separator) {
+			row.Dir = filepath.ToSlash(d) + "/"
+		}
+		if isWhitelistedFile(fp) {
+			// /view/ resolves against browseDir — absolute paths 404.
+			row.ViewPath = getRelativePath(fp)
+		}
+		rows = append(rows, row)
 	}
-	return names
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Edits != rows[j].Edits {
+			return rows[i].Edits > rows[j].Edits
+		}
+		if !rows[i].lastT.Equal(rows[j].lastT) {
+			return rows[i].lastT.After(rows[j].lastT)
+		}
+		return rows[i].Base < rows[j].Base
+	})
+	for i := range rows {
+		rows[i].Extra = i >= standupFileRowsShown
+	}
+	if dayStr == time.Now().Format("2006-01-02") {
+		rels := make([]string, len(rows))
+		for i, r := range rows {
+			rels[i] = r.rel
+		}
+		dirty := dirtyFiles(a.root, rels)
+		for i := range rows {
+			rows[i].Uncommitted = dirty[rows[i].rel]
+		}
+	}
+	return rows
+}
+
+// toolMix renders a file's tool usage as "Edit, Write", dominant tool first.
+func toolMix(tools map[string]int) string {
+	names := make([]string, 0, len(tools))
+	for name := range tools {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if tools[names[i]] != tools[names[j]] {
+			return tools[names[i]] > tools[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	return strings.Join(names, ", ")
+}
+
+// dominantToolClass classifies a file's most-used tool through the shared
+// ribbon mapping, so the row dot and the activity ribbon can never disagree.
+func dominantToolClass(tools map[string]int) string {
+	best, bestN := "", 0
+	for name, n := range tools {
+		if n > bestN || (n == bestN && name < best) {
+			best, bestN = name, n
+		}
+	}
+	return ribbonClassNames[ribbonToolClass(best)]
+}
+
+// dirtyFiles returns which of the given root-relative paths have uncommitted
+// changes, per `git status --porcelain -uall` limited to those pathspecs (a
+// handful of stats instead of a full-tree walk). Rename targets included.
+// Absolute rels (edits outside root, e.g. ~/.claude writes) are skipped — one
+// outside-repo pathspec fails the whole git call. Status codes are cut by
+// trimming to the first space — gitOutput trims the leading space off the
+// first line, so a fixed-column parse would be off by one.
+func dirtyFiles(root string, rels []string) map[string]bool {
+	out := map[string]bool{}
+	var specs []string
+	for _, rel := range rels {
+		if !filepath.IsAbs(rel) {
+			specs = append(specs, rel)
+		}
+	}
+	if len(specs) == 0 {
+		return out
+	}
+	args := append([]string{"status", "--porcelain", "-uall", "--"}, specs...)
+	for _, line := range strings.Split(gitOutput(root, args...), "\n") {
+		_, p, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		p = strings.TrimSpace(p)
+		if i := strings.Index(p, " -> "); i >= 0 {
+			p = p[i+4:]
+		}
+		out[strings.Trim(p, `"`)] = true
+	}
+	return out
 }
 
 // headlineMetrics builds the per-project rail, appending only non-zero segments
@@ -775,7 +955,7 @@ func serveStandup(w http.ResponseWriter, r *http.Request) {
 	day := standupTargetDay(r.URL.Query().Get("d"))
 	data := standupTemplateData{
 		baseTemplateData: newBaseTemplateData(),
-		TreeHTML:         template.HTML(generateTreeHTML()),
+		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
 		BrowsePath:       browse,
 		Day:              buildStandupDay(browse, day),
 	}

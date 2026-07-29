@@ -310,8 +310,12 @@ function copyRecap(btn) {
         }
         lines.push('• ' + name.textContent.trim() + (m ? ' — ' + m : ''));
     });
-    var tail = document.querySelector('.standup-tail-items');
-    if (tail) { lines.push(''); lines.push('Also touched: ' + tail.textContent.replace(/\s+/g, ' ').trim()); }
+    var tailItems = document.querySelectorAll('.standup-tail .standup-tail-item');
+    if (tailItems.length) {
+        var parts = [].map.call(tailItems, function (n) { return n.textContent.replace(/\s+/g, ' ').trim(); });
+        lines.push('');
+        lines.push('Also touched: ' + parts.join(' · '));
+    }
     var text = lines.join('\n');
 
     var done = function () {
@@ -394,6 +398,7 @@ function reinitializeScripts() {
         if (viewType === 'transcript') {
             initTranscriptLightbox();
             initReplyBox();
+            revealHashTarget();
         }
 
         // Re-render mermaid diagrams after SPA content swap
@@ -405,6 +410,37 @@ function reinitializeScripts() {
     } catch (error) {
         console.error('[Reinit] Error during script initialization:', error);
         // Don't crash - graceful degradation
+    }
+}
+
+// Reveal the element addressed by location.hash even when it sits inside
+// collapsed <details> (e.g. the recap's #tool-<id> transcript deep links):
+// open the ancestor chain, scroll it into view, flash it. Lives here, not in
+// the partial — inline scripts don't run on SPA content swaps.
+function revealHashTarget() {
+    if (!location.hash) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (!el) return;
+    for (let d = el; d; d = d.parentElement) {
+        if (d.tagName === 'DETAILS') d.open = true;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('anchor-flash');
+    setTimeout(function() { el.classList.remove('anchor-flash'); }, 1800);
+}
+
+// Copy button on the recap's file rows (defined here for the same SPA reason).
+function copyStandupPath(e, btn, path) {
+    e.preventDefault();
+    e.stopPropagation();
+    var done = function() {
+        btn.classList.add('copied');
+        setTimeout(function() { btn.classList.remove('copied'); }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(path).then(done).catch(function() { copyFallback(path, done); });
+    } else {
+        copyFallback(path, done);
     }
 }
 
@@ -500,6 +536,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add initial history state (preserve query string for transcript, timeline filters)
     var initialURL = window.location.pathname + window.location.search;
     history.replaceState({ url: initialURL }, '', initialURL);
+
+    // Sidebar sort preference: the cookie normally lets the server ship the
+    // right sidebar; re-sync it and refetch only if this payload predates the
+    // cookie (the .tree-recent wrapper marks an already-Recent sidebar).
+    updateTreeSortButton();
+    if (treeSortMode() === 'recent') {
+        setTreeSortCookie('recent');
+        if (!document.querySelector('.sidebar-tree .tree-recent')) refreshTree();
+    }
 
     console.log('[SPA] Initialization complete');
 });
@@ -996,8 +1041,51 @@ function expandParentDirectories(filePath) {
 }
 
 // Refresh tree from server (self-healing mechanism)
+// Sidebar sort mode: 'name' (the tree) or 'recent' (flat, newest edit first).
+// The cookie mirrors localStorage so the server ships the right sidebar on
+// full-page loads instead of an A–Z tree the client would discard.
+function treeSortMode() {
+    try { return localStorage.getItem('peekm_tree_sort') === 'recent' ? 'recent' : 'name'; } catch (e) { return 'name'; }
+}
+
+function setTreeSortCookie(mode) {
+    document.cookie = 'peekm_tree_sort=' + mode + '; path=/; max-age=31536000; SameSite=Lax';
+}
+
+// Whether Recent mode shows files beyond the server's day window; reset on
+// toggle so re-entering the mode starts windowed again.
+var treeShowAll = false;
+
+function toggleTreeSort() {
+    var next = treeSortMode() === 'recent' ? 'name' : 'recent';
+    try { localStorage.setItem('peekm_tree_sort', next); } catch (e) {}
+    setTreeSortCookie(next);
+    treeShowAll = false;
+    updateTreeSortButton();
+    refreshTree();
+}
+
+function updateTreeSortButton() {
+    var btn = document.getElementById('tree-sort-toggle');
+    if (btn) btn.classList.toggle('active', treeSortMode() === 'recent');
+}
+
+// "+N older files" expander in Recent mode — the windowed payload only counts
+// older files, so expanding refetches unwindowed. The flag lives here (not in
+// the button) so the expansion survives SSE-driven refreshes.
+function showOlderFiles(btn) {
+    btn.disabled = true;
+    treeShowAll = true;
+    refreshTree();
+}
+
 async function refreshTree() {
     try {
+        // The memory view owns its sidebar tree — never clobber it with the
+        // workspace tree. Guarded here so every caller is safe by default.
+        const view = document.getElementById('content');
+        if (view && view.dataset.view === 'memory') return;
+
         const fileTree = document.querySelector('.sidebar-tree');
         if (!fileTree) {
             console.log('[refreshTree] No sidebar-tree element found, skipping');
@@ -1011,7 +1099,9 @@ async function refreshTree() {
         console.log('[refreshTree] Refreshing tree, scroll pos:', scrollPos);
 
         // 2. Fetch fresh tree HTML from server
-        const response = await fetch('/tree-html', {
+        const recent = treeSortMode() === 'recent';
+        const url = recent ? '/tree-html?sort=recent' + (treeShowAll ? '&all=1' : '') : '/tree-html';
+        const response = await fetch(url, {
             headers: {
                 'Cache-Control': 'no-cache'
             }
@@ -1027,9 +1117,12 @@ async function refreshTree() {
         // 3. Replace tree DOM
         fileTree.innerHTML = html;
 
-        // 4. Restore expanded state from localStorage
-        restoreTreeState();
-        restoreSmartFolderState();
+        // 4. Restore expanded state from localStorage (tree mode only — Recent
+        // mode has no directories to restore)
+        if (!recent) {
+            restoreTreeState();
+            restoreSmartFolderState();
+        }
 
         // 5. Restore scroll position
         if (sidebarContent) {
@@ -1424,6 +1517,9 @@ function getTreeStateKey() {
 // Save tree expansion state and scroll position to localStorage
 function saveTreeState() {
     try {
+        // Recent mode renders no directories — saving would wipe the stored
+        // collapse state of the real tree.
+        if (treeSortMode() === 'recent') return;
         const storageKey = getTreeStateKey();
         if (!storageKey) return;
 

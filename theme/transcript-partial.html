@@ -62,7 +62,7 @@
                         <pre class="transcript-thinking-content">{{.Text}}</pre>
                     </details>
                     {{else if eq .Type "tool_use"}}
-                    <details class="transcript-tool">
+                    <details class="transcript-tool"{{if .ToolID}} id="tool-{{.ToolID}}"{{end}}>
                         <summary>
                             <span class="transcript-tool-icon">{{toolIcon .ToolName}}</span>
                             {{if .ToolServer}}<span class="transcript-tool-server">{{.ToolServer}}/</span>{{end}}
