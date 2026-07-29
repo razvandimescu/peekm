@@ -324,6 +324,12 @@ function copyRecap(btn) {
         btn.textContent = 'Copied!';
         setTimeout(function () { btn.classList.remove('copied'); btn.textContent = orig; }, 1600);
     };
+    copyText(text, done);
+}
+// navigator.clipboard only exists in secure contexts (HTTPS/localhost);
+// over plain HTTP (e.g. a tailnet IP) fall back to execCommand.
+function copyText(text, done) {
+    done = done || function () {};
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done).catch(function () { copyFallback(text, done); });
     } else {
@@ -437,11 +443,7 @@ function copyStandupPath(e, btn, path) {
         btn.classList.add('copied');
         setTimeout(function() { btn.classList.remove('copied'); }, 1200);
     };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(path).then(done).catch(function() { copyFallback(path, done); });
-    } else {
-        copyFallback(path, done);
-    }
+    copyText(path, done);
 }
 
 // Setup collapsible directory functionality
@@ -1258,8 +1260,7 @@ async function toggleShare() {
         updateSharePanel(data);
         shareBtn.classList.add('share-active');
         setSharePanelOpen(true);
-        await navigator.clipboard.writeText(data.url);
-        showToast('LAN share link copied');
+        copyText(data.url, function () { showToast('LAN share link copied'); });
     } catch (err) {
         showErrorToast('Failed to create share: ' + err.message);
     } finally {
@@ -1281,8 +1282,7 @@ async function makeSharePublic() {
         if (!resp.ok) throw new Error(await resp.text());
         var data = await resp.json();
         updateSharePanel(data);
-        await navigator.clipboard.writeText(data.public_url);
-        showToast('Public link copied');
+        copyText(data.public_url, function () { showToast('Public link copied'); });
     } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Make public';
@@ -1309,7 +1309,7 @@ async function stopSharing() {
 
 function copyShareURL(inputId) {
     var url = document.getElementById(inputId).value;
-    navigator.clipboard.writeText(url).then(function() { showToast('URL copied'); });
+    copyText(url, function () { showToast('URL copied'); });
 }
 
 async function submitReply() {
