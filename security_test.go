@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -565,5 +567,59 @@ func TestCollectMarkdownFiles_SymlinkCycle(t *testing.T) {
 	// Should find file.md exactly once, not infinite copies
 	if len(files) != 1 {
 		t.Errorf("expected 1 file (cycle should be detected), got %d: %v", len(files), files)
+	}
+}
+
+func TestResolveTranscriptPath_RejectsNonUUID(t *testing.T) {
+	malicious := []string{
+		"../../../../etc/passwd",
+		"../../../.peekm/events",
+		"..%2f..%2fsecret",
+		"foo/bar",
+		"",
+		"12345678-1234-1234-1234-12345678901g",  // non-hex char
+		"12345678-1234-1234-1234-1234567890123", // wrong length
+	}
+	for _, id := range malicious {
+		if got := resolveTranscriptPath(id); got != "" {
+			t.Errorf("resolveTranscriptPath(%q) = %q, want empty", id, got)
+		}
+	}
+
+	// A well-formed UUID must pass validation (empty result only because no such
+	// transcript exists, not a panic or traversal).
+	resolveTranscriptPath("12345678-abcd-ABCD-1234-123456789012")
+}
+
+func TestLocalOnly_HostHeader(t *testing.T) {
+	handler := localOnly(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name       string
+		host       string
+		remoteAddr string
+		wantStatus int
+	}{
+		{"localhost host", "localhost:6419", "127.0.0.1:50000", http.StatusOK},
+		{"loopback IP host", "127.0.0.1:6419", "127.0.0.1:50000", http.StatusOK},
+		{"ipv6 loopback host", "[::1]:6419", "[::1]:50000", http.StatusOK},
+		{"lan IP host from loopback", "192.168.1.10:6419", "127.0.0.1:50000", http.StatusOK},
+		{"dns rebinding hostname", "evil.example.com:6419", "127.0.0.1:50000", http.StatusForbidden},
+		{"dns rebinding bare hostname", "evil.example.com", "127.0.0.1:50000", http.StatusForbidden},
+		{"non-local remote addr", "localhost:6419", "203.0.113.5:50000", http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://placeholder/", nil)
+			req.Host = tt.host
+			req.RemoteAddr = tt.remoteAddr
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Errorf("Host=%q RemoteAddr=%q: got status %d, want %d", tt.host, tt.remoteAddr, rec.Code, tt.wantStatus)
+			}
+		})
 	}
 }

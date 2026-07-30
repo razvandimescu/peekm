@@ -744,9 +744,26 @@ func blockTunnel(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// hostHeaderAllowed guards against DNS rebinding: an attacker's domain re-resolved
+// to a local address still carries the attacker's hostname in the Host header, so
+// only "localhost" and literal IPs are accepted on local-only routes.
+func hostHeaderAllowed(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil
+}
+
 // localOnly rejects requests from non-localhost addresses
 func localOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !hostHeaderAllowed(r) {
+			log.Printf("localOnly: rejected Host header %q from %s", r.Host, r.RemoteAddr)
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		if host == "127.0.0.1" || host == "::1" {
 			next(w, r)
@@ -830,9 +847,13 @@ func registerRoutes() {
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
 	http.HandleFunc("/share/public", localOnly(withRecovery(withCSRFCheck(handleShareMakePublic))))
 
-	// LAN-accessible routes (token-gated or non-sensitive)
+	// LAN-accessible routes (token-gated)
 	http.HandleFunc("/s/", withRecovery(serveSharedFile))
-	http.HandleFunc("/events", withRecovery(serveSSE))
+
+	// SSE broadcasts markdown file events for the browse dir plus session-activity
+	// pings for every Claude Code tool call machine-wide, so it must not be open
+	// to arbitrary LAN viewers of a shared file.
+	http.HandleFunc("/events", localOnly(withRecovery(serveSSE)))
 
 	// AI session tracking endpoint (always on unless --no-ai-tracking)
 	if !*disableHook {
