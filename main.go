@@ -850,7 +850,8 @@ func registerRoutes() {
 	// LAN-accessible routes (token-gated)
 	http.HandleFunc("/s/", withRecovery(serveSharedFile))
 
-	// SSE broadcasts every file event in the browse dir, so it must not be open
+	// SSE broadcasts markdown file events for the browse dir plus session-activity
+	// pings for every Claude Code tool call machine-wide, so it must not be open
 	// to arbitrary LAN viewers of a shared file.
 	http.HandleFunc("/events", localOnly(withRecovery(serveSSE)))
 
