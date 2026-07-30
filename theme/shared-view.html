@@ -552,6 +552,7 @@
             // Suppressed when served via tunnel (no /events endpoint on relay)
             {{if not .IsTunnel}}
             var es;
+            var failures = 0;
             function connectSSE() {
                 es = new EventSource('/events');
                 es.onmessage = function(e) {
@@ -562,8 +563,11 @@
                         }
                     } catch(err) {}
                 };
+                es.onopen = function() { failures = 0; };
                 es.onerror = function() {
                     es.close();
+                    // /events is local-only; remote viewers get 403 — stop retrying.
+                    if (++failures >= 3) return;
                     setTimeout(connectSSE, 3000);
                 };
             }

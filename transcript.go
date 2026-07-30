@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -71,9 +72,17 @@ func encodeProjectDir(dir string) string {
 	return strings.ReplaceAll(dir, "/", "-")
 }
 
+// sessionIDRe matches Claude Code session IDs (UUIDs). Anything else is rejected
+// before path construction: filepath.Join cleans "..", so an unvalidated session ID
+// would escape ~/.claude/projects and read arbitrary .jsonl files.
+var sessionIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
 // Tries the current browseDir first, then falls back to scanning all project dirs.
 func resolveTranscriptPath(sessionID string) string {
+	if !sessionIDRe.MatchString(sessionID) {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
