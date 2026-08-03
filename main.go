@@ -77,9 +77,13 @@ var (
 	disableHook  = flag.Bool("no-ai-tracking", false, "Disable AI session tracking endpoint")
 	demoMode     = flag.Bool("demo", false, "Demo mode (fake tunnel for public sharing)")
 	trustedCIDRs = flag.String("trusted-cidr", "", "Comma-separated CIDRs allowed beyond localhost (e.g. 100.64.0.0/10 for a Tailscale tailnet)")
+	allowHosts   = flag.String("allow-host", "", "Comma-separated extra hostnames accepted in the Host header (e.g. peekm.numa for a local DNS alias)")
 
 	// Parsed form of -trusted-cidr; empty keeps the default localhost-only guard.
 	trustedNets []*net.IPNet
+
+	// Parsed form of -allow-host (lowercased); empty keeps the default localhost/IP-only Host check.
+	allowedHosts = make(map[string]bool)
 
 	// State (global for single-user CLI simplicity; protected by mutexes)
 	clients      = make(map[chan string]bool)
@@ -746,14 +750,14 @@ func blockTunnel(next http.HandlerFunc) http.HandlerFunc {
 
 // hostHeaderAllowed guards against DNS rebinding: an attacker's domain re-resolved
 // to a local address still carries the attacker's hostname in the Host header, so
-// only "localhost" and literal IPs are accepted on local-only routes.
+// only "localhost", literal IPs, and -allow-host names are accepted on local-only routes.
 func hostHeaderAllowed(r *http.Request) bool {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.Trim(host, "[]")
-	return strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil || allowedHosts[strings.ToLower(host)]
 }
 
 // localOnly rejects requests from non-localhost addresses
@@ -1395,6 +1399,12 @@ func main() {
 			log.Fatalf("invalid -trusted-cidr %q: %v", c, err)
 		}
 		trustedNets = append(trustedNets, n)
+	}
+
+	for _, h := range strings.Split(*allowHosts, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			allowedHosts[strings.ToLower(h)] = true
+		}
 	}
 
 	if *showVersion {
