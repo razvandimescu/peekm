@@ -609,7 +609,12 @@ func TestLocalOnly_HostHeader(t *testing.T) {
 		{"dns rebinding hostname", "evil.example.com:6419", "127.0.0.1:50000", http.StatusForbidden},
 		{"dns rebinding bare hostname", "evil.example.com", "127.0.0.1:50000", http.StatusForbidden},
 		{"non-local remote addr", "localhost:6419", "203.0.113.5:50000", http.StatusForbidden},
+		{"allow-host alias", "peekm.numa:6419", "[::1]:50000", http.StatusOK},
+		{"allow-host alias case-insensitive", "PEEKM.NUMA:6419", "127.0.0.1:50000", http.StatusOK},
+		{"non-allowed alias still rejected", "other.numa:6419", "127.0.0.1:50000", http.StatusForbidden},
 	}
+	allowedHosts["peekm.numa"] = true
+	defer delete(allowedHosts, "peekm.numa")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "http://placeholder/", nil)
