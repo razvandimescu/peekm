@@ -829,6 +829,8 @@ func withGzip(handler http.Handler) http.Handler {
 func registerRoutes() {
 	// Local-only routes (owner's browser)
 	http.HandleFunc("/", localOnly(withRecovery(serveBrowser)))
+	http.HandleFunc("/healthz", localOnly(withRecovery(handleHealthz)))
+	http.HandleFunc("/open", localOnly(withRecovery(withCSRFCheck(handleOpen))))
 	http.HandleFunc("/view/", localOnly(withRecovery(serveFile)))
 	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
 	http.HandleFunc("/folder", localOnly(withRecovery(withCSRFCheck(handleCreateFolder))))
@@ -1324,6 +1326,93 @@ func scanUntrackedPlans(tracked map[string]*SessionMetadata, plansDir, cacheDir 
 	}
 }
 
+// handleHealthz identifies this server as peekm so a second CLI invocation can
+// hand off to it instead of failing on the port bind.
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "peekm %s", version)
+}
+
+// handleOpen whitelists a file requested by a second CLI invocation and returns
+// its /view/ URL path. The path must resolve inside $HOME (validateAndResolvePath)
+// and be a file type peekm serves.
+func handleOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	absPath, err := validateAndResolvePath(r.FormValue("path"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil || info.IsDir() {
+		http.Error(w, "not a file", http.StatusBadRequest)
+		return
+	}
+	if !isCollectableFile(filepath.Base(absPath)) {
+		http.Error(w, "unsupported file type", http.StatusBadRequest)
+		return
+	}
+	fileMutex.Lock()
+	if !isWhitelistedLocked(absPath) {
+		markdownFiles = append(markdownFiles, absPath)
+	}
+	fileMutex.Unlock()
+	fmt.Fprintf(w, "/view/%s", pathEscapeSegments(filepath.ToSlash(getRelativePath(absPath))))
+}
+
+// handoffToRunning detects a peekm instance already listening on the target port
+// and delegates to it: a file argument is opened there via /open, a directory
+// argument just opens the running instance. Returns false when no peekm answers,
+// letting normal startup proceed.
+func handoffToRunning() bool {
+	base := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(base + "/healthz")
+	if err != nil {
+		return false
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "peekm") {
+		return false
+	}
+
+	target := "."
+	if flag.NArg() > 0 {
+		target = flag.Arg(0)
+	}
+	absPath, err := validateAndResolvePath(target)
+	if err != nil {
+		return false // let resolveTarget report the error
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return false
+	}
+
+	openTarget := fmt.Sprintf("http://localhost:%d", *port)
+	if !info.IsDir() {
+		resp, err := client.PostForm(base+"/open", url.Values{"path": {absPath}})
+		if err != nil {
+			return false
+		}
+		viewPath, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Fatalf("peekm already running at %s but cannot open %s: %s", openTarget, target, strings.TrimSpace(string(viewPath)))
+		}
+		openTarget += string(viewPath)
+	}
+
+	fmt.Printf("peekm already running at http://localhost:%d — opening there (use -port for a second instance)\n", *port)
+	if *openBrowser {
+		openURL(openTarget)
+	}
+	return true
+}
+
 // serveAndWait starts the HTTP server, handles graceful shutdown, and blocks until exit.
 func serveAndWait(addr, startURL string) {
 	if version != "dev" {
@@ -1363,6 +1452,9 @@ func serveAndWait(addr, startURL string) {
 	}()
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		if strings.Contains(err.Error(), "address already in use") {
+			log.Fatalf("port %d is in use by another application — use -port to pick a different one", *port)
+		}
 		log.Fatal(err)
 	}
 }
@@ -1415,6 +1507,10 @@ func main() {
 	if *showIgnored {
 		runShowIgnored()
 		os.Exit(0)
+	}
+
+	if handoffToRunning() {
+		return
 	}
 
 	if !*disableHook {
