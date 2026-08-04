@@ -13,11 +13,7 @@ A local dashboard to read every Claude Code conversation, review the diffs and w
 
 > **[▶ Try the live demo →](https://peekm.dev/#demo)** — open a diff, expand a response, or reply to continue a session, right in the page.
 
-> AI coding agents edit dozens of files per session. You get a git diff and a JSONL log — results without the reasoning, and nothing you can actually read back or hand to a teammate.
->
-> peekm turns every session into something you can *read*: the full conversation, line-level diffs, and what the AI remembers about each project — live as it works or long after, across all your projects, from one local UI.
->
-> When you need to, **continue any session** with a follow-up — peekm forks an isolated branch, so the session running in your terminal is never touched.
+> A Claude Code session leaves you a git diff and a JSONL log. peekm turns it into something you can read — the full conversation, line-level diffs, what the AI remembers about each project — and lets you reply to continue any session in an isolated fork.
 
 **All data stays local. No accounts. No telemetry. Open source (Apache 2.0).**
 
@@ -39,10 +35,10 @@ Or install globally: `npm i -g @peekm/peekm` | `brew install razvandimescu/tap/p
 
 **Read & review every session:**
 
-- **Transcript viewer** — read the full AI conversation for any session. Tool calls, line-level code diffs, and reasoning rendered inline — refreshed live while the session is still running
+- **Transcript viewer** — read the full AI conversation for any session. Tool calls, line-level code diffs, and thinking blocks rendered inline — refreshed live while the session is still running
 - **Memory browser** — see what Claude remembers about each of your projects, side by side
 - **Timeline** — every AI session across all projects, grouped by day, with live status showing which tool the AI is using right now. Duration, file counts, tool breakdown, All/Edits-only filter
-- **Continue a session (read-only)** — reply to any transcript to ask a follow-up. peekm runs it as an isolated forked session (`claude -p --fork-session`) with read-only tools (Read/Grep/Glob), so it can inspect and answer but never edits files or touches the session running in your terminal. Replies use your Claude Code plan just like a normal session
+- **Continue a session (read-only)** — reply to any transcript to ask a follow-up. peekm runs it as an isolated forked session with read-only tools, so it can inspect and answer but never edits files or touches the session running in your terminal
 - **Real-time notifications** — toast the instant AI modifies a file, with live reload via SSE
 
 **Share it:**
@@ -53,12 +49,6 @@ Or install globally: `npm i -g @peekm/peekm` | `brew install razvandimescu/tap/p
 - **File viewer** — VS Code-style sidebar with Markdown, HTML, SVG, and TXT support. Fuzzy search (Cmd/Ctrl+P), in-browser editing (Markdown), Mermaid diagram rendering, syntax highlighting, light/dark/auto themes
 - **Smart folders** — "Recent AI Edits" surfaces files touched by AI in the last 24 hours
 - **Persistent history** — events survive restarts via `~/.peekm/events.jsonl`
-
-## Why This Exists
-
-Git diffs show results. Transcript viewers show history. Neither tells you what's happening *right now* or connects changes to the AI's reasoning. When you're running multiple agents across projects, you need one place to see all of it — live.
-
-peekm correlates file edits with session metadata and conversations, giving you a unified timeline that updates as the AI works.
 
 ## How It Works
 
@@ -182,7 +172,3 @@ PRs welcome. [Open an issue](https://github.com/razvandimescu/peekm/issues) if s
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
-
----
-
-Try it now: `npx @peekm/peekm .`
