@@ -77,9 +77,18 @@ func encodeProjectDir(dir string) string {
 // would escape ~/.claude/projects and read arbitrary .jsonl files.
 var sessionIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
-// Tries the current browseDir first, then falls back to scanning all project dirs.
+// resolveTranscriptPath finds a session transcript by ID, checking Claude
+// Code's project store first, then pi's session store.
 func resolveTranscriptPath(sessionID string) string {
+	if p := resolveClaudeTranscriptPath(sessionID); p != "" {
+		return p
+	}
+	return resolvePiTranscriptPath(sessionID)
+}
+
+// resolveClaudeTranscriptPath finds a Claude Code transcript by scanning project
+// directories. Tries the current browseDir first, then all project dirs.
+func resolveClaudeTranscriptPath(sessionID string) string {
 	if !sessionIDRe.MatchString(sessionID) {
 		return ""
 	}
@@ -148,15 +157,21 @@ func extractSessionSummary(transcriptPath string) string {
 	return ""
 }
 
-// extractSummaryFromRaw extracts a user summary from a single transcript JSON line.
+// extractSummaryFromRaw extracts a user summary from a single transcript JSON
+// line. Accepts Claude lines (type "user") and pi entries (type "message" with
+// message.role "user").
 func extractSummaryFromRaw(raw json.RawMessage) string {
 	var entry struct {
 		Type    string `json:"type"`
 		Message struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(raw, &entry) != nil || entry.Type != "user" {
+	if json.Unmarshal(raw, &entry) != nil {
+		return ""
+	}
+	if entry.Type != "user" && !(entry.Type == "message" && entry.Message.Role == "user") {
 		return ""
 	}
 	text := extractUserText(entry.Message.Content)
@@ -272,8 +287,12 @@ func removeEmptyTurns(turns []transcriptTurn) []transcriptTurn {
 	return filtered
 }
 
-// parseTranscript reads a Claude Code transcript JSONL file and returns conversation turns
+// parseTranscript reads a session transcript JSONL file and returns
+// conversation turns, dispatching pi session files to the pi parser.
 func parseTranscript(path string) ([]transcriptTurn, error) {
+	if isPiSessionFile(path) {
+		return parsePiTranscript(path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

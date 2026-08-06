@@ -435,6 +435,17 @@ a.timeline-session-id:hover {
     white-space: nowrap;
 }
 
+.timeline-harness-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fgColor-attention);
+    background: var(--bgColor-attention-muted, rgba(210, 153, 34, 0.12));
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+}
+
 .timeline-active-badge {
     font-size: 10px;
     font-weight: 600;

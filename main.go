@@ -178,7 +178,7 @@ func markdownFileCount() int {
 	return len(markdownFiles)
 }
 
-// SessionMetadata contains complete Claude Code session information
+// SessionMetadata contains complete AI session information
 type SessionMetadata struct {
 	SessionID      string    `json:"session_id"`
 	ToolName       string    `json:"tool_name"`
@@ -186,6 +186,7 @@ type SessionMetadata struct {
 	ToolUseID      string    `json:"tool_use_id,omitempty"`
 	CWD            string    `json:"cwd,omitempty"`
 	TranscriptPath string    `json:"transcript_path,omitempty"`
+	Source         string    `json:"source,omitempty"` // harness: "" (Claude Code) or "pi"
 	Timestamp      time.Time `json:"timestamp"`
 }
 
@@ -265,6 +266,7 @@ type SessionEvent struct {
 	CWD            string    `json:"cwd,omitempty"`
 	TranscriptPath string    `json:"tp,omitempty"`
 	PlanTitle      string    `json:"pt_title,omitempty"`
+	Src            string    `json:"src,omitempty"` // harness: "" (Claude Code) or "pi"
 	Timestamp      time.Time `json:"ts"`
 }
 
@@ -276,6 +278,7 @@ func (e *SessionEvent) toMetadata() *SessionMetadata {
 		ToolUseID:      e.ToolUseID,
 		CWD:            e.CWD,
 		TranscriptPath: e.TranscriptPath,
+		Source:         e.Src,
 		Timestamp:      e.Timestamp,
 	}
 }
@@ -289,6 +292,7 @@ func sessionEventFrom(meta *SessionMetadata, filePath string) SessionEvent {
 		ToolUseID:      meta.ToolUseID,
 		CWD:            meta.CWD,
 		TranscriptPath: meta.TranscriptPath,
+		Src:            meta.Source,
 		Timestamp:      meta.Timestamp,
 	}
 }
@@ -1515,6 +1519,7 @@ func main() {
 
 	if !*disableHook {
 		autoSetupClaudeHooks()
+		autoSetupPiHooks()
 		initSessionTracking()
 	}
 
@@ -2134,6 +2139,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		TUID   string `json:"tuid"`
 		TS     string `json:"ts"`
 		Detail string `json:"detail"`
+		Src    string `json:"src"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2179,6 +2185,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		ToolUseID:      req.ToolUseID,
 		CWD:            req.CWD,
 		TranscriptPath: req.TranscriptPath,
+		Source:         req.Src,
 		Timestamp:      parseTimestampOrNow(req.TS),
 	}
 
