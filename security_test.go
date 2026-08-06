@@ -628,3 +628,74 @@ func TestLocalOnly_HostHeader(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleOpen verifies the second-invocation handoff endpoint: it must
+// whitelist valid files inside $HOME and reject everything else.
+func TestHandleOpen(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+	dir, err := os.MkdirTemp(homeDir, "peekm_open_test")
+	if err != nil {
+		t.Fatalf("cannot create test dir in home: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	mdPath := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(mdPath, []byte("# hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(dir, "tool.bin")
+	if err := os.WriteFile(binPath, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fileMutex.Lock()
+	oldBrowseDir, oldFiles := browseDir, markdownFiles
+	browseDir, markdownFiles = dir, nil
+	fileMutex.Unlock()
+	defer func() {
+		fileMutex.Lock()
+		browseDir, markdownFiles = oldBrowseDir, oldFiles
+		fileMutex.Unlock()
+	}()
+
+	post := func(path string) *httptest.ResponseRecorder {
+		form := "path=" + path
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/open", strings.NewReader(form))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handleOpen(rec, req)
+		return rec
+	}
+
+	rec := post(mdPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid file: got status %d, body %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "/view/notes.md" {
+		t.Errorf("valid file: got view path %q, want %q", got, "/view/notes.md")
+	}
+	resolved, _ := filepath.EvalSymlinks(mdPath)
+	if !isWhitelistedFile(resolved) {
+		t.Error("valid file was not whitelisted")
+	}
+
+	if rec := post("/etc/hosts"); rec.Code != http.StatusForbidden {
+		t.Errorf("outside-home path: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if rec := post(binPath); rec.Code != http.StatusBadRequest {
+		t.Errorf("unsupported extension: got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if rec := post(dir); rec.Code != http.StatusBadRequest {
+		t.Errorf("directory: got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "http://localhost/open?path="+mdPath, nil)
+	getRec := httptest.NewRecorder()
+	handleOpen(getRec, getReq)
+	if getRec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: got status %d, want %d", getRec.Code, http.StatusMethodNotAllowed)
+	}
+}
