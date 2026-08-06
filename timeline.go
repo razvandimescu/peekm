@@ -144,7 +144,7 @@ func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
 			continue
 		}
 		if _, checked := cache[evt.SessionID]; !checked {
-			path := resolveTranscriptPath(evt.SessionID)
+			path, _ := resolveTranscriptPath(evt.SessionID)
 			cache[evt.SessionID] = transcriptInfo{
 				hasTranscript: path != "",
 				summary:       extractSessionSummary(path),
@@ -215,30 +215,36 @@ func transcriptSessionsIn(sessionsDir, projectDir string, knownSessionIDs map[st
 		if err != nil {
 			continue
 		}
-		modTime := info.ModTime()
 		transcriptPath := filepath.Join(sessionsDir, entry.Name())
-		summary, firstTS, lastTS := extractTranscriptMeta(transcriptPath)
-		oldest, newest := modTime, modTime
-		if !firstTS.IsZero() {
-			oldest = firstTS
-		}
-		if !lastTS.IsZero() {
-			newest = lastTS
-		}
-
-		sessions = append(sessions, timelineSession{
-			SessionID:     truncateSessionID(sessionID),
-			FullSessionID: sessionID,
-			Summary:       summary,
-			Project:       filepath.Base(projectDir),
-			HasTranscript: true,
-			SessionType:   "conversation",
-			newestTime:    newest,
-			oldestTime:    oldest,
-			Duration:      formatSessionDuration(newest.Sub(oldest)),
-		})
+		sessions = append(sessions, conversationSession(sessionID, filepath.Base(projectDir), "", transcriptPath, info.ModTime()))
 	}
 	return sessions
+}
+
+// conversationSession builds a transcript-backed timeline session, shared by
+// the Claude and pi discovery paths. modTime bounds the session when the
+// transcript's own timestamps are unavailable.
+func conversationSession(sessionID, project, source, transcriptPath string, modTime time.Time) timelineSession {
+	summary, firstTS, lastTS := extractTranscriptMeta(transcriptPath)
+	oldest, newest := modTime, modTime
+	if !firstTS.IsZero() {
+		oldest = firstTS
+	}
+	if !lastTS.IsZero() {
+		newest = lastTS
+	}
+	return timelineSession{
+		SessionID:     truncateSessionID(sessionID),
+		FullSessionID: sessionID,
+		Summary:       summary,
+		Project:       project,
+		Source:        source,
+		HasTranscript: true,
+		SessionType:   "conversation",
+		newestTime:    newest,
+		oldestTime:    oldest,
+		Duration:      formatSessionDuration(newest.Sub(oldest)),
+	}
 }
 
 func parseTranscriptTimestamp(raw json.RawMessage) (time.Time, bool) {

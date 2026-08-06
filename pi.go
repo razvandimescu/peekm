@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -52,10 +51,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 const PORTS = [%d, 6419, 8080, 3000];
-const TOOL_NAMES: Record<string, string> = {
-  bash: "Bash", read: "Read", edit: "Edit", write: "Write",
-  grep: "Grep", find: "Glob", ls: "List",
-};
+const TOOL_NAMES: Record<string, string> = %s;
 const EDIT_TOOLS = new Set(["edit", "write"]);
 
 async function notify(payload: unknown): Promise<void> {
@@ -111,11 +107,32 @@ func piExtensionPath(agentDir string) string {
 	return filepath.Join(agentDir, "extensions", "peekm.ts")
 }
 
+// piToolNamesTS renders piToolNames as a TypeScript object literal so the
+// extension and the transcript parser share one mapping. Keys are sorted so
+// installPiExtension's content comparison stays stable.
+func piToolNamesTS() string {
+	keys := make([]string, 0, len(piToolNames))
+	for k := range piToolNames {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("{ ")
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: %q", k, piToolNames[k])
+	}
+	b.WriteString(" }")
+	return b.String()
+}
+
 // installPiExtension writes the peekm extension into pi's global extensions
 // directory. Returns true when the file did not exist before.
 func installPiExtension(agentDir string, hookPort int) (bool, error) {
 	extPath := piExtensionPath(agentDir)
-	source := []byte(fmt.Sprintf(piExtensionTemplate, hookPort))
+	source := []byte(fmt.Sprintf(piExtensionTemplate, hookPort, piToolNamesTS()))
 
 	existing, err := os.ReadFile(extPath)
 	created := os.IsNotExist(err)
@@ -254,23 +271,6 @@ func piSessionFileIn(dir, suffix string) string {
 	return ""
 }
 
-// isPiSessionFile sniffs the header line pi writes as the first record:
-// {"type":"session","version":3,...}. Claude transcripts never start this way.
-func isPiSessionFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	var header struct {
-		Type string `json:"type"`
-	}
-	if json.NewDecoder(bufio.NewReaderSize(f, 4096)).Decode(&header) != nil {
-		return false
-	}
-	return header.Type == "session"
-}
-
 // ---------- transcript parsing ----------
 
 // piEntry is one line of a pi session file (excluding the header).
@@ -330,8 +330,7 @@ func readPiEntries(path string) ([]piEntry, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+	scanner := newJSONLScanner(f)
 	var entries []piEntry
 	for scanner.Scan() {
 		var e piEntry
@@ -354,19 +353,14 @@ func piActiveBranch(entries []piEntry) []piEntry {
 	if len(entries) == 0 {
 		return entries
 	}
-	byID := make(map[string]*piEntry, len(entries))
-	for i := range entries {
-		byID[entries[i].ID] = &entries[i]
+	parent := make(map[string]string, len(entries))
+	for _, e := range entries {
+		parent[e.ID] = e.ParentID
 	}
 
 	onBranch := make(map[string]bool)
-	for id := entries[len(entries)-1].ID; id != ""; {
-		e, ok := byID[id]
-		if !ok || onBranch[id] {
-			break // broken or cyclic parent link
-		}
+	for id := entries[len(entries)-1].ID; id != "" && !onBranch[id]; id = parent[id] {
 		onBranch[id] = true
-		id = e.ParentID
 	}
 
 	filtered := entries[:0]
@@ -389,7 +383,7 @@ func piMessageToTurn(entry piEntry, md goldmark.Markdown) (transcriptTurn, bool)
 	switch msg.Role {
 	case "user":
 		role = "user"
-		blocks = piTextBlocks(msg.Content, md, false)
+		blocks = piTextBlocks(msg.Content, md)
 	case "assistant":
 		role = "assistant"
 		blocks = piAssistantBlocks(msg.Content, md)
@@ -446,15 +440,12 @@ func extractPiContent(raw json.RawMessage) (string, []imageData) {
 	return buf.String(), images
 }
 
-func piTextBlocks(raw json.RawMessage, md goldmark.Markdown, assistant bool) []contentBlock {
+func piTextBlocks(raw json.RawMessage, md goldmark.Markdown) []contentBlock {
 	text, _ := extractPiContent(raw)
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, text)}
-	recordTextSize(&block, text)
-	markCollapsible(&block, text, assistant)
-	return []contentBlock{block}
+	return []contentBlock{newTextBlock(md, text, false)}
 }
 
 func piAssistantBlocks(raw json.RawMessage, md goldmark.Markdown) []contentBlock {
@@ -474,14 +465,11 @@ func piAssistantBlocks(raw json.RawMessage, md goldmark.Markdown) []contentBlock
 		switch p.Type {
 		case "text":
 			if p.Text != "" {
-				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, p.Text)}
-				recordTextSize(&block, p.Text)
-				markCollapsible(&block, p.Text, true)
-				blocks = append(blocks, block)
+				blocks = append(blocks, newTextBlock(md, p.Text, true))
 			}
 		case "thinking":
 			if p.Thinking != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Text: truncateString(p.Thinking, 20000)})
+				blocks = append(blocks, newThinkingBlock(p.Thinking))
 			}
 		case "toolCall":
 			blocks = append(blocks, piToolUseBlock(p.ID, p.Name, p.Arguments))
@@ -508,11 +496,7 @@ func piToolResultBlocks(msg piMessage, md goldmark.Markdown) []contentBlock {
 	if text == "" && len(images) == 0 {
 		return nil
 	}
-	block := contentBlock{Type: "tool_result", ToolID: msg.ToolCallID, Images: images}
-	if text != "" {
-		block.HTML = renderMarkdownToHTML(md, truncateString(text, 8000))
-	}
-	return []contentBlock{block}
+	return []contentBlock{newToolResultBlock(md, msg.ToolCallID, text, images)}
 }
 
 // piBashBlock renders a user-invoked shell command (pi's "!" prefix) as a Bash
@@ -531,9 +515,10 @@ func piBashBlock(msg piMessage, md goldmark.Markdown) contentBlock {
 		output = fmt.Sprintf("%s\n(exit code %d)", output, *msg.ExitCode)
 	}
 	if strings.TrimSpace(output) != "" {
+		// Truncate before fencing so the closing fence survives.
 		result := contentBlock{
 			Type: "tool_result",
-			HTML: renderMarkdownToHTML(md, "```\n"+truncateString(output, 8000)+"\n```"),
+			HTML: renderMarkdownToHTML(md, "```\n"+truncateString(output, toolResultMaxChars)+"\n```"),
 		}
 		block.Result = &result
 	}
@@ -554,7 +539,8 @@ var piToolNames = map[string]string{
 
 // normalizePiToolInput rewrites a pi tool call into Claude Code naming: the
 // tool name and argument keys (path → file_path, edits[].oldText → old_string)
-// so downstream formatters treat both harnesses identically.
+// so downstream formatters treat both harnesses identically. args is mutated
+// in place — callers own the freshly parsed map.
 func normalizePiToolInput(name string, args map[string]interface{}) (string, map[string]interface{}) {
 	display, known := piToolNames[name]
 	if !known {
@@ -563,21 +549,17 @@ func normalizePiToolInput(name string, args map[string]interface{}) (string, map
 	if args == nil {
 		return display, nil
 	}
-	m := make(map[string]interface{}, len(args))
-	for k, v := range args {
-		m[k] = v
-	}
 	switch name {
 	case "read", "edit", "write", "ls":
-		if p, ok := m["path"].(string); ok {
-			m["file_path"] = p
-			delete(m, "path")
+		if p, ok := args["path"].(string); ok {
+			args["file_path"] = p
+			delete(args, "path")
 		}
 	}
 	if name == "edit" {
-		display = normalizePiEdits(m)
+		display = normalizePiEdits(args)
 	}
-	return display, m
+	return display, args
 }
 
 // normalizePiEdits converts pi's edits[]{oldText,newText} to Claude key names.
@@ -651,9 +633,19 @@ func discoverPiSessions(baseDir string, knownSessionIDs map[string]bool) []timel
 		return nil
 	}
 
+	// Cheap dir-name pre-filter: a session cwd within baseDir encodes to the
+	// base encoding itself or extends it with more dashed segments. Encoding is
+	// lossy ("-" is ambiguous), so matches are confirmed against the header cwd
+	// in piSessionsIn; misses are definitive and skip all file opens.
+	enc := encodePiProjectDir(baseDir)
+	prefix := strings.TrimSuffix(enc, "--") + "-"
+
 	var sessions []timelineSession
 	for _, dir := range dirs {
 		if !dir.IsDir() {
+			continue
+		}
+		if name := dir.Name(); name != enc && !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		sessions = append(sessions, piSessionsIn(filepath.Join(root, dir.Name()), baseDir, knownSessionIDs)...)
@@ -690,30 +682,7 @@ func piSessionsIn(sessionsDir, baseDir string, knownSessionIDs map[string]bool) 
 		if err != nil {
 			continue
 		}
-		sessions = append(sessions, piTimelineSession(path, sessionID, cwd, info.ModTime()))
+		sessions = append(sessions, conversationSession(sessionID, filepath.Base(cwd), "pi", path, info.ModTime()))
 	}
 	return sessions
-}
-
-func piTimelineSession(path, sessionID, cwd string, modTime time.Time) timelineSession {
-	summary, firstTS, lastTS := extractTranscriptMeta(path)
-	oldest, newest := modTime, modTime
-	if !firstTS.IsZero() {
-		oldest = firstTS
-	}
-	if !lastTS.IsZero() {
-		newest = lastTS
-	}
-	return timelineSession{
-		SessionID:     truncateSessionID(sessionID),
-		FullSessionID: sessionID,
-		Summary:       summary,
-		Project:       filepath.Base(cwd),
-		Source:        "pi",
-		HasTranscript: true,
-		SessionType:   "conversation",
-		newestTime:    newest,
-		oldestTime:    oldest,
-		Duration:      formatSessionDuration(newest.Sub(oldest)),
-	}
 }

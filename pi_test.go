@@ -96,16 +96,11 @@ func writePiFixture(t *testing.T) string {
 	return path
 }
 
-func TestIsPiSessionFile(t *testing.T) {
-	path := writePiFixture(t)
-	if !isPiSessionFile(path) {
-		t.Error("pi fixture not detected as pi session")
-	}
-
+func TestReadPiSessionCwdRejectsClaudeTranscript(t *testing.T) {
 	claude := filepath.Join(t.TempDir(), "claude.jsonl")
-	os.WriteFile(claude, []byte(`{"type":"user","message":{"role":"user","content":"hi"}}`+"\n"), 0644)
-	if isPiSessionFile(claude) {
-		t.Error("claude transcript misdetected as pi session")
+	os.WriteFile(claude, []byte(`{"type":"user","message":{"role":"user","content":"hi"},"cwd":"/tmp/x"}`+"\n"), 0644)
+	if got := readPiSessionCwd(claude); got != "" {
+		t.Errorf("claude transcript yielded cwd %q, want empty", got)
 	}
 }
 
@@ -142,7 +137,7 @@ func firstAssistantModel(turns []transcriptTurn) string {
 }
 
 func TestParsePiTranscript(t *testing.T) {
-	turns, err := parseTranscript(writePiFixture(t)) // via dispatch, exercises sniffing too
+	turns, err := parsePiTranscript(writePiFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +194,9 @@ func TestInstallPiExtension(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "[7777, 6419, 8080, 3000]") {
 		t.Error("configured port not baked into extension")
+	}
+	if !strings.Contains(string(content), `bash: "Bash"`) {
+		t.Error("tool name map not rendered into extension")
 	}
 
 	// unchanged content → no-op, not "created"
