@@ -97,8 +97,7 @@ func ParsePi(r io.Reader) (*Session, error) {
 }
 
 func readPiEntries(r io.Reader) (piHeader, []piEntry, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	scanner := newLineScanner(r)
 	var header piHeader
 	var entries []piEntry
 	for scanner.Scan() {
@@ -295,14 +294,15 @@ func piBashBlock(msg piMessage) Block {
 		output = fmt.Sprintf("%s\n(exit code %d)", output, *msg.ExitCode)
 	}
 	if strings.TrimSpace(output) != "" {
-		tc.Result = &ToolResult{Text: output, IsError: failed}
+		tc.Result = &ToolResult{Text: output, Preformatted: true, IsError: failed}
 	}
 	return Block{Kind: KindToolCall, Tool: tc}
 }
 
-// piToolNames maps pi's built-in tools to their Claude Code equivalents, the
-// model's canonical tool vocabulary.
-var piToolNames = map[string]string{
+// PiToolNames maps pi's built-in tools to their Claude Code equivalents, the
+// model's canonical tool vocabulary. Exported so integrations (e.g. the pi
+// extension peekm installs) derive their naming from this single source.
+var PiToolNames = map[string]string{
 	"bash":  "Bash",
 	"read":  "Read",
 	"edit":  "Edit",
@@ -316,7 +316,7 @@ var piToolNames = map[string]string{
 // tool name and argument keys (path → file_path, edits[].oldText → old_string)
 // so consumers treat both harnesses identically.
 func normalizePiToolInput(name string, args map[string]any) (string, map[string]any) {
-	display, known := piToolNames[name]
+	display, known := PiToolNames[name]
 	if !known {
 		display = capitalizeFirst(name)
 	}

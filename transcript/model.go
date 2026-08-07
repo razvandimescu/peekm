@@ -64,10 +64,11 @@ type ToolCall struct {
 
 // ToolResult is the outcome of a tool call.
 type ToolResult struct {
-	CallID  string  `json:"call_id,omitempty"` // id of the call this answers
-	Text    string  `json:"text,omitempty"`
-	IsError bool    `json:"is_error,omitempty"`
-	Images  []Image `json:"images,omitempty"`
+	CallID       string  `json:"call_id,omitempty"` // id of the call this answers
+	Text         string  `json:"text,omitempty"`
+	Preformatted bool    `json:"preformatted,omitempty"` // Text is verbatim output, not markdown
+	IsError      bool    `json:"is_error,omitempty"`
+	Images       []Image `json:"images,omitempty"`
 }
 
 // Image is base64-encoded image content from a tool result.

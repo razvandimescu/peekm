@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
 	"strings"
@@ -37,8 +36,7 @@ type claudeContentBlock struct {
 
 // ParseClaude parses a Claude Code session transcript (JSONL).
 func ParseClaude(r io.Reader) (*Session, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	scanner := newLineScanner(r)
 
 	var turns []Turn
 	for scanner.Scan() {

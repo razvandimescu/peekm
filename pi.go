@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/razvandimescu/peekm/transcript"
 )
@@ -48,15 +47,15 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 const PORTS = [%d, 6419, 8080, 3000];
-const TOOL_NAMES: Record<string, string> = {
-  bash: "Bash", read: "Read", edit: "Edit", write: "Write",
-  grep: "Grep", find: "Glob", ls: "List",
-};
+const TOOL_NAMES: Record<string, string> = { %s };
 const EDIT_TOOLS = new Set(["edit", "write"]);
+
+let lastPort = 0; // last port that answered - tried first to skip dead probes
 
 async function notify(payload: unknown): Promise<void> {
   const body = JSON.stringify(payload);
-  for (const port of PORTS) {
+  const ports = lastPort ? [lastPort, ...PORTS.filter((p) => p !== lastPort)] : PORTS;
+  for (const port of ports) {
     try {
       await fetch("http://127.0.0.1:" + port + "/hook/file-modified", {
         method: "POST",
@@ -64,6 +63,7 @@ async function notify(payload: unknown): Promise<void> {
         body,
         signal: AbortSignal.timeout(150),
       });
+      lastPort = port;
       return;
     } catch {
       // peekm not listening on this port - try the next
@@ -107,11 +107,26 @@ func piExtensionPath(agentDir string) string {
 	return filepath.Join(agentDir, "extensions", "peekm.ts")
 }
 
+// piToolNamesTS renders transcript.PiToolNames as a TS record body, keeping
+// the extension's tool naming derived from the one canonical map.
+func piToolNamesTS() string {
+	names := make([]string, 0, len(transcript.PiToolNames))
+	for name := range transcript.PiToolNames {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	pairs := make([]string, len(names))
+	for i, name := range names {
+		pairs[i] = fmt.Sprintf("%s: %q", name, transcript.PiToolNames[name])
+	}
+	return strings.Join(pairs, ", ")
+}
+
 // installPiExtension writes the peekm extension into pi's global extensions
 // directory. Returns true when the file did not exist before.
 func installPiExtension(agentDir string, hookPort int) (bool, error) {
 	extPath := piExtensionPath(agentDir)
-	source := []byte(fmt.Sprintf(piExtensionTemplate, hookPort))
+	source := []byte(fmt.Sprintf(piExtensionTemplate, hookPort, piToolNamesTS()))
 
 	existing, err := os.ReadFile(extPath)
 	created := os.IsNotExist(err)
@@ -214,27 +229,8 @@ func resolvePiTranscriptPath(sessionID string) string {
 		return ""
 	}
 	suffix := "_" + sessionID + ".jsonl"
-
-	fileMutex.RLock()
-	dir := browseDir
-	fileMutex.RUnlock()
-	if p := piSessionFileIn(filepath.Join(root, encodePiProjectDir(dir)), suffix); p != "" {
-		return p
-	}
-
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if p := piSessionFileIn(filepath.Join(root, entry.Name()), suffix); p != "" {
-			return p
-		}
-	}
-	return ""
+	probe := func(dir string) string { return piSessionFileIn(dir, suffix) }
+	return findInSessionStore(root, encodePiProjectDir(currentBrowseDir()), probe)
 }
 
 func piSessionFileIn(dir, suffix string) string {
@@ -264,9 +260,14 @@ func discoverPiSessions(baseDir string, knownSessionIDs map[string]bool) []timel
 		return nil
 	}
 
+	// Dir names encode the session cwd, so any session under baseDir lives in
+	// a dir sharing baseDir's encoded prefix. Dash-encoding false positives
+	// (e.g. /a/bc vs /a/b) are fine — the header cwd check below still runs.
+	prefix := strings.TrimSuffix(encodePiProjectDir(baseDir), "--")
+
 	var sessions []timelineSession
 	for _, dir := range dirs {
-		if !dir.IsDir() {
+		if !dir.IsDir() || !strings.HasPrefix(dir.Name(), prefix) {
 			continue
 		}
 		sessions = append(sessions, piSessionsIn(filepath.Join(root, dir.Name()), baseDir, knownSessionIDs)...)
@@ -303,30 +304,8 @@ func piSessionsIn(sessionsDir, baseDir string, knownSessionIDs map[string]bool) 
 		if err != nil {
 			continue
 		}
-		sessions = append(sessions, piTimelineSession(path, sessionID, cwd, info.ModTime()))
+		sessions = append(sessions, conversationSession(
+			path, sessionID, filepath.Base(cwd), transcript.HarnessPi, info.ModTime()))
 	}
 	return sessions
-}
-
-func piTimelineSession(path, sessionID, cwd string, modTime time.Time) timelineSession {
-	summary, firstTS, lastTS := extractTranscriptMeta(path)
-	oldest, newest := modTime, modTime
-	if !firstTS.IsZero() {
-		oldest = firstTS
-	}
-	if !lastTS.IsZero() {
-		newest = lastTS
-	}
-	return timelineSession{
-		SessionID:     truncateSessionID(sessionID),
-		FullSessionID: sessionID,
-		Summary:       summary,
-		Project:       filepath.Base(cwd),
-		Source:        "pi",
-		HasTranscript: true,
-		SessionType:   "conversation",
-		newestTime:    newest,
-		oldestTime:    oldest,
-		Duration:      formatSessionDuration(newest.Sub(oldest)),
-	}
 }

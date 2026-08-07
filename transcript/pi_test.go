@@ -7,24 +7,9 @@ import (
 	"testing"
 )
 
-const piSessionFixture = `{"type":"session","version":3,"id":"019fc7d2-71ee-7da3-8497-cf2834825a90","timestamp":"2026-08-03T13:31:25.550Z","cwd":"/tmp/proj"}
-{"type":"model_change","id":"aaaa0001","parentId":null,"timestamp":"2026-08-03T13:31:25.559Z","provider":"openai-codex","modelId":"gpt-5.6-sol"}
-{"type":"message","id":"aaaa0002","parentId":"aaaa0001","timestamp":"2026-08-03T13:31:35.158Z","message":{"role":"user","content":"fix the bug","timestamp":1785763895156}}
-{"type":"message","id":"aaaa0003","parentId":"aaaa0002","timestamp":"2026-08-03T13:31:40.000Z","message":{"role":"assistant","model":"gpt-5.6-sol","content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"On it."},{"type":"toolCall","id":"call_1","name":"edit","arguments":{"path":"main.go","edits":[{"oldText":"a","newText":"b"}]}}],"stopReason":"toolUse"}}
-{"type":"message","id":"aaaa0004","parentId":"aaaa0003","timestamp":"2026-08-03T13:31:41.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"edit","content":[{"type":"text","text":"ok"}],"isError":false}}
-{"type":"message","id":"abandon1","parentId":"aaaa0004","timestamp":"2026-08-03T13:32:00.000Z","message":{"role":"assistant","model":"gpt-5.6-sol","content":[{"type":"text","text":"abandoned branch reply"}],"stopReason":"stop"}}
-{"type":"message","id":"aaaa0005","parentId":"aaaa0004","timestamp":"2026-08-03T13:33:00.000Z","message":{"role":"bashExecution","command":"go test ./...","output":"PASS","exitCode":0,"cancelled":false,"truncated":false,"timestamp":1785763980000}}
-{"type":"message","id":"aaaa0006","parentId":"aaaa0005","timestamp":"2026-08-03T13:34:00.000Z","message":{"role":"assistant","model":"gpt-5.6-sol","content":[{"type":"text","text":"Done."}],"stopReason":"stop"}}
-`
-
-func writePiFixture(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "2026-08-03T13-31-25-550Z_019fc7d2-71ee-7da3-8497-cf2834825a90.jsonl")
-	if err := os.WriteFile(path, []byte(piSessionFixture), 0644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
+// piFixturePath is the shared pi session fixture, also used by the
+// main-package render tests.
+const piFixturePath = "testdata/pi-session.jsonl"
 
 func sessionText(sess *Session) string {
 	var all []byte
@@ -37,7 +22,7 @@ func sessionText(sess *Session) string {
 }
 
 func TestParsePiFile(t *testing.T) {
-	sess, err := ParseFile(writePiFixture(t)) // via dispatch, exercises sniffing too
+	sess, err := ParseFile(piFixturePath) // via dispatch, exercises sniffing too
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +142,7 @@ func TestNormalizePiToolInput(t *testing.T) {
 }
 
 func TestIsPiSessionFile(t *testing.T) {
-	path := writePiFixture(t)
+	path := piFixturePath
 	if !IsPiSessionFile(path) {
 		t.Error("pi fixture not detected as pi session")
 	}
@@ -170,7 +155,7 @@ func TestIsPiSessionFile(t *testing.T) {
 }
 
 func TestPiSessionCwd(t *testing.T) {
-	if got := PiSessionCwd(writePiFixture(t)); got != "/tmp/proj" {
+	if got := PiSessionCwd(piFixturePath); got != "/tmp/proj" {
 		t.Errorf("cwd = %q, want /tmp/proj", got)
 	}
 }

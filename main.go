@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -1358,12 +1359,17 @@ func handleOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported file type", http.StatusBadRequest)
 		return
 	}
-	fileMutex.Lock()
-	if !isWhitelistedLocked(absPath) {
-		markdownFiles = append(markdownFiles, absPath)
-	}
-	fileMutex.Unlock()
+	addToWhitelist(absPath)
 	fmt.Fprintf(w, "/view/%s", pathEscapeSegments(filepath.ToSlash(getRelativePath(absPath))))
+}
+
+// addToWhitelist appends path to the served-files whitelist if absent.
+func addToWhitelist(path string) {
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+	if !isWhitelistedLocked(path) {
+		markdownFiles = append(markdownFiles, path)
+	}
 }
 
 // handoffToRunning detects a peekm instance already listening on the target port
@@ -1396,7 +1402,8 @@ func handoffToRunning() bool {
 		return false
 	}
 
-	openTarget := fmt.Sprintf("http://localhost:%d", *port)
+	display := fmt.Sprintf("http://localhost:%d", *port)
+	openTarget := display
 	if !info.IsDir() {
 		resp, err := client.PostForm(base+"/open", url.Values{"path": {absPath}})
 		if err != nil {
@@ -1405,12 +1412,12 @@ func handoffToRunning() bool {
 		viewPath, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			log.Fatalf("peekm already running at %s but cannot open %s: %s", openTarget, target, strings.TrimSpace(string(viewPath)))
+			log.Fatalf("peekm already running at %s but cannot open %s: %s", display, target, strings.TrimSpace(string(viewPath)))
 		}
 		openTarget += string(viewPath)
 	}
 
-	fmt.Printf("peekm already running at http://localhost:%d — opening there (use -port for a second instance)\n", *port)
+	fmt.Printf("peekm already running at %s — opening there (use -port for a second instance)\n", display)
 	if *openBrowser {
 		openURL(openTarget)
 	}
@@ -1456,7 +1463,7 @@ func serveAndWait(addr, startURL string) {
 	}()
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		if strings.Contains(err.Error(), "address already in use") {
+		if errors.Is(err, syscall.EADDRINUSE) {
 			log.Fatalf("port %d is in use by another application — use -port to pick a different one", *port)
 		}
 		log.Fatal(err)
@@ -1728,11 +1735,7 @@ func handleMarkdownCreated(filePath string) {
 	}
 	log.Printf("New markdown file created: %s", filePath)
 
-	fileMutex.Lock()
-	if !isWhitelistedLocked(filePath) {
-		markdownFiles = append(markdownFiles, filePath)
-	}
-	fileMutex.Unlock()
+	addToWhitelist(filePath)
 
 	go func() {
 		sessionID := awaitSessionID(filePath)

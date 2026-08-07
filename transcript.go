@@ -49,7 +49,7 @@ type contentBlock struct {
 	LineCount       int                // line count hint for collapsible blocks
 	ToolName        string             // for tool_use blocks
 	ToolInput       string             // pretty-printed, truncated
-	ToolID          string             // for pairing tool_use ↔ tool_result
+	ToolID          string             // anchor id for transcript deep links
 	Result          *contentBlock      // paired tool_result (nil if unpaired)
 	ToolDisplayName string             // humanized name
 	ToolServer      string             // MCP server prefix
@@ -93,18 +93,30 @@ func resolveClaudeTranscriptPath(sessionID string) string {
 	}
 	projectsDir := filepath.Join(home, ".claude", "projects")
 	fileName := sessionID + ".jsonl"
-
-	// Try current browseDir first (fast path)
-	fileMutex.RLock()
-	dir := browseDir
-	fileMutex.RUnlock()
-	candidate := filepath.Join(projectsDir, encodeProjectDir(dir), fileName)
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate
+	probe := func(dir string) string {
+		candidate := filepath.Join(dir, fileName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		return ""
 	}
+	return findInSessionStore(projectsDir, encodeProjectDir(currentBrowseDir()), probe)
+}
 
-	// Scan all project directories
-	entries, err := os.ReadDir(projectsDir)
+// currentBrowseDir reads the browse dir under the file mutex.
+func currentBrowseDir() string {
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+	return browseDir
+}
+
+// findInSessionStore probes the browse dir's store folder first (fast path),
+// then every folder under root, returning probe's first hit.
+func findInSessionStore(root, fastDirName string, probe func(dir string) string) string {
+	if p := probe(filepath.Join(root, fastDirName)); p != "" {
+		return p
+	}
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return ""
 	}
@@ -112,9 +124,8 @@ func resolveClaudeTranscriptPath(sessionID string) string {
 		if !entry.IsDir() {
 			continue
 		}
-		candidate = filepath.Join(projectsDir, entry.Name(), fileName)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if p := probe(filepath.Join(root, entry.Name())); p != "" {
+			return p
 		}
 	}
 	return ""
@@ -285,16 +296,13 @@ func countOrphanResults(blocks []transcript.Block) int {
 func renderBlock(b transcript.Block, md goldmark.Markdown, assistant bool) (contentBlock, bool) {
 	switch b.Kind {
 	case transcript.KindText:
-		if b.Text == "" {
-			return contentBlock{}, false
-		}
 		return renderTextBlock(b.Text, md, assistant), true
 	case transcript.KindThinking:
 		return contentBlock{Type: "thinking", Text: truncateString(b.Text, 20000)}, true
 	case transcript.KindToolCall:
 		return renderToolCall(b.Tool, md), true
 	case transcript.KindToolResult:
-		return renderToolResult(nil, b.Result, md), true
+		return renderToolResult(b.Result, md), true
 	}
 	return contentBlock{}, false
 }
@@ -319,20 +327,19 @@ func renderToolCall(tc *transcript.ToolCall, md goldmark.Markdown) contentBlock 
 		ToolInputHTML:   formatStructuredFromMap(tc.Name, tc.Input),
 	}
 	if tc.Result != nil {
-		result := renderToolResult(tc, tc.Result, md)
+		result := renderToolResult(tc.Result, md)
 		block.Result = &result
 	}
 	return block
 }
 
-// renderToolResult renders a tool result; tc is the owning call (nil for
-// orphan results). pi bashExecution output is fenced so shell output is not
-// interpreted as markdown.
-func renderToolResult(tc *transcript.ToolCall, r *transcript.ToolResult, md goldmark.Markdown) contentBlock {
+// renderToolResult renders a tool result. Preformatted output (e.g. captured
+// shell output) is fenced so it is not interpreted as markdown.
+func renderToolResult(r *transcript.ToolResult, md goldmark.Markdown) contentBlock {
 	block := contentBlock{Type: "tool_result", ToolID: r.CallID, Images: r.Images}
 	if r.Text != "" {
 		text := truncateString(r.Text, 8000)
-		if tc != nil && tc.RawName == "bashExecution" {
+		if r.Preformatted {
 			text = "```\n" + text + "\n```"
 		}
 		block.HTML = renderMarkdownToHTML(md, text)
