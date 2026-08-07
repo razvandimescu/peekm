@@ -144,7 +144,7 @@ func buildTranscriptCache(events []SessionEvent) map[string]transcriptInfo {
 			continue
 		}
 		if _, checked := cache[evt.SessionID]; !checked {
-			path := resolveTranscriptPath(evt.SessionID)
+			path, _ := resolveTranscriptPath(evt.SessionID)
 			cache[evt.SessionID] = transcriptInfo{
 				hasTranscript: path != "",
 				summary:       extractSessionSummary(path),
@@ -216,17 +216,16 @@ func transcriptSessionsIn(sessionsDir, projectDir string, knownSessionIDs map[st
 			continue
 		}
 		transcriptPath := filepath.Join(sessionsDir, entry.Name())
-		sessions = append(sessions, conversationSession(
-			transcriptPath, sessionID, filepath.Base(projectDir), "", info.ModTime()))
+		sessions = append(sessions, conversationSession(sessionID, filepath.Base(projectDir), "", transcriptPath, info.ModTime()))
 	}
 	return sessions
 }
 
-// conversationSession builds a timeline session for a transcript-only session
-// file: summary and time range from the file's head/tail records, mod time as
-// the fallback range. source is the harness badge ("" for Claude Code).
-func conversationSession(path, sessionID, project, source string, modTime time.Time) timelineSession {
-	summary, firstTS, lastTS := extractTranscriptMeta(path)
+// conversationSession builds a transcript-backed timeline session, shared by
+// the Claude and pi discovery paths. modTime bounds the session when the
+// transcript's own timestamps are unavailable.
+func conversationSession(sessionID, project, source, transcriptPath string, modTime time.Time) timelineSession {
+	summary, firstTS, lastTS := extractTranscriptMeta(transcriptPath)
 	oldest, newest := modTime, modTime
 	if !firstTS.IsZero() {
 		oldest = firstTS

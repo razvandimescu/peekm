@@ -305,7 +305,7 @@ func piSessionsIn(sessionsDir, baseDir string, knownSessionIDs map[string]bool) 
 			continue
 		}
 		sessions = append(sessions, conversationSession(
-			path, sessionID, filepath.Base(cwd), transcript.HarnessPi, info.ModTime()))
+			sessionID, filepath.Base(cwd), transcript.HarnessPi, path, info.ModTime()))
 	}
 	return sessions
 }

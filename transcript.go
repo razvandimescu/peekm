@@ -73,12 +73,17 @@ func encodeProjectDir(dir string) string {
 var sessionIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // resolveTranscriptPath finds a session transcript by ID, checking Claude
-// Code's project store first, then pi's session store.
-func resolveTranscriptPath(sessionID string) string {
+// Code's project store first, then pi's session store. The source return is
+// "" for Claude Code and transcript.HarnessPi for pi, so callers can dispatch
+// on harness without re-inferring it from file content.
+func resolveTranscriptPath(sessionID string) (path, source string) {
 	if p := resolveClaudeTranscriptPath(sessionID); p != "" {
-		return p
+		return p, ""
 	}
-	return resolvePiTranscriptPath(sessionID)
+	if p := resolvePiTranscriptPath(sessionID); p != "" {
+		return p, transcript.HarnessPi
+	}
+	return "", ""
 }
 
 // resolveClaudeTranscriptPath finds a Claude Code transcript by scanning project
@@ -857,18 +862,14 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	path := resolveTranscriptPath(sessionID)
+	path, _ := resolveTranscriptPath(sessionID)
 
 	data := transcriptTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
 		Title:            "Transcript",
 		Subtitle:         "Session " + truncateSessionID(sessionID),
-		BrowsePath:       currentBrowseDir,
+		BrowsePath:       currentBrowseDir(),
 		SessionID:        sessionID,
 	}
 
@@ -895,7 +896,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 	// Compute edit stats from event log (skip for not-found transcripts)
 	if !data.NotFound && globalEventLog != nil {
 		var sessionEvents []SessionEvent
-		for _, evt := range globalEventLog.eventsForDir(currentBrowseDir) {
+		for _, evt := range globalEventLog.eventsForDir(currentBrowseDir()) {
 			if evt.SessionID == sessionID {
 				sessionEvents = append(sessionEvents, evt)
 			}
