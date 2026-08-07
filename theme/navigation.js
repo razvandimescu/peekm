@@ -7,12 +7,14 @@ let reconnectAttempts = 0;
 const maxReconnectDelay = 30000; // 30 seconds max
 let refreshTreeTimer = null; // For debouncing tree refreshes
 
-// Timeline session card expand/collapse
-function toggleTimelineSession(header) {
-    var events = header.nextElementSibling;
-    var expanded = header.getAttribute('aria-expanded') === 'true';
-    header.setAttribute('aria-expanded', String(!expanded));
-    events.style.display = expanded ? 'none' : '';
+// Expand/collapse for any control whose next sibling is its panel (timeline
+// session cards, Recent-mode bulk-write groups). Carets rotate from CSS on
+// [aria-expanded="true"].
+function toggleExpander(control) {
+    var panel = control.nextElementSibling;
+    var expanded = control.getAttribute('aria-expanded') === 'true';
+    control.setAttribute('aria-expanded', String(!expanded));
+    panel.style.display = expanded ? 'none' : '';
 }
 
 // Timeline filter toggle (All / Edits only)
@@ -90,6 +92,10 @@ function connectSSE() {
                 // Optimistic update: insert immediately (fast, may be buggy)
                 insertFileIntoTree(data.path);
                 // Self-healing: debounced refresh from server (batches rapid updates)
+                scheduleTreeRefresh();
+            } else if (data.type === 'files_added') {
+                // Bulk write: one toast; the debounced refresh brings the batch in.
+                showToast(`${data.count} files added: ${data.path}`);
                 scheduleTreeRefresh();
             } else if (data.type === 'file_removed') {
                 console.log('[SSE] Handling file_removed for:', data.path);
@@ -1456,7 +1462,7 @@ async function refreshTimeline() {
     if (!fresh) return;
     fresh.querySelectorAll('.timeline-session-header').forEach(function(header) {
         const id = header.querySelector('.timeline-session-id');
-        if (id && expanded.has(id.textContent.trim())) toggleTimelineSession(header);
+        if (id && expanded.has(id.textContent.trim())) toggleExpander(header);
     });
     fresh.scrollTop = scrollTop;
 }

@@ -68,6 +68,7 @@ type timelineSession struct {
 	LastToolAgo    string // relative time of last tool call (for tooltip)
 	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
 	SessionType    string // "edit" or "conversation"
+	Source         string // harness badge: "" (Claude Code, unbadged) or "pi"
 	Events         []timelineEntry
 	Ribbon         []ribbonCell // spatial activity strip (chronological)
 	newestTime     time.Time
@@ -453,6 +454,9 @@ func groupEventsBySession(events []SessionEvent, baseDir string) []timelineSessi
 		if sb.session.Project == "" && evt.CWD != "" {
 			sb.session.Project = filepath.Base(evt.CWD)
 		}
+		if sb.session.Source == "" && evt.Src != "" {
+			sb.session.Source = evt.Src
+		}
 		appendOrMergeEntry(sb, evt, baseDir)
 	}
 
@@ -531,6 +535,7 @@ func buildSessionTimeline(events []SessionEvent, baseDir string, discoverConvers
 			}
 		}
 		convSessions := discoverTranscriptSessions(baseDir, knownIDs)
+		convSessions = mergeSessionsByTime(convSessions, discoverPiSessions(baseDir, knownIDs))
 		sessions = mergeSessionsByTime(editSessions, convSessions)
 	}
 

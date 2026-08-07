@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -11,8 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/razvandimescu/peekm/transcript"
 	"github.com/yuin/goldmark"
 )
 
@@ -39,30 +40,24 @@ type transcriptTurn struct {
 	LineCount   int  // estimated rendered lines for the toggle label
 }
 
-// imageData represents a base64-encoded image from a tool result
-type imageData struct {
-	MediaType string // e.g. "image/png"
-	Data      string // base64-encoded
-}
-
 // contentBlock represents a piece of content within a turn
 type contentBlock struct {
-	Type            string        // "text", "tool_use", "tool_result", "thinking", "context_summary"
-	HTML            template.HTML // rendered markdown (for text blocks)
-	Text            string        // raw text (for thinking, tool input)
-	Collapsible     bool          // long user text blocks get fade-out + expand button
-	LineCount       int           // line count hint for collapsible blocks
-	ToolName        string        // for tool_use blocks
-	ToolInput       string        // pretty-printed, truncated
-	ToolID          string        // for pairing tool_use ↔ tool_result
-	Result          *contentBlock // paired tool_result (nil if unpaired)
-	ToolDisplayName string        // humanized name
-	ToolServer      string        // MCP server prefix
-	ToolSummary     string        // short preview for collapsed summary line
-	ToolInputHTML   template.HTML // structured rendering
-	ItemCount       int           // for context_summary
-	Images          []imageData   // for tool_result blocks containing images
-	textChars       int           // raw text size, for turn-level collapse accounting
+	Type            string             // "text", "tool_use", "tool_result", "thinking", "context_summary"
+	HTML            template.HTML      // rendered markdown (for text blocks)
+	Text            string             // raw text (for thinking, tool input)
+	Collapsible     bool               // long user text blocks get fade-out + expand button
+	LineCount       int                // line count hint for collapsible blocks
+	ToolName        string             // for tool_use blocks
+	ToolInput       string             // pretty-printed, truncated
+	ToolID          string             // for pairing tool_use ↔ tool_result
+	Result          *contentBlock      // paired tool_result (nil if unpaired)
+	ToolDisplayName string             // humanized name
+	ToolServer      string             // MCP server prefix
+	ToolSummary     string             // short preview for collapsed summary line
+	ToolInputHTML   template.HTML      // structured rendering
+	ItemCount       int                // for context_summary
+	Images          []transcript.Image // for tool_result blocks containing images
+	textChars       int                // raw text size, for turn-level collapse accounting
 	textLines       int
 }
 
@@ -77,9 +72,18 @@ func encodeProjectDir(dir string) string {
 // would escape ~/.claude/projects and read arbitrary .jsonl files.
 var sessionIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
-// Tries the current browseDir first, then falls back to scanning all project dirs.
+// resolveTranscriptPath finds a session transcript by ID, checking Claude
+// Code's project store first, then pi's session store.
 func resolveTranscriptPath(sessionID string) string {
+	if p := resolveClaudeTranscriptPath(sessionID); p != "" {
+		return p
+	}
+	return resolvePiTranscriptPath(sessionID)
+}
+
+// resolveClaudeTranscriptPath finds a Claude Code transcript by scanning project
+// directories. Tries the current browseDir first, then all project dirs.
+func resolveClaudeTranscriptPath(sessionID string) string {
 	if !sessionIDRe.MatchString(sessionID) {
 		return ""
 	}
@@ -148,15 +152,21 @@ func extractSessionSummary(transcriptPath string) string {
 	return ""
 }
 
-// extractSummaryFromRaw extracts a user summary from a single transcript JSON line.
+// extractSummaryFromRaw extracts a user summary from a single transcript JSON
+// line. Accepts Claude lines (type "user") and pi entries (type "message" with
+// message.role "user").
 func extractSummaryFromRaw(raw json.RawMessage) string {
 	var entry struct {
 		Type    string `json:"type"`
 		Message struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(raw, &entry) != nil || entry.Type != "user" {
+	if json.Unmarshal(raw, &entry) != nil {
+		return ""
+	}
+	if entry.Type != "user" && !(entry.Type == "message" && entry.Message.Role == "user") {
 		return ""
 	}
 	text := extractUserText(entry.Message.Content)
@@ -213,257 +223,121 @@ func extractUserText(content json.RawMessage) string {
 	return ""
 }
 
-// pairToolResults attaches tool_result blocks to their matching tool_use blocks.
-// Paired results are set on the tool_use's Result field and removed from the block list.
-func pairToolResults(turns []transcriptTurn) []transcriptTurn {
-	// Pass 1: index tool_use blocks by ToolID
-	useIndex := make(map[string]*contentBlock)
-	for i := range turns {
-		for j := range turns[i].Blocks {
-			if turns[i].Blocks[j].Type == "tool_use" && turns[i].Blocks[j].ToolID != "" {
-				useIndex[turns[i].Blocks[j].ToolID] = &turns[i].Blocks[j]
-			}
-		}
-	}
-
-	// Pass 2: pair tool_results and remove from block lists
-	for i := range turns {
-		filtered := turns[i].Blocks[:0]
-		for j := range turns[i].Blocks {
-			b := &turns[i].Blocks[j]
-			if b.Type == "tool_result" && b.ToolID != "" {
-				if use, ok := useIndex[b.ToolID]; ok {
-					use.Result = b
-					continue // remove from block list
-				}
-			}
-			filtered = append(filtered, *b)
-		}
-		turns[i].Blocks = filtered
-	}
-	return turns
-}
-
-// mergeConsecutiveTurns combines adjacent turns with the same role into one turn.
-func mergeConsecutiveTurns(turns []transcriptTurn) []transcriptTurn {
-	if len(turns) == 0 {
-		return turns
-	}
-	merged := []transcriptTurn{turns[0]}
-	for i := 1; i < len(turns); i++ {
-		last := &merged[len(merged)-1]
-		if turns[i].Role == last.Role {
-			last.Blocks = append(last.Blocks, turns[i].Blocks...)
-		} else {
-			merged = append(merged, turns[i])
-		}
-	}
-	return merged
-}
-
-// removeEmptyTurns filters out turns with no content blocks.
-func removeEmptyTurns(turns []transcriptTurn) []transcriptTurn {
-	filtered := turns[:0]
-	for _, t := range turns {
-		if len(t.Blocks) > 0 {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-// parseTranscript reads a Claude Code transcript JSONL file and returns conversation turns
+// parseTranscript reads a session transcript (Claude Code or pi, detected by
+// content) and renders it into view-model turns.
 func parseTranscript(path string) ([]transcriptTurn, error) {
-	f, err := os.Open(path)
+	sess, err := transcript.ParseFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return renderSessionTurns(sess), nil
+}
 
+// renderSessionTurns maps the neutral transcript model onto the view model:
+// markdown to HTML, tool formatters, and collapse heuristics.
+func renderSessionTurns(sess *transcript.Session) []transcriptTurn {
 	md := newSafeMarkdownRenderer()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
-
-	var turns []transcriptTurn
-	isFirstUser := true
-
-	for scanner.Scan() {
-		collapseCtx := isFirstUser
-		turn, skip := parseTranscriptLine(scanner.Bytes(), md, collapseCtx)
-		if skip {
-			continue
-		}
-		if collapseCtx {
-			isFirstUser = false
-		}
-		turns = append(turns, turn)
+	turns := make([]transcriptTurn, 0, len(sess.Turns))
+	for i, t := range sess.Turns {
+		turns = append(turns, renderTurn(t, md, i == 0))
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	turns = pairToolResults(turns)
-	turns = removeEmptyTurns(turns)
-	turns = mergeConsecutiveTurns(turns)
 	turns = markTurnCollapsible(turns)
-	turns = expandFinalTurn(turns)
-	return turns, nil
+	return expandFinalTurn(turns)
 }
 
-// transcriptLineEnvelope is the minimal structure for a transcript JSONL line
-type transcriptLineEnvelope struct {
-	Type      string          `json:"type"`
-	IsMeta    bool            `json:"isMeta"`
-	Timestamp string          `json:"timestamp"`
-	Message   json.RawMessage `json:"message"`
-}
-
-// transcriptMsg is the message body within a transcript line
-type transcriptMsg struct {
-	Role    string          `json:"role"`
-	Model   string          `json:"model"`
-	Content json.RawMessage `json:"content"`
-}
-
-// parseTranscriptLine parses a single JSONL line into a transcriptTurn.
-// Returns (turn, skip). If skip is true, the line should be ignored.
-func parseTranscriptLine(line []byte, md goldmark.Markdown, collapseToolResults bool) (transcriptTurn, bool) {
-	var env transcriptLineEnvelope
-	if err := json.Unmarshal(line, &env); err != nil {
-		return transcriptTurn{}, true
+// renderTurn converts one model turn. A first user turn opening with a long
+// run of unpaired tool results is a session resumed from compacted context;
+// those results render as a single context_summary marker.
+func renderTurn(t transcript.Turn, md goldmark.Markdown, first bool) transcriptTurn {
+	vt := transcriptTurn{Role: t.Role, Model: t.Model}
+	if !t.Timestamp.IsZero() {
+		vt.Timestamp = t.Timestamp.Format(time.RFC3339)
 	}
-
-	// Only keep user/assistant, skip meta
-	if env.IsMeta || (env.Type != "user" && env.Type != "assistant") {
-		return transcriptTurn{}, true
-	}
-	if len(env.Message) == 0 {
-		return transcriptTurn{}, true
-	}
-
-	var msg transcriptMsg
-	if err := json.Unmarshal(env.Message, &msg); err != nil {
-		return transcriptTurn{}, true
-	}
-
-	blocks := parseContentBlocks(msg.Content, md, collapseToolResults && msg.Role == "user", msg.Role == "assistant")
-	if len(blocks) == 0 {
-		return transcriptTurn{}, true
-	}
-
-	return transcriptTurn{
-		Role:      msg.Role,
-		Blocks:    blocks,
-		Model:     msg.Model,
-		Timestamp: env.Timestamp,
-	}, false
-}
-
-// parseContentBlocks extracts content blocks from a message's content field
-func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolResults, assistant bool) []contentBlock {
-	// Content can be a string (user prompt) or array of blocks
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil {
-		if str == "" {
-			return nil
-		}
-		block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, str)}
-		recordTextSize(&block, str)
-		markCollapsible(&block, str, assistant)
-		return []contentBlock{block}
-	}
-
-	var rawBlocks []json.RawMessage
-	if err := json.Unmarshal(raw, &rawBlocks); err != nil {
-		return nil
-	}
-
-	// Count tool_results for context collapse
-	if collapseToolResults {
-		if n := countToolResults(rawBlocks); n > 10 {
-			return []contentBlock{{Type: "context_summary", ItemCount: n}}
+	collapsed := 0
+	if first && t.Role == "user" {
+		if n := countOrphanResults(t.Blocks); n > 10 {
+			collapsed = n
+			vt.Blocks = append(vt.Blocks, contentBlock{Type: "context_summary", ItemCount: n})
 		}
 	}
-
-	return convertRawBlocks(rawBlocks, md, assistant)
-}
-
-// countToolResults counts tool_result blocks in a raw block list
-func countToolResults(rawBlocks []json.RawMessage) int {
-	count := 0
-	for _, rb := range rawBlocks {
-		var peek struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(rb, &peek) == nil && peek.Type == "tool_result" {
-			count++
-		}
-	}
-	return count
-}
-
-// rawContentBlock matches the JSON structure of a Claude message content block
-type rawContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	Thinking  string          `json:"thinking"`
-	Name      string          `json:"name"`
-	ID        string          `json:"id"`
-	ToolUseID string          `json:"tool_use_id"`
-	Input     json.RawMessage `json:"input"`
-	Content   json.RawMessage `json:"content"`
-}
-
-// convertRawBlocks parses raw JSON blocks into contentBlock values
-func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assistant bool) []contentBlock {
-	var blocks []contentBlock
-	for _, rb := range rawBlocks {
-		var peek rawContentBlock
-		if json.Unmarshal(rb, &peek) != nil {
+	for _, b := range t.Blocks {
+		if collapsed > 0 && b.Kind == transcript.KindToolResult {
 			continue
 		}
-		switch peek.Type {
-		case "text":
-			if peek.Text != "" {
-				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
-				recordTextSize(&block, peek.Text)
-				markCollapsible(&block, peek.Text, assistant)
-				blocks = append(blocks, block)
-			}
-		case "thinking":
-			if peek.Thinking != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Text: truncateString(peek.Thinking, 20000)})
-			}
-		case "tool_use":
-			displayName, server := humanizeToolName(peek.Name)
-			inputMap := parseToolInput(peek.Input)
-			summary := toolSummaryFromMap(peek.Name, inputMap)
-			structuredHTML := formatStructuredFromMap(peek.Name, inputMap)
-			blocks = append(blocks, contentBlock{
-				Type:            "tool_use",
-				ToolName:        peek.Name,
-				ToolInput:       formatToolInputFromMap(inputMap, peek.Input),
-				ToolID:          peek.ID,
-				ToolDisplayName: displayName,
-				ToolServer:      server,
-				ToolSummary:     summary,
-				ToolInputHTML:   structuredHTML,
-			})
-		case "tool_result":
-			text, images := extractToolResultContent(peek.Content)
-			if text != "" || len(images) > 0 {
-				if text != "" {
-					text = truncateString(text, 8000)
-				}
-				block := contentBlock{Type: "tool_result", ToolID: peek.ToolUseID, Images: images}
-				if text != "" {
-					block.HTML = renderMarkdownToHTML(md, text)
-				}
-				blocks = append(blocks, block)
-			}
+		if cb, ok := renderBlock(b, md, t.Role == "assistant"); ok {
+			vt.Blocks = append(vt.Blocks, cb)
 		}
 	}
-	return blocks
+	return vt
+}
+
+// countOrphanResults counts tool results whose call is not in the session.
+func countOrphanResults(blocks []transcript.Block) int {
+	n := 0
+	for _, b := range blocks {
+		if b.Kind == transcript.KindToolResult {
+			n++
+		}
+	}
+	return n
+}
+
+func renderBlock(b transcript.Block, md goldmark.Markdown, assistant bool) (contentBlock, bool) {
+	switch b.Kind {
+	case transcript.KindText:
+		if b.Text == "" {
+			return contentBlock{}, false
+		}
+		return renderTextBlock(b.Text, md, assistant), true
+	case transcript.KindThinking:
+		return contentBlock{Type: "thinking", Text: truncateString(b.Text, 20000)}, true
+	case transcript.KindToolCall:
+		return renderToolCall(b.Tool, md), true
+	case transcript.KindToolResult:
+		return renderToolResult(nil, b.Result, md), true
+	}
+	return contentBlock{}, false
+}
+
+func renderTextBlock(text string, md goldmark.Markdown, assistant bool) contentBlock {
+	block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, text)}
+	recordTextSize(&block, text)
+	markCollapsible(&block, text, assistant)
+	return block
+}
+
+func renderToolCall(tc *transcript.ToolCall, md goldmark.Markdown) contentBlock {
+	displayName, server := humanizeToolName(tc.Name)
+	block := contentBlock{
+		Type:            "tool_use",
+		ToolName:        tc.Name,
+		ToolID:          tc.ID,
+		ToolDisplayName: displayName,
+		ToolServer:      server,
+		ToolInput:       formatToolInputFromMap(tc.Input, tc.RawInput),
+		ToolSummary:     toolSummaryFromMap(tc.Name, tc.Input),
+		ToolInputHTML:   formatStructuredFromMap(tc.Name, tc.Input),
+	}
+	if tc.Result != nil {
+		result := renderToolResult(tc, tc.Result, md)
+		block.Result = &result
+	}
+	return block
+}
+
+// renderToolResult renders a tool result; tc is the owning call (nil for
+// orphan results). pi bashExecution output is fenced so shell output is not
+// interpreted as markdown.
+func renderToolResult(tc *transcript.ToolCall, r *transcript.ToolResult, md goldmark.Markdown) contentBlock {
+	block := contentBlock{Type: "tool_result", ToolID: r.CallID, Images: r.Images}
+	if r.Text != "" {
+		text := truncateString(r.Text, 8000)
+		if tc != nil && tc.RawName == "bashExecution" {
+			text = "```\n" + text + "\n```"
+		}
+		block.HTML = renderMarkdownToHTML(md, text)
+	}
+	return block
 }
 
 // renderMarkdownToHTML converts markdown text to HTML using goldmark
@@ -473,18 +347,6 @@ func renderMarkdownToHTML(md goldmark.Markdown, text string) template.HTML {
 		return template.HTML(template.HTMLEscapeString(text))
 	}
 	return template.HTML(buf.String())
-}
-
-// parseToolInput unmarshals tool input JSON once for reuse across summary/structured/raw formatters.
-func parseToolInput(input json.RawMessage) map[string]interface{} {
-	if len(input) == 0 {
-		return nil
-	}
-	var m map[string]interface{}
-	if json.Unmarshal(input, &m) != nil {
-		return nil
-	}
-	return m
 }
 
 // formatToolInputFromMap pretty-prints tool input JSON, truncated to a reasonable size.
@@ -889,43 +751,6 @@ func formatGrepInput(m map[string]interface{}) template.HTML {
 	}
 	b.WriteString(`</span>`)
 	return template.HTML(b.String())
-}
-
-// extractToolResultContent extracts text and images from a tool_result content field.
-// Content can be a plain string or an array of typed content blocks.
-func extractToolResultContent(content json.RawMessage) (string, []imageData) {
-	if len(content) == 0 {
-		return "", nil
-	}
-	var s string
-	if json.Unmarshal(content, &s) == nil {
-		return s, nil
-	}
-	var parts []struct {
-		Type   string `json:"type"`
-		Text   string `json:"text"`
-		Source struct {
-			Type      string `json:"type"`
-			MediaType string `json:"media_type"`
-			Data      string `json:"data"`
-		} `json:"source"`
-	}
-	if json.Unmarshal(content, &parts) == nil {
-		var buf strings.Builder
-		var images []imageData
-		for _, p := range parts {
-			switch p.Type {
-			case "text":
-				buf.WriteString(p.Text)
-			case "image":
-				if p.Source.Type == "base64" && p.Source.MediaType != "" && p.Source.Data != "" {
-					images = append(images, imageData{MediaType: p.Source.MediaType, Data: p.Source.Data})
-				}
-			}
-		}
-		return buf.String(), images
-	}
-	return "", nil
 }
 
 // markCollapsible flags text blocks that render clamped with an expand toggle.

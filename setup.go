@@ -18,6 +18,7 @@ func runSetup(args []string) {
 		fmt.Println("Usage: peekm setup <target> [options]")
 		fmt.Println("\nTargets:")
 		fmt.Println("  claude-code  Configure Claude Code hooks [--remove] [--port PORT]")
+		fmt.Println("  pi           Configure pi extension [--remove] [--port PORT]")
 		fmt.Println("  autostart    Install as background service [--remove]")
 		os.Exit(1)
 	}
@@ -25,11 +26,13 @@ func runSetup(args []string) {
 	switch args[0] {
 	case "claude-code":
 		setupClaudeCode(args[1:])
+	case "pi":
+		setupPi(args[1:])
 	case "autostart":
 		setupAutostart(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown setup target: %s\n", args[0])
-		fmt.Println("Available: claude-code, autostart")
+		fmt.Println("Available: claude-code, pi, autostart")
 		os.Exit(1)
 	}
 }
