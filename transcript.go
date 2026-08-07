@@ -77,9 +77,31 @@ func encodeProjectDir(dir string) string {
 // would escape ~/.claude/projects and read arbitrary .jsonl files.
 var sessionIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// resolveTranscriptPath finds a Claude Code transcript by scanning project directories.
-// Tries the current browseDir first, then falls back to scanning all project dirs.
-func resolveTranscriptPath(sessionID string) string {
+// resolveTranscriptPath finds a session transcript by ID, checking Claude
+// Code's project store first, then pi's session store. The source return is
+// "" for Claude Code and "pi" for pi, so callers can dispatch on harness
+// without re-inferring it from file content.
+func resolveTranscriptPath(sessionID string) (path, source string) {
+	if p := resolveClaudeTranscriptPath(sessionID); p != "" {
+		return p, ""
+	}
+	if p := resolvePiTranscriptPath(sessionID); p != "" {
+		return p, "pi"
+	}
+	return "", ""
+}
+
+// parseTranscriptFor dispatches to the harness-appropriate transcript parser.
+func parseTranscriptFor(path, source string) ([]transcriptTurn, error) {
+	if source == "pi" {
+		return parsePiTranscript(path)
+	}
+	return parseTranscript(path)
+}
+
+// resolveClaudeTranscriptPath finds a Claude Code transcript by scanning project
+// directories. Tries the current browseDir first, then all project dirs.
+func resolveClaudeTranscriptPath(sessionID string) string {
 	if !sessionIDRe.MatchString(sessionID) {
 		return ""
 	}
@@ -148,15 +170,21 @@ func extractSessionSummary(transcriptPath string) string {
 	return ""
 }
 
-// extractSummaryFromRaw extracts a user summary from a single transcript JSON line.
+// extractSummaryFromRaw extracts a user summary from a single transcript JSON
+// line. Accepts Claude lines (type "user") and pi entries (type "message" with
+// message.role "user").
 func extractSummaryFromRaw(raw json.RawMessage) string {
 	var entry struct {
 		Type    string `json:"type"`
 		Message struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(raw, &entry) != nil || entry.Type != "user" {
+	if json.Unmarshal(raw, &entry) != nil {
+		return ""
+	}
+	if entry.Type != "user" && !(entry.Type == "message" && entry.Message.Role == "user") {
 		return ""
 	}
 	text := extractUserText(entry.Message.Content)
@@ -281,8 +309,7 @@ func parseTranscript(path string) ([]transcriptTurn, error) {
 	defer f.Close()
 
 	md := newSafeMarkdownRenderer()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+	scanner := newJSONLScanner(f)
 
 	var turns []transcriptTurn
 	isFirstUser := true
@@ -367,10 +394,7 @@ func parseContentBlocks(raw json.RawMessage, md goldmark.Markdown, collapseToolR
 		if str == "" {
 			return nil
 		}
-		block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, str)}
-		recordTextSize(&block, str)
-		markCollapsible(&block, str, assistant)
-		return []contentBlock{block}
+		return []contentBlock{newTextBlock(md, str, assistant)}
 	}
 
 	var rawBlocks []json.RawMessage
@@ -425,14 +449,11 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assista
 		switch peek.Type {
 		case "text":
 			if peek.Text != "" {
-				block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, peek.Text)}
-				recordTextSize(&block, peek.Text)
-				markCollapsible(&block, peek.Text, assistant)
-				blocks = append(blocks, block)
+				blocks = append(blocks, newTextBlock(md, peek.Text, assistant))
 			}
 		case "thinking":
 			if peek.Thinking != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Text: truncateString(peek.Thinking, 20000)})
+				blocks = append(blocks, newThinkingBlock(peek.Thinking))
 			}
 		case "tool_use":
 			displayName, server := humanizeToolName(peek.Name)
@@ -452,18 +473,43 @@ func convertRawBlocks(rawBlocks []json.RawMessage, md goldmark.Markdown, assista
 		case "tool_result":
 			text, images := extractToolResultContent(peek.Content)
 			if text != "" || len(images) > 0 {
-				if text != "" {
-					text = truncateString(text, 8000)
-				}
-				block := contentBlock{Type: "tool_result", ToolID: peek.ToolUseID, Images: images}
-				if text != "" {
-					block.HTML = renderMarkdownToHTML(md, text)
-				}
-				blocks = append(blocks, block)
+				blocks = append(blocks, newToolResultBlock(md, peek.ToolUseID, text, images))
 			}
 		}
 	}
 	return blocks
+}
+
+// newJSONLScanner returns a line scanner sized for transcript records.
+func newJSONLScanner(f *os.File) *bufio.Scanner {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024) // 10MB max line
+	return scanner
+}
+
+// newTextBlock builds a rendered text block with size accounting and the
+// role-appropriate collapse threshold.
+func newTextBlock(md goldmark.Markdown, text string, assistant bool) contentBlock {
+	block := contentBlock{Type: "text", HTML: renderMarkdownToHTML(md, text)}
+	recordTextSize(&block, text)
+	markCollapsible(&block, text, assistant)
+	return block
+}
+
+func newThinkingBlock(text string) contentBlock {
+	return contentBlock{Type: "thinking", Text: truncateString(text, 20000)}
+}
+
+// toolResultMaxChars caps rendered tool output; results collapse behind the
+// tool call row, so this only bounds pathological outputs.
+const toolResultMaxChars = 8000
+
+func newToolResultBlock(md goldmark.Markdown, toolID, text string, images []imageData) contentBlock {
+	block := contentBlock{Type: "tool_result", ToolID: toolID, Images: images}
+	if text != "" {
+		block.HTML = renderMarkdownToHTML(md, truncateString(text, toolResultMaxChars))
+	}
+	return block
 }
 
 // renderMarkdownToHTML converts markdown text to HTML using goldmark
@@ -1029,7 +1075,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 	currentBrowseDir := browseDir
 	fileMutex.RUnlock()
 
-	path := resolveTranscriptPath(sessionID)
+	path, source := resolveTranscriptPath(sessionID)
 
 	data := transcriptTemplateData{
 		baseTemplateData: newBaseTemplateData(),
@@ -1042,7 +1088,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 
 	if path == "" {
 		data.NotFound = true
-	} else if turns, err := parseTranscript(path); err != nil {
+	} else if turns, err := parseTranscriptFor(path, source); err != nil {
 		data.NotFound = true
 	} else {
 		data.Turns = turns

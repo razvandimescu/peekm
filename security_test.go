@@ -581,7 +581,7 @@ func TestResolveTranscriptPath_RejectsNonUUID(t *testing.T) {
 		"12345678-1234-1234-1234-1234567890123", // wrong length
 	}
 	for _, id := range malicious {
-		if got := resolveTranscriptPath(id); got != "" {
+		if got, _ := resolveTranscriptPath(id); got != "" {
 			t.Errorf("resolveTranscriptPath(%q) = %q, want empty", id, got)
 		}
 	}

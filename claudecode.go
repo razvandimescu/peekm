@@ -206,7 +206,9 @@ func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := resolveTranscriptPath(session)
+	// Claude-only resolution: /reply resumes via the claude CLI, which cannot
+	// steer pi sessions, so the pi store must not satisfy this lookup.
+	path := resolveClaudeTranscriptPath(session)
 	if path == "" {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
