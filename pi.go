@@ -50,25 +50,49 @@ const PORTS = [%d, 6419, 8080, 3000];
 const TOOL_NAMES: Record<string, string> = { %s };
 const EDIT_TOOLS = new Set(["edit", "write"]);
 
-let lastPort = 0; // last port that answered - tried first to skip dead probes
+let lastPort = 0; // healthz-validated port that answered - tried first
+let downUntil = 0; // after a full probe miss, skip scanning until this time
+
+async function post(port: number, body: string): Promise<boolean> {
+  try {
+    await fetch("http://127.0.0.1:" + port + "/hook/file-modified", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(150),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Only a responder carrying peekm's /healthz banner may receive events - an
+// unrelated dev server on 8080/3000 must not see session metadata.
+async function isPeekm(port: number): Promise<boolean> {
+  try {
+    const res = await fetch("http://127.0.0.1:" + port + "/healthz", {
+      signal: AbortSignal.timeout(150),
+    });
+    return res.ok && (await res.text()).startsWith("peekm");
+  } catch {
+    return false;
+  }
+}
 
 async function notify(payload: unknown): Promise<void> {
   const body = JSON.stringify(payload);
-  const ports = lastPort ? [lastPort, ...PORTS.filter((p) => p !== lastPort)] : PORTS;
-  for (const port of ports) {
-    try {
-      await fetch("http://127.0.0.1:" + port + "/hook/file-modified", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(150),
-      });
+  if (lastPort && (await post(lastPort, body))) return;
+  lastPort = 0;
+  if (Date.now() < downUntil) return;
+  for (const port of PORTS) {
+    if (await isPeekm(port)) {
       lastPort = port;
-      return;
-    } catch {
-      // peekm not listening on this port - try the next
+      if (await post(port, body)) return;
+      lastPort = 0;
     }
   }
+  downUntil = Date.now() + 30000; // cooldown so a dead peekm costs one scan per 30s
 }
 
 export default function (pi: ExtensionAPI) {

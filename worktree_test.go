@@ -20,6 +20,10 @@ func TestIsLinkedWorktree(t *testing.T) {
 	plain := filepath.Join(root, "plain")
 	mustMkdir(t, plain)
 
+	submodule := filepath.Join(root, "docs")
+	mustMkdir(t, submodule)
+	mustWrite(t, filepath.Join(submodule, ".git"), "gitdir: ../.git/modules/docs")
+
 	tests := []struct {
 		name string
 		dir  string
@@ -29,6 +33,7 @@ func TestIsLinkedWorktree(t *testing.T) {
 		{"main checkout has a .git directory", mainRepo, false},
 		{"plain directory has no .git", plain, false},
 		{"missing directory", filepath.Join(root, "nope"), false},
+		{"submodule gitfile points at modules, holds unique content", submodule, false},
 	}
 	for _, tt := range tests {
 		if got := isLinkedWorktree(tt.dir); got != tt.want {

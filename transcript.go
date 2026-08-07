@@ -27,6 +27,7 @@ type transcriptTemplateData struct {
 	SessionID    string
 	Turns        []transcriptTurn
 	NotFound     bool
+	CanReply     bool // reply composer resumes via claude; Claude sessions only
 	SessionStats *sessionStats
 }
 
@@ -345,11 +346,34 @@ func renderToolResult(r *transcript.ToolResult, md goldmark.Markdown) contentBlo
 	if r.Text != "" {
 		text := truncateString(r.Text, 8000)
 		if r.Preformatted {
-			text = "```\n" + text + "\n```"
+			fence := codeFence(text)
+			text = fence + "\n" + text + "\n" + fence
 		}
 		block.HTML = renderMarkdownToHTML(md, text)
 	}
 	return block
+}
+
+// codeFence returns a backtick fence longer than any backtick run in s, so
+// embedded ``` sequences cannot terminate it early (CommonMark honors the
+// longer fence).
+func codeFence(s string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	n := longest + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
 }
 
 // renderMarkdownToHTML converts markdown text to HTML using goldmark
@@ -862,7 +886,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path, _ := resolveTranscriptPath(sessionID)
+	path, source := resolveTranscriptPath(sessionID)
 
 	data := transcriptTemplateData{
 		baseTemplateData: newBaseTemplateData(),
@@ -903,6 +927,10 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		}
 		data.SessionStats = computeSessionStats(sessionEvents)
 	}
+
+	// The /reply endpoint resumes sessions via `claude` — pi sessions have no
+	// resume path, so they get no composer.
+	data.CanReply = !data.NotFound && source != transcript.HarnessPi
 
 	renderTemplatePair(w, r, transcriptTmpl, transcriptPartialTmpl, data)
 }

@@ -255,6 +255,24 @@ func TestLineDiffHTMLCap(t *testing.T) {
 	}
 }
 
+func TestCodeFence(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"plain text", "hello", "```"},
+		{"embedded triple fence", "a\n```\nb", "````"},
+		{"embedded quad fence", "x````y", "`````"},
+		{"inline single backticks", "use `go test` here", "```"},
+	}
+	for _, tt := range tests {
+		if got := codeFence(tt.text); got != tt.want {
+			t.Errorf("%s: codeFence() = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestTruncateString(t *testing.T) {
 	tests := []struct {
 		input  string
