@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -631,7 +632,7 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 		}
 
 		if info.IsDir() && path != rootDir {
-			if isExcludedDir(info.Name(), customPatterns) {
+			if isExcludedDir(path, info, customPatterns) {
 				return filepath.SkipDir
 			}
 			dirsToWatch = append(dirsToWatch, path)
@@ -1358,67 +1359,120 @@ func handleOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported file type", http.StatusBadRequest)
 		return
 	}
-	fileMutex.Lock()
-	if !isWhitelistedLocked(absPath) {
-		markdownFiles = append(markdownFiles, absPath)
-	}
-	fileMutex.Unlock()
+	addToWhitelist(absPath)
 	fmt.Fprintf(w, "/view/%s", pathEscapeSegments(filepath.ToSlash(getRelativePath(absPath))))
 }
 
-// handoffToRunning detects a peekm instance already listening on the target port
-// and delegates to it: a file argument is opened there via /open, a directory
-// argument just opens the running instance. Returns false when no peekm answers,
-// letting normal startup proceed.
-func handoffToRunning() bool {
+// addToWhitelist appends path to the served-files whitelist if absent.
+func addToWhitelist(path string) {
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+	if !isWhitelistedLocked(path) {
+		markdownFiles = append(markdownFiles, path)
+	}
+}
+
+// handoffToRunning probes the occupied port for a peekm instance and delegates
+// to it: a file argument is opened there via /open, a directory argument just
+// opens the running instance. handed reports a successful handoff; responded
+// reports whether anything answered HTTP on the port at all, so the caller can
+// distinguish an older peekm (or another app) from a dead socket.
+func handoffToRunning() (handed, responded bool) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(base + "/healthz")
 	if err != nil {
-		return false
+		return false, false
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "peekm") {
-		return false
+		return false, true
 	}
 
 	target := "."
 	if flag.NArg() > 0 {
 		target = flag.Arg(0)
 	}
+	// A peekm answered, so startup cannot proceed either way — report a bad
+	// target here with resolveTarget's wording instead of a misleading
+	// port-in-use fatal.
 	absPath, err := validateAndResolvePath(target)
 	if err != nil {
-		return false // let resolveTarget report the error
+		log.Fatalf("Error resolving path: %v", err)
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {
-		return false
+		log.Fatalf("Error accessing path: %v", err)
 	}
 
-	openTarget := fmt.Sprintf("http://localhost:%d", *port)
+	display := fmt.Sprintf("http://localhost:%d", *port)
+	openTarget := display
 	if !info.IsDir() {
 		resp, err := client.PostForm(base+"/open", url.Values{"path": {absPath}})
 		if err != nil {
-			return false
+			return false, true
 		}
 		viewPath, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			log.Fatalf("peekm already running at %s but cannot open %s: %s", openTarget, target, strings.TrimSpace(string(viewPath)))
+			log.Fatalf("peekm already running at %s but cannot open %s: %s", display, target, strings.TrimSpace(string(viewPath)))
 		}
 		openTarget += string(viewPath)
 	}
 
-	fmt.Printf("peekm already running at http://localhost:%d — opening there (use -port for a second instance)\n", *port)
+	fmt.Printf("peekm already running at %s — opening there (use -port for a second instance)\n", display)
 	if *openBrowser {
 		openURL(openTarget)
 	}
-	return true
+	return true, true
 }
 
-// serveAndWait starts the HTTP server, handles graceful shutdown, and blocks until exit.
-func serveAndWait(addr, startURL string) {
+// parseAccessFlags loads -trusted-cidr and -allow-host into their lookup sets.
+func parseAccessFlags() {
+	for _, c := range strings.Split(*trustedCIDRs, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			log.Fatalf("invalid -trusted-cidr %q: %v", c, err)
+		}
+		trustedNets = append(trustedNets, n)
+	}
+	for _, h := range strings.Split(*allowHosts, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			allowedHosts[strings.ToLower(h)] = true
+		}
+	}
+}
+
+// bindOrHandoff acquires the serve socket before any other startup work:
+// holding it removes the TOCTOU window between probing the port and serving on
+// it. Only on EADDRINUSE is a running peekm probed for handoff; the process
+// exits on every non-bind outcome.
+func bindOrHandoff() net.Listener {
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *port))
+	if err == nil {
+		return ln
+	}
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		log.Fatal(err)
+	}
+	handed, responded := handoffToRunning()
+	if handed {
+		os.Exit(0)
+	}
+	if responded {
+		log.Fatalf("port %d is in use by another application (possibly an older peekm without handoff support) — use -port to pick a different one", *port)
+	}
+	log.Fatalf("port %d is in use by another application — use -port to pick a different one", *port)
+	return nil
+}
+
+// serveAndWait serves on the already-bound listener, handles graceful
+// shutdown, and blocks until exit.
+func serveAndWait(ln net.Listener, startURL string) {
 	if version != "dev" {
 		go checkLatestVersion()
 	}
@@ -1430,7 +1484,6 @@ func serveAndWait(addr, startURL string) {
 	}
 
 	server := &http.Server{
-		Addr:        addr,
 		Handler:     withGzip(http.DefaultServeMux),
 		ReadTimeout: 15 * time.Second,
 		// WriteTimeout intentionally omitted for SSE streaming endpoints
@@ -1455,10 +1508,7 @@ func serveAndWait(addr, startURL string) {
 		}
 	}()
 
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		if strings.Contains(err.Error(), "address already in use") {
-			log.Fatalf("port %d is in use by another application — use -port to pick a different one", *port)
-		}
+	if err := server.Serve(ln); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
@@ -1485,23 +1535,7 @@ func main() {
 	}
 
 	flag.Parse()
-
-	for _, c := range strings.Split(*trustedCIDRs, ",") {
-		if c = strings.TrimSpace(c); c == "" {
-			continue
-		}
-		_, n, err := net.ParseCIDR(c)
-		if err != nil {
-			log.Fatalf("invalid -trusted-cidr %q: %v", c, err)
-		}
-		trustedNets = append(trustedNets, n)
-	}
-
-	for _, h := range strings.Split(*allowHosts, ",") {
-		if h = strings.TrimSpace(h); h != "" {
-			allowedHosts[strings.ToLower(h)] = true
-		}
-	}
+	parseAccessFlags()
 
 	if *showVersion {
 		fmt.Printf("peekm %s (commit: %s, built: %s)\n", version, commit, date)
@@ -1513,9 +1547,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if handoffToRunning() {
-		return
-	}
+	listener := bindOrHandoff()
 
 	if !*disableHook {
 		autoSetupClaudeHooks()
@@ -1532,6 +1564,11 @@ func main() {
 
 	targetPath := resolveTarget()
 	markdownFiles = collectFiles(browseDir, targetPath != "")
+	// An explicitly requested file must be viewable even when the scan skips
+	// it (e.g. inside a linked worktree) — mirror handleOpen's force-whitelist.
+	if targetPath != "" && isCollectableFile(filepath.Base(targetPath)) {
+		addToWhitelist(targetPath)
+	}
 	if len(markdownFiles) == 0 {
 		fmt.Printf("No markdown files found in: %s\n", browseDir)
 		fmt.Fprintln(os.Stderr)
@@ -1547,13 +1584,12 @@ func main() {
 	// Register all routes
 	registerRoutes()
 
-	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	url := fmt.Sprintf("http://localhost:%d", *port)
 
 	fullURL := buildStartupURL(url, targetPath)
 	fmt.Println("Press Ctrl+C to quit")
 
-	serveAndWait(addr, fullURL)
+	serveAndWait(listener, fullURL)
 }
 
 // tildeRelPath returns a path relative to baseDir, or ~/... if outside baseDir.
@@ -1580,17 +1616,20 @@ func getRelativePath(absPath string) string {
 	return tildeRelPath(absPath, browseDir)
 }
 
-// removeFromWhitelist removes a file from the markdown files list (thread-safe)
-func removeFromWhitelist(filePath string) {
+// removeFromWhitelist drops filePath and reports whether it was there. The
+// answer gates the removal notification: unindexed trees (linked worktrees,
+// excluded dirs) still emit fsnotify Remove events when deleted.
+func removeFromWhitelist(filePath string) bool {
 	fileMutex.Lock()
 	defer fileMutex.Unlock()
 
 	for i, f := range markdownFiles {
 		if f == filePath {
 			markdownFiles = append(markdownFiles[:i], markdownFiles[i+1:]...)
-			break
+			return true
 		}
 	}
+	return false
 }
 
 // notifySessionActivity pushes a lightweight SSE event on every received hook
@@ -1657,6 +1696,9 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 	if resolved, err := filepath.EvalSymlinks(dirPath); err != nil || !strings.HasPrefix(resolved, homeDir) {
 		return
 	}
+	if isInLinkedWorktree(dirPath) {
+		return
+	}
 
 	fileMutex.RLock()
 	root := browseDir
@@ -1676,7 +1718,7 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 			info = resolvedInfo
 		}
 		if info.IsDir() {
-			if path != dirPath && isExcludedDir(info.Name(), customPatterns) {
+			if path != dirPath && isExcludedDir(path, info, customPatterns) {
 				return filepath.SkipDir
 			}
 			if err := watcher.Add(path); err != nil {
@@ -1690,26 +1732,56 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 		return nil
 	})
 
-	if len(newFiles) > 0 {
-		fileMutex.Lock()
-		markdownFiles = append(markdownFiles, newFiles...)
-		fileMutex.Unlock()
-
-		for _, f := range newFiles {
-			sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(f)})
+	// Re-check after the walk: `git worktree add` can write the gitfile after
+	// the directory Create event, so the up-front guard may have run too early.
+	fresh := newFiles[:0]
+	for _, f := range newFiles {
+		if !isInLinkedWorktree(f) {
+			fresh = append(fresh, f)
 		}
+	}
+	announceNewFiles(dirPath, fresh)
+}
+
+// announceNewFiles whitelists files a new directory brought in and tells the
+// clients. A directory arriving with a crowd of files is a bulk write (clone,
+// unpack, copy), not authorship: one summary event keeps it out of the toast
+// stream and off the 50-slot replay buffer.
+func announceNewFiles(dirPath string, newFiles []string) {
+	// Per-file Create events race the directory walk: files the walk harvests
+	// may already be whitelisted by handleMarkdownCreated. Announce only what
+	// is genuinely new — duplicates would outlive one-shot removeFromWhitelist.
+	fileMutex.Lock()
+	fresh := newFiles[:0]
+	for _, f := range newFiles {
+		if !isWhitelistedLocked(f) {
+			markdownFiles = append(markdownFiles, f)
+			fresh = append(fresh, f)
+		}
+	}
+	fileMutex.Unlock()
+	newFiles = fresh
+	if len(newFiles) == 0 {
+		return
+	}
+
+	if len(newFiles) >= bulkFileThreshold {
+		sendFileEvent(fileEventMessage{Type: "files_added", Path: getRelativePath(dirPath), Count: len(newFiles)})
+		return
+	}
+	for _, f := range newFiles {
+		sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(f)})
 	}
 }
 
 // handleMarkdownCreated adds a new markdown file to the whitelist and notifies clients.
 func handleMarkdownCreated(filePath string) {
+	if isInLinkedWorktree(filePath) {
+		return
+	}
 	log.Printf("New markdown file created: %s", filePath)
 
-	fileMutex.Lock()
-	if !isWhitelistedLocked(filePath) {
-		markdownFiles = append(markdownFiles, filePath)
-	}
-	fileMutex.Unlock()
+	addToWhitelist(filePath)
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
@@ -1743,8 +1815,10 @@ func awaitSessionID(filePath string) string {
 
 // handleMarkdownRemoved removes a markdown file from the whitelist and notifies clients.
 func handleMarkdownRemoved(filePath string, reason string) {
+	if !removeFromWhitelist(filePath) {
+		return
+	}
 	log.Printf("%s file: %s", reason, filePath)
-	removeFromWhitelist(filePath)
 	sendFileEvent(fileEventMessage{Type: "file_removed", Path: getRelativePath(filePath)})
 }
 
@@ -2971,8 +3045,12 @@ func collectTopLevelFiles(dir string) []string {
 	return files
 }
 
-// isExcludedDir returns true if the directory name should be skipped
-func isExcludedDir(name string, customPatterns []string) bool {
+// isExcludedDir returns true if the directory should be skipped. The name
+// tests read from info, which for a symlink describes its target, while the
+// worktree test needs the path as walked. Ordered cheapest first: the name
+// tests decide most directories without touching the filesystem.
+func isExcludedDir(path string, info os.FileInfo, customPatterns []string) bool {
+	name := info.Name()
 	if strings.HasPrefix(name, ".") && name != ".claude" {
 		return true
 	}
@@ -2981,6 +3059,50 @@ func isExcludedDir(name string, customPatterns []string) bool {
 	}
 	if len(customPatterns) > 0 && matchesIgnorePattern(name, customPatterns) {
 		return true
+	}
+	return isLinkedWorktree(path)
+}
+
+// isLinkedWorktree reports whether dir is a git linked worktree root — a .git
+// gitfile whose gitdir points into a repo's .git/worktrees. Worktree markdown
+// duplicates the main checkout's, and `git worktree add` stamps every file
+// with the checkout time. Submodules also use gitfiles (gitdir under
+// .git/modules) but hold unique content, so they stay included. Callers
+// exempt the browse root.
+func isLinkedWorktree(dir string) bool {
+	gitfile := filepath.Join(dir, ".git")
+	info, err := os.Lstat(gitfile)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	content, err := os.ReadFile(gitfile)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), "/worktrees/") ||
+		strings.Contains(string(content), `\worktrees\`)
+}
+
+// isInLinkedWorktree reports whether path is inside (or is) a linked worktree,
+// testing it and every directory up to but excluding the browse root. The live
+// watcher needs this rather than isLinkedWorktree alone: markdown Create events
+// arrive per file, with no directory event to reject, and `git worktree add`
+// can create the worktree directory before writing its gitfile.
+func isInLinkedWorktree(path string) bool {
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+	if root == "" {
+		return false
+	}
+
+	// The trailing separator keeps a sibling that merely shares a name prefix
+	// (~/projects-old against ~/projects) out of the walk.
+	prefix := root + string(filepath.Separator)
+	for dir := path; strings.HasPrefix(dir, prefix); dir = filepath.Dir(dir) {
+		if isLinkedWorktree(dir) {
+			return true
+		}
 	}
 	return false
 }
@@ -3030,7 +3152,7 @@ func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns [
 		}
 
 		if info.IsDir() {
-			if path != resolved && isExcludedDir(info.Name(), customPatterns) {
+			if path != resolved && isExcludedDir(path, info, customPatterns) {
 				return filepath.SkipDir
 			}
 			if isSymlink && path != resolved {
@@ -3349,6 +3471,78 @@ func generateTreeHTML() string {
 // behind a "+N older" expander so a big workspace doesn't render as a wall.
 const recentTreeDays = 30
 
+// bulkFileThreshold is how many files arriving together stop reading as
+// authorship and start reading as a bulk filesystem write.
+const bulkFileThreshold = 5
+
+// bulkFileWindow bounds a burst: files a checkout, unpack or copy stamped in
+// one operation land within it, while genuine consecutive edits do not.
+const bulkFileWindow = 2 * time.Second
+
+// recentFile is one row of the Recent sidebar. fromEvent records that mod came
+// from the AI event log rather than mtime: a session really touched the file,
+// which exempts it from burst collapsing.
+type recentFile struct {
+	rel       string
+	mod       time.Time
+	fromEvent bool
+}
+
+// bulkWrite returns the rows at the head of rows that one filesystem operation
+// stamped, or nil if the head is not a bulk write. Rows are sorted newest
+// first and each is compared against that same head rather than its neighbour,
+// so a steadily-edited directory cannot chain into one ever-growing burst.
+func bulkWrite(rows []recentFile) []recentFile {
+	n := 0
+	for _, r := range rows {
+		if r.fromEvent || rows[0].mod.Sub(r.mod) > bulkFileWindow {
+			break
+		}
+		n++
+	}
+	if n < bulkFileThreshold {
+		return nil
+	}
+	return rows[:n]
+}
+
+// writeBurstGroup renders a bulk write as a single expandable row. The files
+// stay in the DOM behind the toggle so search and SPA navigation still reach
+// them — only the wall of identical timestamps is folded away.
+func writeBurstGroup(buf *bytes.Buffer, burst []recentFile) {
+	label := fmt.Sprintf("%d %s", len(burst), plural(len(burst), "file"))
+	if dir := commonDirPrefix(burst); dir != "" {
+		label += " in " + dir
+	}
+	buf.WriteString(fmt.Sprintf(
+		`<button class="tree-burst-toggle" aria-expanded="false" onclick="toggleExpander(this)">`+
+			`<span class="tree-burst-caret">▸</span><span class="tree-burst-label">%s</span>`+
+			`<span class="tree-recent-time">%s</span></button><div class="tree-burst-files" style="display:none">`,
+		template.HTMLEscapeString(label), burst[0].mod.Local().Format("15:04")))
+	for _, r := range burst {
+		writeRecentRow(buf, r.rel, r.mod)
+	}
+	buf.WriteString(`</div>`)
+}
+
+// commonDirPrefix returns the deepest directory containing every row, or "" if
+// they share none — it names the bulk write's origin in the collapsed label.
+func commonDirPrefix(rows []recentFile) string {
+	common := rows[0].rel
+	for _, r := range rows[1:] {
+		n := 0
+		for n < len(common) && n < len(r.rel) && common[n] == r.rel[n] {
+			n++
+		}
+		common = common[:n]
+	}
+	// Cutting at the last separator drops any partly-matched final segment.
+	if i := strings.LastIndexByte(common, filepath.Separator); i >= 0 {
+		return filepath.ToSlash(common[:i+1])
+	}
+	return ""
+}
+
 // generateRecentTreeHTML renders the sidebar's Recent mode: whitelisted
 // markdown files as flat rows, newest edit first, grouped under day headers.
 // An AI event's timestamp wins over mtime when one exists — git checkouts
@@ -3369,25 +3563,21 @@ func generateRecentTreeHTML(all bool) string {
 		}
 	}
 
-	type recentFile struct {
-		rel string
-		mod time.Time
-	}
 	rows := make([]recentFile, 0, len(currentMarkdownFiles))
 	for _, path := range currentMarkdownFiles {
 		absPath := path
 		if !filepath.IsAbs(path) {
 			absPath, _ = filepath.Abs(path)
 		}
-		mod, ok := eventTimes[absPath]
-		if !ok {
+		mod, fromEvent := eventTimes[absPath]
+		if !fromEvent {
 			info, err := os.Stat(path)
 			if err != nil {
 				continue
 			}
 			mod = info.ModTime()
 		}
-		rows = append(rows, recentFile{rel: tildeRelPath(absPath, absDir), mod: mod})
+		rows = append(rows, recentFile{rel: tildeRelPath(absPath, absDir), mod: mod, fromEvent: fromEvent})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].mod.After(rows[j].mod) })
 
@@ -3397,7 +3587,8 @@ func generateRecentTreeHTML(all bool) string {
 	// sidebar already is Recent mode (see the DOMContentLoaded init).
 	buf.WriteString(`<div class="tree-recent">`)
 	day, older := "", 0
-	for _, r := range rows {
+	for i := 0; i < len(rows); i++ {
+		r := rows[i]
 		if !all && r.mod.Before(cutoff) {
 			older++
 			continue
@@ -3405,6 +3596,11 @@ func generateRecentTreeHTML(all bool) string {
 		if d := dayLabel(r.mod.Local()); d != day {
 			day = d
 			buf.WriteString(`<div class="tree-day-header sidebar-eyebrow">` + template.HTMLEscapeString(d) + `</div>`)
+		}
+		if burst := bulkWrite(rows[i:]); burst != nil {
+			writeBurstGroup(&buf, burst)
+			i += len(burst) - 1
+			continue
 		}
 		writeRecentRow(&buf, r.rel, r.mod)
 	}

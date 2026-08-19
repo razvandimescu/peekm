@@ -46,7 +46,7 @@
             </div>
             {{else}}
             <div class="timeline-session{{if .IsActive}} timeline-session-active{{end}}">
-                <div class="timeline-session-header" role="button" tabindex="0" aria-expanded="false" onclick="toggleTimelineSession(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleTimelineSession(this)}">
+                <div class="timeline-session-header" role="button" tabindex="0" aria-expanded="false" onclick="toggleExpander(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleExpander(this)}">
                     <svg class="timeline-session-chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>
                     <div class="timeline-session-info">
                         <div class="timeline-session-title">

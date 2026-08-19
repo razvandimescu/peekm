@@ -255,6 +255,24 @@ func TestLineDiffHTMLCap(t *testing.T) {
 	}
 }
 
+func TestCodeFence(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"plain text", "hello", "```"},
+		{"embedded triple fence", "a\n```\nb", "````"},
+		{"embedded quad fence", "x````y", "`````"},
+		{"inline single backticks", "use `go test` here", "```"},
+	}
+	for _, tt := range tests {
+		if got := codeFence(tt.text); got != tt.want {
+			t.Errorf("%s: codeFence() = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestTruncateString(t *testing.T) {
 	tests := []struct {
 		input  string
@@ -276,95 +294,5 @@ func TestTruncateString(t *testing.T) {
 		if got := truncateString(tt.input, tt.maxLen); got != tt.want {
 			t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 		}
-	}
-}
-
-func TestPairToolResults(t *testing.T) {
-	t.Run("pairs matching tool_use and tool_result", func(t *testing.T) {
-		turns := []transcriptTurn{
-			{Role: "assistant", Blocks: []contentBlock{
-				{Type: "tool_use", ToolID: "t1", ToolName: "Bash"},
-			}},
-			{Role: "user", Blocks: []contentBlock{
-				{Type: "tool_result", ToolID: "t1", Text: "output"},
-			}},
-		}
-		result := pairToolResults(turns)
-		if result[0].Blocks[0].Result == nil {
-			t.Error("tool_use should have paired result")
-		}
-		if len(result[1].Blocks) != 0 {
-			t.Errorf("tool_result should be removed from user turn, got %d blocks", len(result[1].Blocks))
-		}
-	})
-
-	t.Run("unmatched tool_result stays", func(t *testing.T) {
-		turns := []transcriptTurn{
-			{Role: "user", Blocks: []contentBlock{
-				{Type: "tool_result", ToolID: "orphan", Text: "no match"},
-			}},
-		}
-		result := pairToolResults(turns)
-		if len(result[0].Blocks) != 1 {
-			t.Error("unmatched tool_result should remain")
-		}
-	})
-
-	t.Run("empty turns", func(t *testing.T) {
-		result := pairToolResults(nil)
-		if len(result) != 0 {
-			t.Errorf("expected empty, got %d turns", len(result))
-		}
-	})
-}
-
-func TestMergeConsecutiveTurns(t *testing.T) {
-	t.Run("merges same role", func(t *testing.T) {
-		turns := []transcriptTurn{
-			{Role: "user", Blocks: []contentBlock{{Type: "text", Text: "a"}}},
-			{Role: "user", Blocks: []contentBlock{{Type: "text", Text: "b"}}},
-			{Role: "assistant", Blocks: []contentBlock{{Type: "text", Text: "c"}}},
-		}
-		result := mergeConsecutiveTurns(turns)
-		if len(result) != 2 {
-			t.Fatalf("expected 2 turns, got %d", len(result))
-		}
-		if len(result[0].Blocks) != 2 {
-			t.Errorf("first turn should have 2 blocks, got %d", len(result[0].Blocks))
-		}
-	})
-
-	t.Run("no merge needed", func(t *testing.T) {
-		turns := []transcriptTurn{
-			{Role: "user", Blocks: []contentBlock{{Type: "text"}}},
-			{Role: "assistant", Blocks: []contentBlock{{Type: "text"}}},
-		}
-		result := mergeConsecutiveTurns(turns)
-		if len(result) != 2 {
-			t.Fatalf("expected 2 turns, got %d", len(result))
-		}
-	})
-
-	t.Run("empty input", func(t *testing.T) {
-		result := mergeConsecutiveTurns(nil)
-		if len(result) != 0 {
-			t.Errorf("expected empty, got %d", len(result))
-		}
-	})
-}
-
-func TestRemoveEmptyTurns(t *testing.T) {
-	turns := []transcriptTurn{
-		{Role: "user", Blocks: []contentBlock{{Type: "text"}}},
-		{Role: "assistant", Blocks: nil},
-		{Role: "user", Blocks: []contentBlock{}},
-		{Role: "assistant", Blocks: []contentBlock{{Type: "text"}}},
-	}
-	result := removeEmptyTurns(turns)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 non-empty turns, got %d", len(result))
-	}
-	if result[0].Role != "user" || result[1].Role != "assistant" {
-		t.Errorf("unexpected roles: %s, %s", result[0].Role, result[1].Role)
 	}
 }
