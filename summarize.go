@@ -796,16 +796,18 @@ func runLLMSummarize(ctx context.Context, prompt string) (string, error) {
 		Model    string              `json:"model"`
 		Stream   bool                `json:"stream"`
 		Messages []map[string]string `json:"messages"`
-		// Suppresses reasoning output on runtimes that honour it (llama.cpp,
-		// vLLM); ignored elsewhere, where stripThinkingBlock is the fallback.
-		ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
+		// Suppresses reasoning: measured 2 completion tokens vs 102 unhinted on
+		// Ollama for a trivial prompt. chat_template_kwargs is silently ignored
+		// there, so prefer the OpenAI-standard field; stripThinkingBlock stays
+		// as the fallback for runtimes that honour neither.
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	}{
 		Model:  envOrDefault("PEEKM_LLM_MODEL", defaultLLMModel),
 		Stream: false,
 		Messages: []map[string]string{
 			{"role": "user", "content": prompt},
 		},
-		ChatTemplateKwargs: map[string]bool{"enable_thinking": false},
+		ReasoningEffort: "none",
 	}
 
 	body, err := json.Marshal(reqBody)
