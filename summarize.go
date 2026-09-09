@@ -27,11 +27,21 @@ const (
 	sessionActiveThreshold = 5 * time.Minute
 	monitorTickInterval    = 30 * time.Second
 	summarizationTimeout   = 5 * time.Minute
-	// Any local runtime serving the OpenAI-compatible chat-completions API
-	// works here: llama.cpp (llama-server), LM Studio, Jan, ramalama, vLLM,
-	// Ollama. Override with PEEKM_LLM_URL / PEEKM_LLM_MODEL.
-	defaultLLMEndpoint = "http://localhost:11434/v1/chat/completions"
-	defaultLLMModel    = "qwen3.6:35b-a3b-q4_K_M"
+	// Defaults target llama-server on its stock port:
+	//
+	//	llama-server -hf unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M --port 8080 -c 32768 --jinja
+	//
+	// Any other runtime serving the OpenAI-compatible chat-completions API
+	// works via PEEKM_LLM_URL / PEEKM_LLM_MODEL: LM Studio, Jan, ramalama,
+	// vLLM, or Ollama at :11434. llama-server ignores the model field (it
+	// serves whatever was loaded); the name is sent for runtimes that route on
+	// it, and for legible request logs.
+	//
+	// 127.0.0.1 rather than localhost: llama-server binds IPv4 only, while
+	// "localhost" resolves to ::1 first on macOS — so a stray IPv6 listener on
+	// :8080 (Docker binds *:8080 by default) silently answers instead.
+	defaultLLMEndpoint = "http://127.0.0.1:8080/v1/chat/completions"
+	defaultLLMModel    = "qwen3.8-27b"
 	// Limit summary input to recent activity so multi-day sessions don't
 	// blur distinct work periods together.
 	summaryWindow = 24 * time.Hour
