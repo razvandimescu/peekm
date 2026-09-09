@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,14 +27,18 @@ const (
 	sessionActiveThreshold = 5 * time.Minute
 	monitorTickInterval    = 30 * time.Second
 	summarizationTimeout   = 5 * time.Minute
-	ollamaModel            = "qwen3.6:35b-a3b-q4_K_M"
+	// Any local runtime serving the OpenAI-compatible chat-completions API
+	// works here: llama.cpp (llama-server), LM Studio, Jan, ramalama, vLLM,
+	// Ollama. Override with PEEKM_LLM_URL / PEEKM_LLM_MODEL.
+	defaultLLMEndpoint = "http://localhost:11434/v1/chat/completions"
+	defaultLLMModel    = "qwen3.6:35b-a3b-q4_K_M"
 	// Limit summary input to recent activity so multi-day sessions don't
 	// blur distinct work periods together.
 	summaryWindow = 24 * time.Hour
 )
 
 // Sentinel errors returned by generateSummary for expected skip paths.
-// Real failures (read errors, ollama errors) are wrapped via fmt.Errorf.
+// Real failures (read errors, LLM errors) are wrapped via fmt.Errorf.
 var (
 	errNoRecentActivity  = errors.New("no recent activity in window")
 	errSummaryUpToDate   = errors.New("summary already covers latest activity")
@@ -83,7 +89,7 @@ type summaryFile struct {
 	Daily    map[string]*dailySummary   `json:"daily"`
 }
 
-type ollamaResult struct {
+type llmResult struct {
 	Summary string
 	Outcome string
 	Domain  string
@@ -281,7 +287,7 @@ func (ss *summaryStore) maybeGenerateDailySummary(sessionTime time.Time) {
 
 	log.Printf("Summary: generating daily digest for %s (%d sessions)", dateKey, len(sessionIDs))
 
-	result, err := runOllamaSummarize(ctx, prompt)
+	result, err := runLLMSummarize(ctx, prompt)
 	if err != nil {
 		log.Printf("Summary: daily digest failed for %s: %v", dateKey, err)
 		return
@@ -431,12 +437,12 @@ func (ss *summaryStore) generateSummary(sessionID, project, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), summarizationTimeout)
 	defer cancel()
 
-	raw, err := runOllamaSummarize(ctx, prompt)
+	raw, err := runLLMSummarize(ctx, prompt)
 	if err != nil {
-		return fmt.Errorf("ollama: %w", err)
+		return fmt.Errorf("summarize: %w", err)
 	}
 
-	parsed := parseOllamaResult(raw)
+	parsed := parseLLMResult(raw)
 	ss.set(sessionID, &sessionSummary{
 		Summary:       parsed.Summary,
 		Project:       project,
@@ -780,19 +786,26 @@ func buildSummaryPrompt(transcript, previousSummary string) string {
 	return fmt.Sprintf(summaryPromptTemplate, contextSection, transcript)
 }
 
-func runOllamaSummarize(ctx context.Context, prompt string) (string, error) {
+func runLLMSummarize(ctx context.Context, prompt string) (string, error) {
+	endpoint, err := llmEndpoint()
+	if err != nil {
+		return "", err
+	}
+
 	reqBody := struct {
 		Model    string              `json:"model"`
 		Stream   bool                `json:"stream"`
-		Think    bool                `json:"think"`
 		Messages []map[string]string `json:"messages"`
+		// Suppresses reasoning output on runtimes that honour it (llama.cpp,
+		// vLLM); ignored elsewhere, where stripThinkingBlock is the fallback.
+		ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs,omitempty"`
 	}{
-		Model:  ollamaModel,
+		Model:  envOrDefault("PEEKM_LLM_MODEL", defaultLLMModel),
 		Stream: false,
-		Think:  false,
 		Messages: []map[string]string{
 			{"role": "user", "content": prompt},
 		},
+		ChatTemplateKwargs: map[string]bool{"enable_thinking": false},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -800,7 +813,7 @@ func runOllamaSummarize(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost:11434/api/chat", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -811,31 +824,69 @@ func runOllamaSummarize(ctx context.Context, prompt string) (string, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("timed out after %v", summarizationTimeout)
 		}
-		return "", fmt.Errorf("ollama API: %w", err)
+		return "", fmt.Errorf("LLM API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama API %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return "", fmt.Errorf("LLM API %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var respData struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
-
-	result := strings.TrimSpace(respData.Message.Content)
-	if result == "" {
-		return "", fmt.Errorf("ollama returned empty response")
+	if len(respData.Choices) == 0 {
+		return "", fmt.Errorf("LLM returned no choices")
 	}
-	// Defensive: strip any residual thinking in case model ignores think:false
+
+	result := strings.TrimSpace(respData.Choices[0].Message.Content)
+	if result == "" {
+		return "", fmt.Errorf("LLM returned empty response")
+	}
+	// Defensive: strip any residual thinking in case the runtime ignores the hint
 	result = stripThinkingBlock(result)
 	return result, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// llmEndpoint resolves the chat-completions URL, refusing non-loopback hosts
+// unless explicitly allowed: transcripts carry source code and must not leave
+// the machine through a stray config value.
+func llmEndpoint() (string, error) {
+	raw := envOrDefault("PEEKM_LLM_URL", defaultLLMEndpoint)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid PEEKM_LLM_URL %q: %w", raw, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("invalid PEEKM_LLM_URL %q: need scheme and host", raw)
+	}
+	if os.Getenv("PEEKM_LLM_ALLOW_REMOTE") == "1" || isLoopbackHost(u.Hostname()) {
+		return raw, nil
+	}
+	return "", fmt.Errorf("refusing to send transcripts to non-local host %q; set PEEKM_LLM_ALLOW_REMOTE=1 to override", u.Host)
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // stripThinkingBlock removes Qwen's thinking output that leaks despite /no_think.
@@ -862,8 +913,8 @@ func stripThinkingBlock(s string) string {
 	return s
 }
 
-func parseOllamaResult(raw string) ollamaResult {
-	result := ollamaResult{Outcome: "partial"} // default
+func parseLLMResult(raw string) llmResult {
+	result := llmResult{Outcome: "partial"} // default
 	lines := strings.Split(raw, "\n")
 
 	var summaryLines []string
