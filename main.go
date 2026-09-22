@@ -1672,17 +1672,8 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				log.Println("File modified, sending reload notification...")
 
-				// Send file_modified event with path so client can auto-refresh if viewing this file
-				msgBytes, err := json.Marshal(map[string]string{
-					"type": "file_modified",
-					"path": filePath,
-				})
-				if err != nil {
-					log.Printf("Error marshaling file modified message: %v", err)
-					notifyClients() // Fallback to plain reload
-				} else {
-					notifyClientsWithMessage(string(msgBytes))
-				}
+				// Path must be browseDir-relative: clients build /view/ links from it
+				sendFileEvent(fileEventMessage{Type: "file_modified", Path: getRelativePath(filePath)})
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
