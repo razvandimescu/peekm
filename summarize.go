@@ -152,16 +152,17 @@ func (ss *summaryStore) load() {
 }
 
 // cleanContaminatedSummaries strips thinking blocks from stored summaries
-// and removes daily entries generated from contaminated input.
+// and removes session and daily entries generated from contaminated input.
 // Must be called before startMonitor (no concurrent access).
 func (ss *summaryStore) cleanContaminatedSummaries() {
 	dirty := false
 	for sid, s := range ss.summaries {
 		cleaned := stripThinkingBlock(s.Summary)
 		if isContaminated(cleaned) {
-			// Can't recover — mark for re-summarization by clearing
-			log.Printf("Summary: clearing contaminated session %s", truncateSessionID(sid))
-			s.Summary = ""
+			// Delete rather than blank: a blank entry stays contaminated and
+			// its GeneratedAt would make generateSummary skip the session.
+			log.Printf("Summary: removed contaminated session %s", truncateSessionID(sid))
+			delete(ss.summaries, sid)
 			dirty = true
 		} else if cleaned != s.Summary {
 			log.Printf("Summary: cleaned thinking block from session %s", truncateSessionID(sid))

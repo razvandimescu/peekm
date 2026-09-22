@@ -162,3 +162,39 @@ func TestLiveSummarize(t *testing.T) {
 		t.Error("thinking markers leaked into summary")
 	}
 }
+
+func TestCleanContaminatedSummaries_SettlesAfterOneRun(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "summaries.json")
+	ss := &summaryStore{
+		summaries: map[string]*sessionSummary{
+			"empty":    {Project: "peekm"},
+			"thinking": {Summary: "Thinking about it", GeneratedAt: time.Now()},
+			"wrapped":  {Summary: "<think>hmm</think>Fixed the watcher.", GeneratedAt: time.Now()},
+			"ok":       {Summary: "Added tests.", GeneratedAt: time.Now()},
+		},
+		daily:    make(map[string]*dailySummary),
+		filePath: fp,
+	}
+
+	ss.cleanContaminatedSummaries()
+
+	if got := len(ss.summaries); got != 2 {
+		t.Fatalf("kept %d summaries, want 2 (wrapped, ok)", got)
+	}
+	if got := ss.summaries["wrapped"].Summary; got != "Fixed the watcher." {
+		t.Errorf("wrapped summary = %q, want thinking block stripped", got)
+	}
+
+	before, err := os.Stat(fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss.cleanContaminatedSummaries()
+	after, err := os.Stat(fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("second run rewrote the file; cleanup did not settle")
+	}
+}
