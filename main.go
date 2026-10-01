@@ -135,6 +135,9 @@ var (
 
 	// LAN share store (in-memory, dies on restart)
 	globalShareStore *shareStore
+
+	// AI-generated session summaries (background Ollama summarization)
+	globalSummaryStore *summaryStore
 )
 
 // watcherManager manages file watching with proper cleanup
@@ -142,6 +145,7 @@ type watcherManager struct {
 	mu      sync.Mutex
 	current *fsnotify.Watcher
 	cancel  context.CancelFunc
+	root    string // dirWatcher only: added dirs must lie under it
 }
 
 // baseTemplateData contains common fields for all templates
@@ -528,119 +532,70 @@ func (m *watcherManager) watch(filePath string) error {
 	return nil
 }
 
+// watchDirectory watches rootDir plus only the directories holding whitelisted
+// markdown and their ancestors. kqueue (macOS) opens a descriptor for every
+// entry of a watched directory, so watching the whole tree costs one per file.
 func (m *watcherManager) watchDirectory(rootDir string) error {
-	m.mu.Lock()
+	var dirs []string
+	fileMutex.RLock()
+	for _, f := range markdownFiles {
+		if strings.HasSuffix(strings.ToLower(f), ".md") {
+			dirs = append(dirs, filepath.Dir(f))
+		}
+	}
+	fileMutex.RUnlock()
 
-	// Stop existing watcher (under lock)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.cancel != nil {
 		m.cancel()
 	}
 	if m.current != nil {
 		m.current.Close()
 	}
-
-	// Start new watcher
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
+	m.current, m.cancel = nil, nil
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		m.mu.Unlock()
 		return err
 	}
-	m.current = watcher
-
-	// Add root directory
 	if err := watcher.Add(rootDir); err != nil {
 		if closeErr := watcher.Close(); closeErr != nil {
 			log.Printf("Failed to close watcher after add error: %v", closeErr)
 		}
-		cancel()
-		m.current = nil
-		m.cancel = nil
-		m.mu.Unlock()
 		return err
 	}
 
-	// Unlock before slow directory walk
-	m.mu.Unlock()
-
-	// Collect directories to watch (without lock to avoid blocking on large trees)
-	dirsToWatch, err := m.collectDirectories(rootDir)
-	if err != nil {
-		m.mu.Lock()
-		// Clean up if we still own this watcher
-		if m.current == watcher {
-			if closeErr := watcher.Close(); closeErr != nil {
-				log.Printf("Failed to close watcher after directory walk error: %v", closeErr)
-			}
-			cancel()
-			m.current = nil
-			m.cancel = nil
-		}
-		m.mu.Unlock()
-		return fmt.Errorf("directory walk failed: %w", err)
-	}
-
-	// Re-acquire lock to finish setup
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check if watcher was replaced during walk
-	if m.current != watcher {
-		// Another call won the race, abandon this setup
-		if closeErr := watcher.Close(); closeErr != nil {
-			log.Printf("Failed to close abandoned watcher: %v", closeErr)
-		}
-		cancel()
-		return fmt.Errorf("watcher setup cancelled (replaced during walk)")
-	}
-
-	// Add directories (holding lock)
-	for _, dir := range dirsToWatch {
-		if err := watcher.Add(dir); err != nil {
-			log.Printf("Warning: Cannot watch directory %s: %v", dir, err)
-		}
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.current, m.cancel, m.root = watcher, cancel, rootDir
+	m.addDirsLocked(dirs)
 
 	go watchDirectoryWithContext(ctx, watcher)
 	return nil
 }
 
-// collectDirectories walks the directory tree and returns paths to watch
-func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
-	var dirsToWatch []string
-	homeDir, _ := os.UserHomeDir()
-
-	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Security: Skip symlinks outside $HOME
-		resolvedInfo, _, resolveErr := validateSymlinkSecurity(path, info, homeDir)
-		if resolveErr != nil {
-			return nil
-		}
-		if resolvedInfo != nil {
-			info = resolvedInfo
-		}
-
-		if info.IsDir() && path != rootDir {
-			if isExcludedDir(path, info) {
-				return filepath.SkipDir
-			}
-			dirsToWatch = append(dirsToWatch, path)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
+// addDirs watches each dir and its ancestors below the root. Re-adding an
+// already watched path opens no new descriptor, so callers need not deduplicate.
+func (m *watcherManager) addDirs(dirs ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current != nil {
+		m.addDirsLocked(dirs)
 	}
+}
 
-	return dirsToWatch, nil
+func (m *watcherManager) addDirsLocked(dirs []string) {
+	prefix := m.root + string(filepath.Separator)
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		for ; strings.HasPrefix(dir, prefix) && !seen[dir]; dir = filepath.Dir(dir) {
+			seen[dir] = true
+			if err := m.current.Add(dir); err != nil {
+				log.Printf("Warning: Cannot watch directory %s: %v", dir, err)
+			}
+		}
+	}
 }
 
 func (m *watcherManager) close() {
@@ -1225,7 +1180,7 @@ func resolveTarget() string {
 
 func buildStartupURL(baseURL, targetPath string) string {
 	if targetPath == "" {
-		fmt.Printf("peekm file browser at %s\n", baseURL)
+		fmt.Printf("peekm %s (%s) at %s\n", version, commit, baseURL)
 		fmt.Printf("Browsing %s - found %d markdown file(s)\n", browseDir, len(markdownFiles))
 		return baseURL
 	}
@@ -1236,7 +1191,7 @@ func buildStartupURL(baseURL, targetPath string) string {
 		}
 	}
 	displayName := filepath.Base(targetPath)
-	fmt.Printf("peekm at %s\n", baseURL)
+	fmt.Printf("peekm %s (%s) at %s\n", version, commit, baseURL)
 	fmt.Printf("Opening %s - found %d markdown file(s)\n", displayName, len(markdownFiles))
 	return fullURL
 }
@@ -1526,6 +1481,9 @@ func main() {
 		case "setup":
 			runSetup(os.Args[2:])
 			return
+		case "summarize":
+			runSummarize(os.Args[2:])
+			return
 		}
 	}
 
@@ -1548,6 +1506,10 @@ func main() {
 		autoSetupClaudeHooks()
 		autoSetupPiHooks()
 		initSessionTracking()
+		if _, err := exec.LookPath("ollama"); err == nil {
+			globalSummaryStore = newSummaryStore(globalHeartbeats)
+			globalSummaryStore.startMonitor()
+		}
 	}
 
 	globalShareStore = newShareStore()
@@ -1662,17 +1624,8 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				log.Println("File modified, sending reload notification...")
 
-				// Send file_modified event with path so client can auto-refresh if viewing this file
-				msgBytes, err := json.Marshal(map[string]string{
-					"type": "file_modified",
-					"path": filePath,
-				})
-				if err != nil {
-					log.Printf("Error marshaling file modified message: %v", err)
-					notifyClients() // Fallback to plain reload
-				} else {
-					notifyClientsWithMessage(string(msgBytes))
-				}
+				// Path must be browseDir-relative: clients build /view/ links from it
+				sendFileEvent(fileEventMessage{Type: "file_modified", Path: getRelativePath(filePath)})
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -1683,7 +1636,10 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 	}
 }
 
-func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
+// handleDirCreated watches a new directory, since markdown may be written into
+// it next, and whitelists markdown already inside, watching only the
+// subdirectories that hold some.
+func handleDirCreated(dirPath string) {
 	homeDir, _ := os.UserHomeDir()
 	if homeDir == "" {
 		return
@@ -1694,9 +1650,35 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 	if isInLinkedWorktree(dirPath) {
 		return
 	}
+	if info, err := os.Lstat(dirPath); err == nil && isExcludedDir(dirPath, info) {
+		return
+	}
+	// Watch before walking so markdown created during the walk still raises an event
+	dirWatcher.addDirs(dirPath)
 
-	var newFiles []string
+	// Re-check each file: `git worktree add` can write the gitfile after the
+	// directory Create event, so the guard above may have run too early.
+	var fresh []string
+	for _, f := range collectMarkdownUnder(dirPath, homeDir) {
+		if !isInLinkedWorktree(f) {
+			fresh = append(fresh, f)
+		}
+	}
 
+	// Watch only the subdirectories that hold markdown, not the whole subtree.
+	dirs := make([]string, len(fresh))
+	for i, f := range fresh {
+		dirs[i] = filepath.Dir(f)
+	}
+	dirWatcher.addDirs(dirs...)
+
+	announceNewFiles(dirPath, fresh)
+}
+
+// collectMarkdownUnder returns the markdown under dirPath, skipping excluded
+// directories and symlinks that leave $HOME.
+func collectMarkdownUnder(dirPath, homeDir string) []string {
+	var found []string
 	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -1712,26 +1694,14 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 			if path != dirPath && isExcludedDir(path, info) {
 				return filepath.SkipDir
 			}
-			if err := watcher.Add(path); err != nil {
-				log.Printf("Warning: Cannot watch new directory %s: %v", path, err)
-			}
 			return nil
 		}
 		if strings.HasSuffix(strings.ToLower(path), ".md") {
-			newFiles = append(newFiles, path)
+			found = append(found, path)
 		}
 		return nil
 	})
-
-	// Re-check after the walk: `git worktree add` can write the gitfile after
-	// the directory Create event, so the up-front guard may have run too early.
-	fresh := newFiles[:0]
-	for _, f := range newFiles {
-		if !isInLinkedWorktree(f) {
-			fresh = append(fresh, f)
-		}
-	}
-	announceNewFiles(dirPath, fresh)
+	return found
 }
 
 // announceNewFiles whitelists files a new directory brought in and tells the
@@ -1780,6 +1750,40 @@ func handleMarkdownCreated(filePath string) {
 	}()
 }
 
+// adoptHookMarkdown whitelists markdown an AI wrote into a directory holding no
+// other markdown. Such directories are not watched, so fsnotify stays silent.
+func adoptHookMarkdown(path string) {
+	if !strings.HasSuffix(strings.ToLower(path), ".md") || isWhitelistedFile(path) {
+		return
+	}
+	fileMutex.RLock()
+	root := browseDir
+	fileMutex.RUnlock()
+
+	dir := filepath.Dir(path)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+	cur := root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		if seg == "." {
+			continue
+		}
+		cur = filepath.Join(cur, seg)
+		info, err := os.Lstat(cur)
+		if err != nil || isExcludedDir(cur, info) {
+			return
+		}
+	}
+	if _, err := validateAndResolvePath(path); err != nil {
+		return
+	}
+
+	dirWatcher.addDirs(dir)
+	handleMarkdownCreated(path)
+}
+
 // awaitSessionID polls the session store for up to 5s, returning the session ID if found.
 func awaitSessionID(filePath string) string {
 	if globalSessionStore == nil {
@@ -1825,7 +1829,7 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					go handleDirCreated(watcher, event.Name)
+					go handleDirCreated(event.Name)
 				}
 				if strings.HasSuffix(strings.ToLower(event.Name), ".md") {
 					handleMarkdownCreated(event.Name)
@@ -2259,6 +2263,7 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 
 	// Register session mapping for file (after path rewrite so plan files use local path)
 	globalSessionStore.register(req.FilePath, metadata)
+	adoptHookMarkdown(req.FilePath)
 
 	// Persist to event log
 	if globalEventLog != nil {

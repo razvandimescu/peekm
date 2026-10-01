@@ -166,10 +166,6 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func notifyClients() {
-	notifyClientsWithMessage("reload")
-}
-
 func notifyClientsWithMessage(message string) {
 	// Assign event ID and add to buffer for replay
 	id := globalEventBuffer.add(message)
