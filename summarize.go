@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -20,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/razvandimescu/peekm/transcript"
 	"unicode/utf8"
 )
 
@@ -390,7 +391,7 @@ func (ss *summaryStore) summarizeSession(sessionID string) {
 	if !sessionInScopeWith(cwd) {
 		return
 	}
-	path := resolveTranscriptPath(sessionID)
+	path, _ := resolveTranscriptPath(sessionID)
 	if path == "" {
 		return
 	}
@@ -430,11 +431,11 @@ func (ss *summaryStore) generateSummary(sessionID, project, path string) error {
 		}
 	}
 
-	lines, _, err := readTranscriptLines(path, 0)
+	session, err := transcript.ParseFile(path)
 	if err != nil {
 		return fmt.Errorf("read transcript: %w", err)
 	}
-	windowed := filterByTimeWindow(lines, time.Now(), summaryWindow)
+	windowed := turnsInWindow(session.Turns, time.Now(), summaryWindow)
 	if len(windowed) == 0 {
 		return errNoRecentActivity
 	}
@@ -462,62 +463,27 @@ func (ss *summaryStore) generateSummary(sessionID, project, path string) error {
 		FilesModified: meta.FilesModified,
 		FilesExplored: meta.FilesExplored,
 		ToolsUsed:     meta.ToolsUsed,
-		StartedAt:     extractSessionStartTime(lines),
+		StartedAt:     sessionStartTime(session.Turns),
 		GeneratedAt:   time.Now(),
 	})
 	return nil
 }
 
-func filterByTimeWindow(lines [][]byte, now time.Time, window time.Duration) [][]byte {
+func turnsInWindow(turns []transcript.Turn, now time.Time, window time.Duration) []transcript.Turn {
 	cutoff := now.Add(-window)
-	var filtered [][]byte
-	for _, line := range lines {
-		var env transcriptLineEnvelope
-		if json.Unmarshal(line, &env) != nil || env.Timestamp == "" {
-			continue
-		}
-		ts, ok := parseTimestamp(env.Timestamp)
-		if !ok {
-			continue
-		}
-		if ts.After(cutoff) {
-			filtered = append(filtered, line)
+	var filtered []transcript.Turn
+	for _, t := range turns {
+		if t.Timestamp.After(cutoff) {
+			filtered = append(filtered, t)
 		}
 	}
 	return filtered
 }
 
-func readTranscriptLines(path string, offset int) ([][]byte, int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
-
-	var lines [][]byte
-	lineNum := 0
-	for scanner.Scan() {
-		if lineNum >= offset {
-			line := make([]byte, len(scanner.Bytes()))
-			copy(line, scanner.Bytes())
-			lines = append(lines, line)
-		}
-		lineNum++
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, 0, err
-	}
-	return lines, lineNum, nil
-}
-
-func extractSessionStartTime(jsonlLines [][]byte) string {
-	for _, line := range jsonlLines {
-		var env transcriptLineEnvelope
-		if json.Unmarshal(line, &env) == nil && env.Timestamp != "" {
-			return env.Timestamp
+func sessionStartTime(turns []transcript.Turn) string {
+	for _, t := range turns {
+		if !t.Timestamp.IsZero() {
+			return t.Timestamp.Format(time.RFC3339)
 		}
 	}
 	return ""
@@ -525,11 +491,11 @@ func extractSessionStartTime(jsonlLines [][]byte) string {
 
 // formatTranscriptForSummary preprocesses JSONL into a compact session outline
 // and returns structured metadata (files, tools) alongside the formatted text.
-func formatTranscriptForSummary(jsonlLines [][]byte) summaryMetadata {
+func formatTranscriptForSummary(sessionTurns []transcript.Turn) summaryMetadata {
 	filesModified := make(map[string]bool)
 	filesRead := make(map[string]bool)
 	toolsUsed := make(map[string]bool)
-	turns, convLines := extractSummaryTurns(jsonlLines, filesModified, filesRead, toolsUsed)
+	turns, convLines := extractSummaryTurns(sessionTurns, filesModified, filesRead, toolsUsed)
 
 	modified := sortedKeys(filesModified)
 	toolNames := sortedKeys(toolsUsed)
@@ -584,44 +550,44 @@ func sortedKeys(m map[string]bool) []string {
 	return keys
 }
 
-func extractSummaryTurns(jsonlLines [][]byte, filesModified, filesRead, toolsUsed map[string]bool) ([]string, int) {
+func extractSummaryTurns(sessionTurns []transcript.Turn, filesModified, filesRead, toolsUsed map[string]bool) ([]string, int) {
 	var turns []string
-	convLines := 0
+	convTurns := 0
 
-	for _, line := range jsonlLines {
-		var env transcriptLineEnvelope
-		if json.Unmarshal(line, &env) != nil {
+	for _, turn := range sessionTurns {
+		if len(turn.Blocks) == 0 {
 			continue
 		}
-		if env.IsMeta || (env.Type != "user" && env.Type != "assistant") {
-			continue
-		}
-		if len(env.Message) == 0 {
-			continue
-		}
-		var msg transcriptMsg
-		if json.Unmarshal(env.Message, &msg) != nil {
-			continue
-		}
-		convLines++
+		convTurns++
 
-		switch msg.Role {
+		switch turn.Role {
 		case "user":
-			text := extractUserText(msg.Content)
+			text := userTextFromBlocks(turn.Blocks)
 			if text != "" && !isSystemNoise(text) {
 				turns = append(turns, "User: "+truncateString(text, 500))
 			}
 		case "assistant":
-			if t := formatAssistantTurn(msg.Content, filesModified, filesRead, toolsUsed); t != "" {
+			if t := formatAssistantTurn(turn.Blocks, filesModified, filesRead, toolsUsed); t != "" {
 				turns = append(turns, t)
 			}
 		}
 	}
-	return turns, convLines
+	return turns, convTurns
 }
 
-func formatAssistantTurn(content json.RawMessage, filesModified, filesRead, toolsUsed map[string]bool) string {
-	toolLine, conclusion := summarizeAssistantTurn(content, filesModified, filesRead, toolsUsed)
+// userTextFromBlocks joins a user turn's text blocks, skipping tool results.
+func userTextFromBlocks(blocks []transcript.Block) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Kind == transcript.KindText && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func formatAssistantTurn(blocks []transcript.Block, filesModified, filesRead, toolsUsed map[string]bool) string {
+	toolLine, conclusion := summarizeAssistantTurn(blocks, filesModified, filesRead, toolsUsed)
 	if toolLine == "" && conclusion == "" {
 		return ""
 	}
@@ -636,36 +602,30 @@ func formatAssistantTurn(content json.RawMessage, filesModified, filesRead, tool
 
 // summarizeAssistantTurn collapses an assistant turn into a tool summary line
 // and the conclusion text. Populates filesModified/filesRead/toolsUsed sets.
-func summarizeAssistantTurn(content json.RawMessage, filesModified, filesRead, toolsUsed map[string]bool) (toolLine, conclusion string) {
-	var rawBlocks []json.RawMessage
-	if json.Unmarshal(content, &rawBlocks) != nil {
-		return "", ""
-	}
-
+func summarizeAssistantTurn(blocks []transcript.Block, filesModified, filesRead, toolsUsed map[string]bool) (toolLine, conclusion string) {
 	var tools []toolCall
 	var lastText string
 	lastTextAfterTool := false
 
-	for _, rb := range rawBlocks {
-		var block rawContentBlock
-		if json.Unmarshal(rb, &block) != nil {
-			continue
-		}
-		switch block.Type {
-		case "text":
+	for _, block := range blocks {
+		switch block.Kind {
+		case transcript.KindText:
 			if block.Text != "" {
 				lastText = block.Text
 				lastTextAfterTool = len(tools) > 0
 			}
-		case "tool_use":
-			m := parseToolInput(block.Input)
-			detail := toolSummaryFromMap(block.Name, m)
-			tools = append(tools, toolCall{name: block.Name, detail: detail})
-			toolsUsed[block.Name] = true
+		case transcript.KindToolCall:
+			if block.Tool == nil {
+				continue
+			}
+			m := block.Tool.Input
+			detail := toolSummaryFromMap(block.Tool.Name, m)
+			tools = append(tools, toolCall{name: block.Tool.Name, detail: detail})
+			toolsUsed[block.Tool.Name] = true
 			fp := toolInputStr(m, "file_path")
 			if fp != "" {
 				short := filepath.Base(fp)
-				switch block.Name {
+				switch block.Tool.Name {
 				case "Edit", "Write", "NotebookEdit":
 					filesModified[short] = true
 				case "Read":
@@ -978,7 +938,7 @@ func runSummarize(args []string) {
 	for _, sid := range args {
 		fmt.Fprintf(os.Stderr, "=== Session %s ===\n", truncateSessionID(sid))
 
-		path := resolveTranscriptPath(sid)
+		path, _ := resolveTranscriptPath(sid)
 		if path == "" {
 			fmt.Fprintln(os.Stderr, "No transcript found")
 			continue
