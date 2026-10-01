@@ -1650,14 +1650,35 @@ func handleDirCreated(dirPath string) {
 	if isInLinkedWorktree(dirPath) {
 		return
 	}
-
 	if info, err := os.Lstat(dirPath); err == nil && isExcludedDir(dirPath, info) {
 		return
 	}
 	// Watch before walking so markdown created during the walk still raises an event
 	dirWatcher.addDirs(dirPath)
-	var newFiles []string
 
+	// Re-check each file: `git worktree add` can write the gitfile after the
+	// directory Create event, so the guard above may have run too early.
+	var fresh []string
+	for _, f := range collectMarkdownUnder(dirPath, homeDir) {
+		if !isInLinkedWorktree(f) {
+			fresh = append(fresh, f)
+		}
+	}
+
+	// Watch only the subdirectories that hold markdown, not the whole subtree.
+	dirs := make([]string, len(fresh))
+	for i, f := range fresh {
+		dirs[i] = filepath.Dir(f)
+	}
+	dirWatcher.addDirs(dirs...)
+
+	announceNewFiles(dirPath, fresh)
+}
+
+// collectMarkdownUnder returns the markdown under dirPath, skipping excluded
+// directories and symlinks that leave $HOME.
+func collectMarkdownUnder(dirPath, homeDir string) []string {
+	var found []string
 	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -1676,28 +1697,11 @@ func handleDirCreated(dirPath string) {
 			return nil
 		}
 		if strings.HasSuffix(strings.ToLower(path), ".md") {
-			newFiles = append(newFiles, path)
+			found = append(found, path)
 		}
 		return nil
 	})
-
-	// Re-check after the walk: `git worktree add` can write the gitfile after
-	// the directory Create event, so the up-front guard may have run too early.
-	fresh := newFiles[:0]
-	for _, f := range newFiles {
-		if !isInLinkedWorktree(f) {
-			fresh = append(fresh, f)
-		}
-	}
-
-	// Watch only the subdirectories that hold markdown, not the whole subtree.
-	dirs := make([]string, len(fresh))
-	for i, f := range fresh {
-		dirs[i] = filepath.Dir(f)
-	}
-	dirWatcher.addDirs(dirs...)
-
-	announceNewFiles(dirPath, fresh)
+	return found
 }
 
 // announceNewFiles whitelists files a new directory brought in and tells the
