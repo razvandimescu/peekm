@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -99,12 +100,8 @@ var (
 	fileWatcher   watcherManager
 	dirWatcher    watcherManager
 
-	// Ignore pattern cache (reduces file I/O on navigation)
-	globalIgnoreCache struct {
-		rootDir  string
-		patterns []string
-		mu       sync.RWMutex
-	}
+	// .peekmignore patterns, memoized per directory
+	globalIgnoreCache = &ignoreCache{patterns: make(map[string][]string)}
 
 	// Templates, CSS, and JavaScript (loaded once at startup)
 	githubCSS              string
@@ -615,8 +612,6 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 	var dirsToWatch []string
 	homeDir, _ := os.UserHomeDir()
 
-	customPatterns := getIgnorePatterns(rootDir)
-
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -632,7 +627,7 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 		}
 
 		if info.IsDir() && path != rootDir {
-			if isExcludedDir(path, info, customPatterns) {
+			if isExcludedDir(path, info) {
 				return filepath.SkipDir
 			}
 			dirsToWatch = append(dirsToWatch, path)
@@ -1186,13 +1181,13 @@ func runShowIgnored() {
 		checkDir = filepath.Dir(checkDir)
 	}
 
-	if patterns := getIgnorePatterns(checkDir); len(patterns) > 0 {
-		fmt.Printf("\nCustom exclusions (.peekmignore in %s):\n", checkDir)
+	if patterns := globalIgnoreCache.patternsFor(checkDir); len(patterns) > 0 {
+		fmt.Printf("\nCustom exclusions in effect for %s (.peekmignore files from $HOME down):\n", checkDir)
 		for _, p := range patterns {
 			fmt.Printf("  %s\n", p)
 		}
 	} else {
-		fmt.Printf("\nNo .peekmignore file found in %s\n", checkDir)
+		fmt.Printf("\nNo .peekmignore file applies to %s\n", checkDir)
 	}
 }
 
@@ -1700,10 +1695,6 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 		return
 	}
 
-	fileMutex.RLock()
-	root := browseDir
-	fileMutex.RUnlock()
-	customPatterns := getIgnorePatterns(root)
 	var newFiles []string
 
 	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
@@ -1718,7 +1709,7 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 			info = resolvedInfo
 		}
 		if info.IsDir() {
-			if path != dirPath && isExcludedDir(path, info, customPatterns) {
+			if path != dirPath && isExcludedDir(path, info) {
 				return filepath.SkipDir
 			}
 			if err := watcher.Add(path); err != nil {
@@ -2818,17 +2809,13 @@ func servePreviewContent(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, validated)
 }
 
-// parseIgnoreFile reads and parses .peekmignore file
-func parseIgnoreFile(rootDir string) []string {
-	ignoreFilePath := filepath.Join(rootDir, ".peekmignore")
-
-	// CRITICAL: Validate path through existing security chain
-	validatedPath, err := validateAndResolvePath(ignoreFilePath)
-	if err != nil {
-		return nil // Outside $HOME or path validation failed
-	}
-
-	file, err := os.Open(validatedPath)
+// parseIgnoreFile reads and parses the .peekmignore in dir. The $HOME boundary is
+// enforced by the caller — accumulate stops recursing outside it, and dir otherwise
+// arrives from a walk already rooted inside it. Validating here instead would run
+// EvalSymlinks once per directory, which Lstats every path component: ~9 syscalls
+// to look for a file almost no directory has.
+func parseIgnoreFile(dir string) []string {
+	file, err := os.Open(filepath.Join(dir, ".peekmignore"))
 	if err != nil {
 		return nil // File doesn't exist or can't be read - silent fallback
 	}
@@ -2891,28 +2878,55 @@ func parseIgnoreFile(rootDir string) []string {
 	return customPatterns
 }
 
-// getIgnorePatterns returns custom ignore patterns with caching
-// Reduces file I/O by caching patterns per rootDir
-func getIgnorePatterns(rootDir string) []string {
-	// Check cache (read lock)
-	globalIgnoreCache.mu.RLock()
-	if globalIgnoreCache.rootDir == rootDir {
-		patterns := globalIgnoreCache.patterns
-		globalIgnoreCache.mu.RUnlock()
-		return patterns // Cache hit
+// ignoreCache resolves the .peekmignore patterns governing a directory. Files compose
+// the way git's .gitignore files do: one governs its own directory and everything
+// below it, additively with the ones above, up to $HOME. A file's location is
+// therefore what scopes its patterns, which is why they stay basename-only and
+// separators are rejected — ~/projects/.peekmignore reaches every repo, while
+// ~/projects/dns_fun/.peekmignore reaches only dns_fun.
+type ignoreCache struct {
+	mu       sync.Mutex
+	patterns map[string][]string
+}
+
+// reset drops memoized patterns so a rescan picks up edited .peekmignore files.
+func (c *ignoreCache) reset() {
+	c.mu.Lock()
+	c.patterns = make(map[string][]string)
+	c.mu.Unlock()
+}
+
+// patternsFor returns the patterns governing the entries of dir.
+func (c *ignoreCache) patternsFor(dir string) []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
 	}
-	globalIgnoreCache.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.accumulate(dir, homeDir)
+}
 
-	// Cache miss - parse file
-	patterns := parseIgnoreFile(rootDir)
-
-	// Update cache (write lock)
-	globalIgnoreCache.mu.Lock()
-	globalIgnoreCache.rootDir = rootDir
-	globalIgnoreCache.patterns = patterns
-	globalIgnoreCache.mu.Unlock()
-
-	return patterns
+// accumulate memoizes dir's inherited patterns plus its own. Callers hold c.mu.
+func (c *ignoreCache) accumulate(dir, homeDir string) []string {
+	if cached, ok := c.patterns[dir]; ok {
+		return cached
+	}
+	var combined []string
+	if dir != homeDir {
+		// Also terminates the recursion: filepath.Dir("/") is "/".
+		if !strings.HasPrefix(dir, homeDir+string(filepath.Separator)) {
+			return nil
+		}
+		combined = c.accumulate(filepath.Dir(dir), homeDir)
+	}
+	// Sharing the parent's slice when this directory adds nothing avoids a copy per
+	// directory in the tree; slices.Concat allocates a fresh one when it does.
+	if own := parseIgnoreFile(dir); len(own) > 0 {
+		combined = slices.Concat(combined, own)
+	}
+	c.patterns[dir] = combined
+	return combined
 }
 
 // matchesIgnorePattern checks if directory name matches any pattern
@@ -3001,16 +3015,16 @@ func isCollectableFile(name string) bool {
 }
 
 func collectMarkdownFiles(rootDir string) []string {
-	customPatterns := getIgnorePatterns(rootDir)
-	if len(customPatterns) > 0 {
-		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(customPatterns))
+	globalIgnoreCache.reset()
+	if patterns := globalIgnoreCache.patternsFor(rootDir); len(patterns) > 0 {
+		log.Printf("[peekm] Using .peekmignore (%d custom exclusions)", len(patterns))
 	}
 
 	homeDir, _ := os.UserHomeDir()
 
 	visited := make(map[string]bool)
 	var files []string
-	collectMarkdownFilesWalk(rootDir, rootDir, homeDir, customPatterns, visited, &files)
+	collectMarkdownFilesWalk(rootDir, homeDir, visited, &files)
 
 	sort.Strings(files)
 	return files
@@ -3049,7 +3063,7 @@ func collectTopLevelFiles(dir string) []string {
 // tests read from info, which for a symlink describes its target, while the
 // worktree test needs the path as walked. Ordered cheapest first: the name
 // tests decide most directories without touching the filesystem.
-func isExcludedDir(path string, info os.FileInfo, customPatterns []string) bool {
+func isExcludedDir(path string, info os.FileInfo) bool {
 	name := info.Name()
 	if strings.HasPrefix(name, ".") && name != ".claude" {
 		return true
@@ -3057,7 +3071,7 @@ func isExcludedDir(path string, info os.FileInfo, customPatterns []string) bool 
 	if isHardcodedExclusion(name) {
 		return true
 	}
-	if len(customPatterns) > 0 && matchesIgnorePattern(name, customPatterns) {
+	if matchesIgnorePattern(name, globalIgnoreCache.patternsFor(filepath.Dir(path))) {
 		return true
 	}
 	return isLinkedWorktree(path)
@@ -3119,7 +3133,7 @@ func remapPath(resolved, walkDir, path string) string {
 	return filepath.Join(walkDir, relPath)
 }
 
-func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns []string, visited map[string]bool, files *[]string) {
+func collectMarkdownFilesWalk(walkDir, homeDir string, visited map[string]bool, files *[]string) {
 	// Resolve symlinks to get the real path for walking and cycle detection
 	resolved, err := filepath.EvalSymlinks(walkDir)
 	if err != nil {
@@ -3152,11 +3166,11 @@ func collectMarkdownFilesWalk(walkDir, rootDir, homeDir string, customPatterns [
 		}
 
 		if info.IsDir() {
-			if path != resolved && isExcludedDir(path, info, customPatterns) {
+			if path != resolved && isExcludedDir(path, info) {
 				return filepath.SkipDir
 			}
 			if isSymlink && path != resolved {
-				collectMarkdownFilesWalk(remapPath(resolved, walkDir, path), rootDir, homeDir, customPatterns, visited, files)
+				collectMarkdownFilesWalk(remapPath(resolved, walkDir, path), homeDir, visited, files)
 				return nil
 			}
 		}
