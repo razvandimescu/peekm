@@ -32,15 +32,38 @@
         h1 {
             font-size: 2em;
             margin-bottom: 0.5em;
-            color: var(--fgColor-accent);
+            color: var(--fgColor-default);
             border-bottom: 2px solid var(--borderColor-muted);
             padding-bottom: 0.3em;
         }
 
+        /* Calm content surface: dark headings, no accent bleed */
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4,
+        .markdown-body h5,
+        .markdown-body h6 {
+            color: var(--fgColor-default);
+        }
+
         .subtitle {
+            font-family: var(--font-mono);
+            font-size: 12px;
             color: var(--fgColor-muted);
-            margin-bottom: 2em;
-            font-size: 0.9em;
+            margin-bottom: 2.2em;
+        }
+
+        /* File views: the filename lives in the top-bar breadcrumb, so the
+           in-content title is hidden; the subtitle keeps the absolute path,
+           which the dir-relative breadcrumb lacks, flush at the top. */
+        [data-view="file"] .file-title,
+        [data-view="preview"] .file-title {
+            display: none;
+        }
+        [data-view="file"] .subtitle,
+        [data-view="preview"] .subtitle {
+            margin-top: 0;
         }
 
         .tree {
@@ -161,49 +184,63 @@
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 26px;
         }
 
         .file-action-bar {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             align-items: center;
             margin-left: auto;
         }
 
-        .delete-button {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            background-color: var(--fgColor-danger);
-            border: 1px solid var(--fgColor-danger);
-            border-radius: 6px;
-            color: white;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .delete-button:hover {
-            opacity: 0.9;
-        }
-
-        /* Unified Top Bar */
+        /* Unified Top Bar: glass */
         .top-bar {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
-            height: 56px;
-            background: var(--bgColor-default);
-            border-bottom: 1px solid var(--borderColor-default);
+            height: 58px;
+            background: linear-gradient(180deg,
+                color-mix(in srgb, var(--bgColor-default) 90%, transparent),
+                color-mix(in srgb, var(--bgColor-default) 80%, transparent));
+            -webkit-backdrop-filter: blur(12px) saturate(1.1);
+            backdrop-filter: blur(12px) saturate(1.1);
+            border-bottom: 1px solid var(--borderColor-muted);
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 0 max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
             z-index: 1000;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 1px 0 color-mix(in srgb, var(--borderColor-default) 35%, transparent);
+        }
+
+        /* Brand wordmark */
+        .peekm-brand {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-right: 8px;
+            padding-right: 14px;
+            border-right: 1px solid var(--borderColor-muted);
+            text-decoration: none;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .peekm-brand-mark {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: -0.5px;
+            color: var(--fgColor-default);
+        }
+        .peekm-brand-mark b { color: var(--peekm-accent); }
+        .peekm-brand-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--peekm-amber);
+            box-shadow: 0 0 8px var(--peekm-amber);
         }
 
         .top-bar-left,
@@ -220,7 +257,7 @@
         .top-bar-middle {
             flex: 1;
             justify-content: center;
-            max-width: 400px;
+            max-width: 320px;
             margin: 0 16px;
         }
 
@@ -264,6 +301,18 @@
         .top-bar button:hover {
             background: var(--bgColor-muted);
             border-color: var(--borderColor-emphasis);
+        }
+
+        /* Borderless left controls */
+        .top-bar-left button,
+        #sidebar-toggle {
+            border-color: transparent;
+            color: var(--fgColor-muted);
+        }
+        .top-bar-left button:hover {
+            background: var(--bgColor-muted);
+            border-color: transparent;
+            color: var(--fgColor-default);
         }
 
         .top-bar button:focus-visible,
@@ -330,13 +379,9 @@
         }
 
         .file-search-input:focus {
-            border-color: var(--fgColor-accent);
+            border-color: var(--peekm-accent);
             background: var(--bgColor-default);
-            box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.1);
-        }
-
-        [data-theme="dark"] .file-search-input:focus {
-            box-shadow: 0 0 0 2px rgba(68, 147, 248, 0.15);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--peekm-accent) 18%, transparent);
         }
 
         .search-clear {
@@ -834,6 +879,23 @@
             display: flex;
             align-items: center;
         }
+        .sidebar-eyebrow {
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            color: var(--fgColor-muted);
+        }
+        .sidebar-count {
+            margin-left: auto;
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.6px;
+            color: var(--fgColor-muted);
+            opacity: 0.7;
+        }
 
         /* Folder filter */
         .folder-filter-container {
@@ -992,8 +1054,9 @@
         }
 
         .breadcrumb {
-            font-family: var(--font-body);
-            font-size: 11px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            letter-spacing: -0.01em;
             color: var(--fgColor-muted);
             white-space: nowrap;
             overflow: hidden;
@@ -1001,17 +1064,32 @@
         }
 
         .breadcrumb a {
-            color: var(--fgColor-accent);
+            color: var(--fgColor-muted);
             text-decoration: none;
             transition: color 0.2s;
         }
 
         .breadcrumb a:hover {
-            text-decoration: underline;
+            color: var(--peekm-accent);
+            text-decoration: none;
         }
 
         .breadcrumb span {
             color: var(--fgColor-default);
+            font-weight: 600;
+        }
+
+        /* Breadcrumb in the top bar carries the filename, GitHub-style */
+        .top-bar-breadcrumb {
+            max-width: 380px;
+            min-width: 0;
+            margin-left: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        @media (max-width: 767px) {
+            .top-bar-breadcrumb { display: none; }
         }
 
         .sidebar-content {
@@ -1025,8 +1103,8 @@
 
         /* Current file highlighting in sidebar */
         .sidebar-content .tree-file a.current {
-            background: rgba(9, 105, 218, 0.1);
-            color: var(--fgColor-accent);
+            background: color-mix(in srgb, var(--peekm-accent) 12%, transparent);
+            color: var(--peekm-accent);
             font-weight: 500;
             display: block;
             padding: 0 4px;
@@ -1041,12 +1119,13 @@
             left: 0;
             top: 0;
             bottom: 0;
-            width: 2px;
-            background: var(--fgColor-accent);
+            width: 3px;
+            border-radius: 0 2px 2px 0;
+            background: var(--peekm-accent);
         }
 
         [data-color-mode="dark"] .sidebar-content .tree-file a.current {
-            background: rgba(68, 147, 248, 0.15);
+            background: color-mix(in srgb, var(--peekm-accent) 18%, transparent);
         }
 
         .content-area {
@@ -1080,23 +1159,17 @@
             100% { width: 100%; opacity: 0; }
         }
 
+        /* Narrow reading column with generous breathing room */
         .content-area .container {
-            max-width: min(1200px, calc(100% - 120px));
-            padding: 40px 60px;
+            max-width: min(860px, calc(100% - 80px));
+            padding: 40px 56px 96px;
             margin: 0 auto;
             transition: max-width 0.3s ease;
         }
 
-        /* Responsive scaling for larger displays */
         @media (min-width: 1920px) {
             .content-area .container {
-                max-width: 1280px;
-            }
-        }
-
-        @media (min-width: 2560px) {
-            .content-area .container {
-                max-width: 1400px;
+                max-width: 880px;
             }
         }
 
@@ -1178,7 +1251,7 @@
             /* Content area: reduce padding */
             .content-area .container {
                 max-width: 100%;
-                padding: 24px 20px;
+                padding: 24px 20px 64px;
             }
 
             /* Code blocks: fit viewport, not the desktop calc */
@@ -1199,11 +1272,6 @@
             .top-bar-left,
             .top-bar-right {
                 gap: 6px;
-            }
-
-            /* Search: full-width dropdown */
-            .top-bar-middle {
-                max-width: none;
             }
 
             /* Hamburger: 44px minimum touch target */
@@ -1273,7 +1341,6 @@
             /* File action bar: wrap on narrow screens */
             .file-action-bar {
                 flex-wrap: wrap;
-                gap: 6px;
             }
         }
 
@@ -1387,7 +1454,8 @@
             background: transparent;
             border: none;
             padding: 4px 8px;
-            font-size: 12px;
+            font-family: var(--font-mono);
+            font-size: 11px;
             color: var(--fgColor-muted);
             cursor: default;
         }
@@ -1437,24 +1505,32 @@
             color: var(--fgColor-muted);
         }
 
-        /* Edit button (now in header-actions) */
-        .edit-button {
+        /* Quiet outline buttons; Delete turns danger only on hover */
+        .edit-button,
+        .delete-button {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 8px 16px;
-            background-color: var(--bgColor-default);
+            padding: 7px 13px;
+            background: var(--bgColor-default);
             border: 1px solid var(--borderColor-default);
-            border-radius: 6px;
-            color: var(--fgColor-default);
-            font-size: 14px;
+            border-radius: 8px;
+            color: var(--fgColor-muted);
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 13px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
         }
 
         .edit-button:hover {
-            background-color: var(--bgColor-muted);
-            border-color: var(--borderColor-emphasis);
+            color: var(--peekm-accent);
+            border-color: var(--peekm-accent);
+        }
+
+        .delete-button:hover {
+            color: var(--fgColor-danger);
+            border-color: var(--fgColor-danger);
         }
 
         /* Editor container */
@@ -2117,7 +2193,7 @@
         }
         .nav-btn.active {
             background: var(--bgColor-default);
-            color: var(--fgColor-accent);
+            color: var(--peekm-accent);
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
@@ -2126,11 +2202,21 @@
             border-left: 2px solid var(--fgColor-done);
         }
 
-        /* LAN Share */
+        /* LAN Share: the one accent button */
+        #share-btn {
+            background: var(--peekm-accent);
+            border-color: var(--peekm-accent);
+            color: #fff;
+        }
         #share-btn.share-active {
             background: var(--bgColor-accent-muted);
             border-color: var(--borderColor-accent-emphasis);
             color: var(--fgColor-accent);
+        }
+        #share-btn:hover {
+            background: var(--peekm-accent-strong);
+            border-color: var(--peekm-accent-strong);
+            color: #fff;
         }
         .share-container {
             position: relative;
@@ -2234,217 +2320,6 @@
         .share-stop-btn:hover {
             background: var(--bgColor-danger-emphasis);
             color: var(--fgColor-onEmphasis);
-        }
-        /* ============================================================
-           peekm chrome redesign — glass top bar, brand wordmark, mono
-           breadcrumbs, refined tree. Overrides earlier rules via cascade.
-           Content surface (.markdown-body) stays GitHub-faithful.
-           ============================================================ */
-        .top-bar {
-            height: 58px;
-            background: linear-gradient(180deg,
-                color-mix(in srgb, var(--bgColor-default) 90%, transparent),
-                color-mix(in srgb, var(--bgColor-default) 80%, transparent));
-            -webkit-backdrop-filter: blur(12px) saturate(1.1);
-            backdrop-filter: blur(12px) saturate(1.1);
-            border-bottom: 1px solid var(--borderColor-muted);
-            box-shadow: 0 1px 0 color-mix(in srgb, var(--borderColor-default) 35%, transparent);
-        }
-
-        /* Brand wordmark */
-        .peekm-brand {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            margin-right: 8px;
-            padding-right: 14px;
-            border-right: 1px solid var(--borderColor-muted);
-            text-decoration: none;
-            user-select: none;
-            flex-shrink: 0;
-        }
-        .peekm-brand-mark {
-            font-family: var(--font-display);
-            font-weight: 700;
-            font-size: 18px;
-            letter-spacing: -0.5px;
-            color: var(--fgColor-default);
-        }
-        .peekm-brand-mark b { color: var(--peekm-accent); }
-        .peekm-brand-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--peekm-amber);
-            box-shadow: 0 0 8px var(--peekm-amber);
-        }
-
-        /* Mono breadcrumbs */
-        .breadcrumb {
-            font-family: var(--font-mono);
-            font-size: 12px;
-            letter-spacing: -0.01em;
-        }
-        .breadcrumb a { color: var(--fgColor-muted); }
-        .breadcrumb a:hover { color: var(--peekm-accent); text-decoration: none; }
-        .breadcrumb span { color: var(--fgColor-default); font-weight: 600; }
-
-        /* View switcher — active tab carries the accent */
-        .nav-btn.active {
-            color: var(--peekm-accent);
-        }
-
-        /* Search input — house body font + accent focus ring */
-        .file-search-input { font-family: var(--font-body); }
-        .file-search-input:focus,
-        [data-theme="dark"] .file-search-input:focus {
-            border-color: var(--peekm-accent);
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--peekm-accent) 18%, transparent);
-        }
-
-        /* Active file in the tree — peekm accent (replaces hard-coded blue) */
-        .sidebar-content .tree-file a.current {
-            background: color-mix(in srgb, var(--peekm-accent) 12%, transparent);
-            color: var(--peekm-accent);
-        }
-        [data-color-mode="dark"] .sidebar-content .tree-file a.current {
-            background: color-mix(in srgb, var(--peekm-accent) 18%, transparent);
-        }
-        .sidebar-content .tree-node:has(.tree-file a.current)::before {
-            background: var(--peekm-accent);
-            width: 3px;
-            border-radius: 0 2px 2px 0;
-        }
-
-        /* ---- Calm content surface: dark headings (kill the accent bleed),
-               narrower reading column, generous breathing room ---- */
-        h1 {
-            color: var(--fgColor-default);
-            border-bottom-color: var(--borderColor-muted);
-        }
-        .markdown-body h1,
-        .markdown-body h2,
-        .markdown-body h3,
-        .markdown-body h4,
-        .markdown-body h5,
-        .markdown-body h6 {
-            color: var(--fgColor-default);
-        }
-        .content-area .container {
-            max-width: min(860px, calc(100% - 80px));
-            padding: 40px 56px 96px;
-        }
-        @media (min-width: 1920px) {
-            .content-area .container { max-width: 880px; }
-        }
-        @media (max-width: 768px) {
-            .content-area .container {
-                max-width: 100%;
-                padding: 24px 20px 64px;
-            }
-        }
-        .subtitle {
-            font-family: var(--font-mono);
-            font-size: 12px;
-            color: var(--fgColor-muted);
-            margin-bottom: 2.2em;
-        }
-
-        /* ---- Quiet action bar: subtle outline buttons, Share as the one
-               accent, Delete de-reddened (danger only on hover) ---- */
-        .header-actions { margin-bottom: 26px; }
-        .file-action-bar { gap: 6px; }
-        .edit-button,
-        .delete-button {
-            font-family: var(--font-display);
-            font-weight: 600;
-            font-size: 13px;
-            padding: 7px 13px;
-            border-radius: 8px;
-            background: var(--bgColor-default);
-            border: 1px solid var(--borderColor-default);
-            color: var(--fgColor-muted);
-            transition: color 0.15s, border-color 0.15s, background 0.15s;
-        }
-        .edit-button:hover {
-            color: var(--peekm-accent);
-            border-color: var(--peekm-accent);
-            background: var(--bgColor-default);
-        }
-        .delete-button { color: var(--fgColor-muted); opacity: 1; }
-        .delete-button:hover {
-            color: var(--fgColor-danger);
-            border-color: var(--fgColor-danger);
-            background: var(--bgColor-default);
-            opacity: 1;
-        }
-        /* Share is the primary action — the one accent button */
-        #share-btn {
-            background: var(--peekm-accent);
-            border-color: var(--peekm-accent);
-            color: #fff;
-        }
-        #share-btn:hover {
-            background: var(--peekm-accent-strong);
-            border-color: var(--peekm-accent-strong);
-            color: #fff;
-        }
-
-        /* ---- Lighter top bar: smaller search, borderless left controls ---- */
-        .top-bar-middle { max-width: 320px; }
-        .top-bar-left button,
-        #sidebar-toggle {
-            border-color: transparent;
-            color: var(--fgColor-muted);
-        }
-        .top-bar-left button:hover {
-            background: var(--bgColor-muted);
-            border-color: transparent;
-            color: var(--fgColor-default);
-        }
-        .connection-status { font-family: var(--font-mono); font-size: 11px; }
-
-        /* ---- Breadcrumb relocated into the top bar (carries the filename,
-               GitHub-style), file-title collapsed to remove duplication ---- */
-        .top-bar-breadcrumb {
-            max-width: 380px;
-            min-width: 0;
-            margin-left: 8px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .sidebar-eyebrow {
-            font-family: var(--font-mono);
-            font-size: 10.5px;
-            font-weight: 500;
-            letter-spacing: 1.4px;
-            text-transform: uppercase;
-            color: var(--fgColor-muted);
-        }
-        .sidebar-count {
-            margin-left: auto;
-            font-family: var(--font-mono);
-            font-size: 10.5px;
-            font-weight: 500;
-            letter-spacing: 0.6px;
-            color: var(--fgColor-muted);
-            opacity: 0.7;
-        }
-        /* The filename now lives in the breadcrumb; hide the in-content title
-           to avoid duplication. The subtitle stays — it carries the file's
-           absolute path, which the breadcrumb (dir-relative) does not. */
-        [data-view="file"] .file-title,
-        [data-view="preview"] .file-title {
-            display: none;
-        }
-        /* Absolute path caption sits flush at the top of the document. */
-        [data-view="file"] .subtitle,
-        [data-view="preview"] .subtitle {
-            margin-top: 0;
-        }
-        @media (max-width: 767px) {
-            .top-bar-breadcrumb { display: none; }
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -2649,6 +2524,7 @@
             <div class="folder-filter-container" id="folder-filter-container">
                 <input type="text" id="folder-filter-input" class="folder-filter-input" placeholder="Filter folders..." aria-label="Filter folders by name" autocomplete="off" />
             </div>
+            <div class="folder-filter-empty" id="folder-filter-empty">No matching folders</div>
             <div class="sidebar-content" id="sidebar-tree">
                 {{if .TreeHTML}}
                     <div class="tree sidebar-tree">{{.TreeHTML}}</div>
@@ -2658,7 +2534,6 @@
                         <p>No markdown files found</p>
                     </div>
                 {{end}}
-                <div class="folder-filter-empty" id="folder-filter-empty">No matching folders</div>
             </div>
             <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
         </aside>
@@ -2763,31 +2638,10 @@
                 return;
             }
 
-            // Submit to backend
-            fetch('/navigate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ path: path })
-            })
-            .then(response => {
-                if (response.ok) {
-                    // Close modal first
-                    const modal = document.getElementById('nav-modal');
-                    modal.classList.remove('active');
-
-                    // Navigate to root using SPA if available
-                    if (typeof navigate === 'function') {
-                        navigate('/');
-                    } else {
-                        window.location.reload();
-                    }
-                } else {
-                    return response.text().then(text => {
-                        throw new Error(text || 'Navigation failed');
-                    });
-                }
+            sendJSON('/navigate', { path: path })
+            .then(() => {
+                document.getElementById('nav-modal').classList.remove('active');
+                navigate('/');
             })
             .catch(error => {
                 showErrorToast('Navigation error: ' + error.message);
@@ -2867,19 +2721,11 @@
             if (container) container.remove();
             if (!name) return;
 
-            fetch('/folder', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name, parent: parentPath || '' })
-            })
-            .then(function(response) {
-                if (response.ok) {
-                    var displayPath = parentPath ? parentPath + '/' + name : name;
-                    showToast('Created folder: ' + displayPath, null, null);
-                    scheduleTreeRefresh();
-                } else {
-                    return response.text().then(function(text) { throw new Error(text); });
-                }
+            sendJSON('/folder', { name: name, parent: parentPath || '' })
+            .then(function() {
+                var displayPath = parentPath ? parentPath + '/' + name : name;
+                showToast('Created folder: ' + displayPath, null, null);
+                scheduleTreeRefresh();
             })
             .catch(function(error) {
                 showErrorToast(error.message);
@@ -2916,27 +2762,10 @@
         function deleteFile(filePath) {
             closeDeleteModal();
 
-            fetch('/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ path: filePath })
-            })
-            .then(response => {
-                if (response.ok) {
-                    const fileName = filePath.split('/').pop();
-                    showToast('Moved to trash: ' + fileName, null, null);
-                    if (typeof navigate === 'function') {
-                        navigate('/');
-                    } else {
-                        window.location.href = '/';
-                    }
-                } else {
-                    return response.text().then(text => {
-                        throw new Error(text || 'Delete failed');
-                    });
-                }
+            sendJSON('/delete', { path: filePath })
+            .then(() => {
+                showToast('Moved to trash: ' + filePath.split('/').pop(), null, null);
+                navigate('/');
             })
             .catch(error => {
                 console.error('[Delete] Error:', error);
@@ -3110,15 +2939,8 @@
             }
 
             function moveFile(source, dest) {
-                fetch('/move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: source, dest: dest })
-                })
-                .then(function(response) {
-                    if (response.ok) return response.json();
-                    return response.text().then(function(t) { throw new Error(t); });
-                })
+                sendJSON('/move', { source: source, dest: dest })
+                .then(function(response) { return response.json(); })
                 .then(function(data) {
                     showToast('Moved: ' + source.split('/').pop(), null, null);
                     // Skip optimistic tree manipulation — scheduleTreeRefresh
@@ -3136,24 +2958,6 @@
                 });
             }
         })();
-
-        // Smart Folder toggle
-        function toggleSmartFolder(header) {
-            const folder = header.closest('.smart-folder');
-            const children = folder.querySelector('.smart-folder-children');
-            const icon = header.querySelector('.expand-icon');
-            if (!children || !icon) return;
-
-            const isCollapsed = children.style.display === 'none';
-            children.style.display = isCollapsed ? 'block' : 'none';
-            icon.textContent = isCollapsed ? '▼' : '▶';
-            header.dataset.collapsed = isCollapsed ? 'false' : 'true';
-
-            // Persist state
-            if (typeof saveSmartFolderState === 'function') {
-                saveSmartFolderState();
-            }
-        }
 
         // Session Info Panel Toggle
         function toggleSessionInfo() {

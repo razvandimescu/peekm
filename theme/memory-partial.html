@@ -1,13 +1,9 @@
-<!-- Sidebar tree (for SPA navigation updates) -->
+{{if .Partial}}
+<!-- Sidebar tree for navigate() to swap in; full pages render it in the shell -->
 <div id="sidebar-tree" style="display: none;">
-    {{if .TreeHTML}}
-        <div class="tree sidebar-tree">{{.TreeHTML}}</div>
-    {{else}}
-        <div class="empty-sidebar">
-            <p>No memory files found</p>
-        </div>
-    {{end}}
+    <div class="tree sidebar-tree">{{.TreeHTML}}</div>
 </div>
+{{end}}
 
 <main id="content" data-view="memory" data-path="{{.BrowsePath}}" class="content-area">
     <div class="container">
