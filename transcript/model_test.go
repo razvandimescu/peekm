@@ -16,6 +16,7 @@ func TestSessionJSONRoundTrip(t *testing.T) {
 		ID:      "019fc7d2-71ee-7da3-8497-cf2834825a90",
 		Harness: HarnessPi,
 		CWD:     "/tmp/proj",
+		Usage:   &Usage{ContextTokens: 107000, At: time.Date(2026, 8, 3, 13, 32, 0, 0, time.UTC)},
 		Turns: []Turn{
 			{
 				Role:      "user",

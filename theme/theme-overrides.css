@@ -746,6 +746,7 @@ a.timeline-session-id:hover {
     display: flex;
     gap: 16px;
 }
+.transcript-idle { color: var(--fgColor-muted); }
 
 /* Floating composer: sticks to the bottom of the scroll area so the
    reply box is always at hand, like a chat input (matches site demo).

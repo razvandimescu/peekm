@@ -68,7 +68,7 @@ func firstAssistantModel(turns []transcriptTurn) string {
 }
 
 func TestParsePiTranscript(t *testing.T) {
-	turns, err := parseTranscript(piFixturePath) // via dispatch, exercises sniffing too
+	_, turns, err := parseTranscript(piFixturePath) // via dispatch, exercises sniffing too
 	if err != nil {
 		t.Fatal(err)
 	}

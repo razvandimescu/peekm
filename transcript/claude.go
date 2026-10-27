@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"time"
 )
 
 // claudeLine is the envelope of one Claude Code transcript JSONL line.
@@ -19,6 +20,28 @@ type claudeMsg struct {
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
+	Usage   *claudeUsage    `json:"usage"`
+}
+
+// claudeUsage is the token accounting Claude Code records on assistant lines.
+type claudeUsage struct {
+	InputTokens         int `json:"input_tokens"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	CacheReadTokens     int `json:"cache_read_input_tokens"`
+}
+
+// total reports the prompt size this call was sent with. Nil when the line
+// carries no usage, or reports all zeroes — which Claude Code emits for a
+// small fraction of records and which would otherwise blank the readout.
+func (u *claudeUsage) total(at time.Time) *Usage {
+	if u == nil {
+		return nil
+	}
+	n := u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens
+	if n == 0 {
+		return nil
+	}
+	return &Usage{ContextTokens: n, At: at}
 }
 
 // claudeContentBlock matches the JSON structure of a message content block.
@@ -39,38 +62,41 @@ func ParseClaude(r io.Reader) (*Session, error) {
 	scanner := newLineScanner(r)
 
 	var turns []Turn
+	var usage *Usage
 	for scanner.Scan() {
-		turn, ok := parseClaudeLine(scanner.Bytes())
+		turn, u, ok := parseClaudeLine(scanner.Bytes())
 		if !ok {
 			continue
+		}
+		if u != nil {
+			usage = u
 		}
 		turns = append(turns, turn)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return &Session{Version: Version, Harness: HarnessClaudeCode, Turns: finishTurns(turns)}, nil
+	return &Session{Version: Version, Harness: HarnessClaudeCode, Usage: usage, Turns: finishTurns(turns)}, nil
 }
 
 // parseClaudeLine parses a single JSONL line; ok is false for meta lines,
-// non-conversation types, and malformed input.
-func parseClaudeLine(line []byte) (Turn, bool) {
+// non-conversation types, and malformed input. A line with no renderable
+// blocks is still ok: it may carry usage.
+func parseClaudeLine(line []byte) (Turn, *Usage, bool) {
 	var env claudeLine
 	if json.Unmarshal(line, &env) != nil {
-		return Turn{}, false
+		return Turn{}, nil, false
 	}
 	if env.IsMeta || (env.Type != "user" && env.Type != "assistant") || len(env.Message) == 0 {
-		return Turn{}, false
+		return Turn{}, nil, false
 	}
 	var msg claudeMsg
 	if json.Unmarshal(env.Message, &msg) != nil {
-		return Turn{}, false
+		return Turn{}, nil, false
 	}
-	blocks := claudeContentBlocks(msg.Content)
-	if len(blocks) == 0 {
-		return Turn{}, false
-	}
-	return Turn{Role: msg.Role, Model: msg.Model, Timestamp: parseTime(env.Timestamp), Blocks: blocks}, true
+	at := parseTime(env.Timestamp)
+	turn := Turn{Role: msg.Role, Model: msg.Model, Timestamp: at, Blocks: claudeContentBlocks(msg.Content)}
+	return turn, msg.Usage.total(at), true
 }
 
 // claudeContentBlocks converts a message content field — a plain string or an

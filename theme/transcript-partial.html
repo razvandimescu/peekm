@@ -17,6 +17,8 @@
             <div class="transcript-nav">
                 <a href="/">Files</a>
                 <a href="/timeline">Timeline</a>
+                {{with .Usage}}<span class="transcript-idle" data-at="{{formatISO .At}}"
+                    data-explain="The next message re-sends about {{formatCompact .ContextTokens}} tokens as fresh input instead of cache reads."></span>{{end}}
                 <span class="transcript-nav-jumps">
                     <a href="#transcript-top">Top</a>
                     <a href="#transcript-bottom">End</a>

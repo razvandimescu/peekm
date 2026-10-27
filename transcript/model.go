@@ -30,7 +30,15 @@ type Session struct {
 	ID      string `json:"id,omitempty"`
 	Harness string `json:"harness"`
 	CWD     string `json:"cwd,omitempty"`
+	Usage   *Usage `json:"usage,omitempty"`
 	Turns   []Turn `json:"turns"`
+}
+
+// Usage is the token accounting of the most recent model call in a session.
+// Nil for harnesses that do not report it.
+type Usage struct {
+	ContextTokens int       `json:"context_tokens"` // prompt size: fresh + cache write + cache read
+	At            time.Time `json:"at"`
 }
 
 // Turn is a user or assistant turn. Consecutive same-role messages are merged.

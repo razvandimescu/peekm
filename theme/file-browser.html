@@ -3429,9 +3429,35 @@
             console.log('[Session] Rendered panel from localStorage');
         }
 
+        function formatIdleDuration(ms) {
+            const s = Math.floor(ms / 1000);
+            if (s < 1) return '< 1s';
+            if (s < 60) return s + 's';
+            const m = Math.floor(s / 60);
+            if (m < 60) return m + 'm';
+            const h = Math.floor(m / 60);
+            if (h < 24) return (m % 60 === 0) ? h + 'h' : h + 'h' + (m % 60) + 'm';
+            const d = Math.floor(h / 24);
+            return (h % 24 === 0) ? d + 'd' : d + 'd ' + (h % 24) + 'h';
+        }
+
+        // The transcript page only re-renders on session activity, and an idle
+        // session has none, so the idle readout is rendered here: on load,
+        // after SPA swaps, and on the minute tick.
+        function renderIdleReadout() {
+            document.querySelectorAll('.transcript-idle').forEach(el => {
+                const idle = Math.max(0, Date.now() - Date.parse(el.dataset.at));
+                const cold = idle >= 3600000; // Claude Code's prompt-cache TTL
+                el.textContent = 'Idle ' + formatIdleDuration(idle) + (cold ? ' · cache cold' : '');
+                el.title = cold ? el.dataset.explain : '';
+            });
+        }
+        window.renderIdleReadout = renderIdleReadout;
+
         // Call initialization when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             initializeSessionInfo();
+            renderIdleReadout();
 
             // Restore tree state from localStorage (function defined in navigation.js)
             if (typeof restoreTreeState === 'function') {
@@ -3447,6 +3473,7 @@
                         element.textContent = formatRelativeTime(isoTime);
                     }
                 });
+                renderIdleReadout();
             }, 60000); // Update every 60 seconds
         });
 
