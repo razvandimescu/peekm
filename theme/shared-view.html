@@ -338,12 +338,6 @@
             // Defer init+run to DOMContentLoaded so theme-manager.js (loaded later in body)
             // has already applied data-color-mode from localStorage. Without this defer,
             // mermaid would pick its theme from a stale OS-only signal.
-            function isDark() {
-                var mode = document.documentElement.getAttribute('data-color-mode');
-                if (mode === 'dark') return true;
-                if (mode === 'light') return false;
-                return window.matchMedia('(prefers-color-scheme: dark)').matches;
-            }
             document.addEventListener('DOMContentLoaded', function() {
                 // Cache mermaid sources before run() consumes them — DOCX export re-renders
                 // them in light theme to preserve contrast on a white page background.
@@ -353,7 +347,7 @@
                         window.peekmMermaidSources.push(el.textContent.trim());
                     }
                 });
-                mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose' });
+                mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
             });
@@ -432,14 +426,8 @@
             var btn = document.getElementById('s-theme-toggle');
             if (!btn) return;
 
-            function isDark() {
-                var mode = document.documentElement.getAttribute('data-color-mode');
-                if (mode === 'dark') return true;
-                if (mode === 'light') return false;
-                return window.matchMedia('(prefers-color-scheme: dark)').matches;
-            }
             function paint() {
-                var dark = isDark();
+                var dark = isDarkMode();
                 btn.innerHTML = dark ? SUN : MOON;
                 btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
                 // #shared-content is a .markdown-body, so the same mechanism the main app
@@ -448,7 +436,7 @@
                 applyThemeToContent(mode === 'light' || mode === 'dark' ? mode : 'auto');
             }
             btn.addEventListener('click', function() {
-                setTheme(isDark() ? 'light' : 'dark');
+                setTheme(isDarkMode() ? 'light' : 'dark');
                 paint();
                 if (typeof mermaid !== 'undefined' && window.peekmMermaidSources) {
                     document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el, i) {
@@ -457,7 +445,7 @@
                         el.removeAttribute('data-processed');
                         el.textContent = src;
                     });
-                    mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose' });
+                    mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                     try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                     catch (e) { console.warn('[mermaid] re-render failed', e); }
                 }
@@ -695,12 +683,7 @@
 
                 // Switch mermaid to light theme for any re-renders during export.
                 // Live SVGs already on the page are unaffected (initialize only changes future renders).
-                var pageIsDark = (function() {
-                    var mode = document.documentElement.getAttribute('data-color-mode');
-                    if (mode === 'dark') return true;
-                    if (mode === 'light') return false;
-                    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-                })();
+                var pageIsDark = isDarkMode();
                 if (typeof mermaid !== 'undefined') {
                     mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
                 }

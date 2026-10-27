@@ -89,9 +89,7 @@ function connectSSE() {
             if (data.type === 'file_added') {
                 console.log('[SSE] Handling file_added for:', data.path);
                 showToast(`New file: ${data.path}`, data.path, data.session);
-                // Optimistic update: insert immediately (fast, may be buggy)
-                insertFileIntoTree(data.path);
-                // Self-healing: debounced refresh from server (batches rapid updates)
+                // Debounced refresh from server (batches rapid updates)
                 scheduleTreeRefresh();
             } else if (data.type === 'files_added') {
                 // Bulk write: one toast; the debounced refresh brings the batch in.
@@ -139,23 +137,7 @@ function connectSSE() {
                 updateConnectionStatus(data.count);
             }
         } catch (e) {
-            console.log('[SSE] Not JSON, checking for plain string messages');
-            // Fallback to plain string messages (backwards compatibility)
-            if (event.data === 'reload') {
-                console.log('[SSE] Handling reload message');
-                // Check current view type from content element
-                const content = document.getElementById('content');
-                const viewType = content ? content.dataset.view : null;
-
-                if (viewType === 'file') {
-                    // File view - reload content to show updated markdown
-                    const currentPath = window.location.pathname;
-                    navigate(currentPath, false); // Don't add to history
-                } else {
-                    // Browser view - full reload
-                    location.reload();
-                }
-            }
+            console.log('[SSE] Ignoring non-JSON message:', event.data);
         }
     };
 
@@ -383,14 +365,6 @@ function reinitializeScripts() {
             applyThemeToContent(localStorage.getItem('theme') || 'auto');
         }
 
-        if (viewType === 'browser') {
-            if (typeof setupCollapse === 'function') {
-                setupCollapse();
-            } else {
-                console.warn('[Reinit] setupCollapse not available');
-            }
-        }
-
         // Initialize sidebar (Focus Mode) - works for both views
         if (typeof initializeSidebar === 'function') {
             initializeSidebar();
@@ -453,26 +427,6 @@ function copyStandupPath(e, btn, path) {
         setTimeout(function() { btn.classList.remove('copied'); }, 1200);
     };
     copyText(path, done);
-}
-
-// Setup collapsible directory functionality
-function setupCollapse() {
-    // Initialize collapsed directories on page load
-    const allItems = document.querySelectorAll('.tree-item');
-
-    // Hide children of collapsed directories
-    for (let item of allItems) {
-        const depth = parseInt(item.dataset.depth) || 0;
-        if (depth > 1) {
-            const parent = findParentItem(item, allItems);
-            if (parent) {
-                const parentDir = parent.querySelector('.tree-directory');
-                if (parentDir && parentDir.dataset.collapsed === 'true') {
-                    item.classList.add('hidden');
-                }
-            }
-        }
-    }
 }
 
 // Intercept link clicks for SPA navigation
@@ -575,21 +529,6 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-// Find parent tree item (used by setupCollapse)
-function findParentItem(item, allItems) {
-    const depth = parseInt(item.dataset.depth) || 0;
-    if (depth <= 1) return null;
-
-    const index = Array.from(allItems).indexOf(item);
-    for (let i = index - 1; i >= 0; i--) {
-        const candidateDepth = parseInt(allItems[i].dataset.depth) || 0;
-        if (candidateDepth === depth - 1) {
-            return allItems[i];
-        }
-    }
-    return null;
 }
 
 // ===== Toast Notification Functions =====
@@ -823,191 +762,16 @@ function updateConnectionStatus(count) {
 
 // ===== Dynamic Tree Manipulation =====
 
-// Update the file count in the subtitle
-function updateFileCount(delta) {
-    const subtitle = document.querySelector('.subtitle');
-    if (subtitle) {
-        const match = subtitle.textContent.match(/(\d+) markdown file/);
-        if (match) {
-            const currentCount = parseInt(match[1]);
-            const newCount = Math.max(0, currentCount + delta);
-            subtitle.textContent = subtitle.textContent.replace(/\d+ markdown file/, `${newCount} markdown file`);
-            console.log(`[updateFileCount] Updated count from ${currentCount} to ${newCount}`);
-        }
-    }
-}
-
-// Dynamically insert a new file into the tree
-// Note: Event delegation from body.addEventListener('click', interceptLinks)
-// automatically handles SPA navigation for dynamically inserted links
-function insertFileIntoTree(filePath) {
-    try {
-        console.log('[insertFileIntoTree] Adding file:', filePath);
-        const fileName = filePath.split('/').pop();
-        const fileTree = document.querySelector('.sidebar-tree');
-
-        if (!fileTree) {
-            console.log('[insertFileIntoTree] No sidebar-tree element found, skipping');
-            return;
-        }
-
-        // Check if file already exists in tree
-        const existingLinks = fileTree.querySelectorAll('.tree-item .tree-file a');
-        for (let link of existingLinks) {
-            const href = link.getAttribute('href');
-            if (href === `/view/${encodeURIComponent(filePath)}`) {
-                console.log('[insertFileIntoTree] File already exists in tree, skipping insertion');
-                return;
-            }
-        }
-
-        // Calculate depth from path (count slashes + 1)
-        const pathParts = filePath.split('/');
-        const depth = pathParts.length;
-        console.log('[insertFileIntoTree] Depth:', depth, 'Parts:', pathParts);
-
-        // Create new tree item HTML (VS Code style - indent-based, no ASCII art)
-        const div = document.createElement('div');
-        div.className = 'tree-item';
-        div.dataset.depth = depth.toString();
-        if (depth > 0) {
-            div.style.paddingLeft = (depth * 16) + 'px';
-        }
-        div.innerHTML = `
-            <span class="tree-file">
-                <a href="/view/${encodeURIComponent(filePath)}">${escapeHtml(fileName)}</a>
-            </span>
-        `;
-
-        // Find parent directory if nested
-        let parentNode = fileTree;
-        let insertDepth = depth;
-
-        if (depth > 1) {
-            // Find the parent directory node
-            const parentPath = pathParts.slice(0, -1).join('/');
-            console.log('[insertFileIntoTree] Looking for parent directory:', parentPath);
-
-            const allDirs = fileTree.querySelectorAll('.tree-directory');
-            for (let dir of allDirs) {
-                const dirName = dir.querySelector('.dir-name');
-                if (dirName) {
-                    // Check if this is the correct parent by comparing the full path
-                    const dirItem = dir.closest('.tree-item');
-                    const dirDepth = parseInt(dirItem.dataset.depth);
-
-                    // Parent should be at depth-1 and match the path
-                    if (dirDepth === depth - 1) {
-                        // Build expected parent path by checking siblings
-                        const dirNameText = dirName.textContent.trim();
-                        if (pathParts[depth - 2] === dirNameText) {
-                            parentNode = dirItem.parentNode;
-                            console.log('[insertFileIntoTree] Found parent directory:', dirNameText);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Find correct position (alphabetically among siblings at same depth)
-        const allItems = parentNode.querySelectorAll(`.tree-item[data-depth="${depth}"]`);
-        let inserted = false;
-
-        for (let item of allItems) {
-            // Skip if this item is not a direct child of parentNode
-            if (item.parentNode !== parentNode) continue;
-
-            const link = item.querySelector('.tree-file a');
-            if (link) {
-                const itemName = link.textContent.trim();
-                console.log('[insertFileIntoTree] Comparing:', fileName, 'vs', itemName);
-
-                if (fileName.localeCompare(itemName) < 0) {
-                    parentNode.insertBefore(div, item);
-                    inserted = true;
-                    console.log('[insertFileIntoTree] Inserted before:', itemName);
-                    break;
-                }
-            }
-        }
-
-        // If not inserted, append at end of parent's children
-        if (!inserted) {
-            // Find the last child of this parent at the same depth
-            const children = Array.from(parentNode.querySelectorAll('.tree-item')).filter(
-                item => item.parentNode === parentNode
-            );
-            if (children.length > 0) {
-                const lastChild = children[children.length - 1];
-                parentNode.insertBefore(div, lastChild.nextSibling);
-                console.log('[insertFileIntoTree] Inserted after last sibling');
-            } else {
-                parentNode.appendChild(div);
-                console.log('[insertFileIntoTree] Appended to parent');
-            }
-        }
-
-        // Update file count in subtitle
-        updateFileCount(1);
-
-        console.log('[insertFileIntoTree] Successfully added file');
-    } catch (error) {
-        console.error('[insertFileIntoTree] Error:', error);
-        // Don't crash the page - just log the error
-    }
-}
-
-// Dynamically remove a file from the tree
+// Optimistically drops a removed file's row; scheduleTreeRefresh() reconciles.
+// Matches by href, not basename: names like README.md repeat across folders.
 function removeFileFromTree(filePath) {
-    try {
-        console.log('[removeFileFromTree] Removing file:', filePath);
-        const fileName = filePath.split('/').pop();
-        const fileTree = document.querySelector('.sidebar-tree');
-
-        if (!fileTree) {
-            console.log('[removeFileFromTree] No sidebar-tree element found, skipping');
+    const hrefs = [`/view/${filePath}`, `/view/${encodeURIComponent(filePath)}`];
+    for (const link of document.querySelectorAll('.sidebar-tree .tree-file a')) {
+        if (hrefs.includes(link.getAttribute('href'))) {
+            // closest(), not the outer .tree-item: a directory's item contains its files.
+            link.closest('.tree-item').remove();
             return;
         }
-
-        // Find and remove the tree item
-        const allItems = fileTree.querySelectorAll('.tree-item');
-        let removed = false;
-
-        for (let item of allItems) {
-            const link = item.querySelector('.tree-file a');
-            if (link) {
-                const href = link.getAttribute('href');
-                const linkText = link.textContent.trim();
-
-                // Debug logging
-                console.log('[removeFileFromTree] Checking item - href:', href, 'text:', linkText, 'target:', fileName);
-
-                // Match by href path or by filename (link text content)
-                // The href should be /view/{filePath} where filePath is URL-encoded
-                if (href === `/view/${encodeURIComponent(filePath)}` ||
-                    href === `/view/${filePath}` ||
-                    linkText === fileName) {
-                    item.remove();
-                    removed = true;
-                    console.log('[removeFileFromTree] Removed item:', fileName);
-                    break;
-                }
-            }
-        }
-
-        if (!removed) {
-            console.log('[removeFileFromTree] File not found in tree:', fileName);
-            return;
-        }
-
-        // Update file count in subtitle
-        updateFileCount(-1);
-
-        console.log('[removeFileFromTree] Successfully removed file');
-    } catch (error) {
-        console.error('[removeFileFromTree] Error:', error);
-        // Don't crash the page - just log the error
     }
 }
 
@@ -1661,117 +1425,6 @@ function restoreSmartFolderState() {
         });
     } catch (e) {
         console.error('[SmartFolders] Failed to restore state:', e);
-    }
-}
-
-// =============================================================================
-// Session Metadata Persistence (localStorage with 7-day TTL)
-// =============================================================================
-
-const SESSION_STORAGE_KEY_PREFIX = 'peekm:sessions:';
-const SESSION_TTL_DAYS = 7;
-const MAX_SESSIONS_PER_DIR = 100;
-
-// Get localStorage key for current browse directory
-function getSessionStorageKey() {
-    // Use current directory path as key suffix
-    const content = document.getElementById('content');
-    const browsePath = content ? (content.dataset.path || '') : '';
-    return SESSION_STORAGE_KEY_PREFIX + browsePath;
-}
-
-// Save session metadata to localStorage
-function saveSessionMetadata(filePath, sessionData) {
-    try {
-        const storageKey = getSessionStorageKey();
-        const sessions = getSessionsFromStorage(storageKey);
-
-        const sessionEntry = {
-            filePath: filePath,
-            sessionData: sessionData,
-            storedAt: Date.now()
-        };
-
-        // Update existing or add new
-        const existingIndex = sessions.findIndex(s => s.filePath === filePath);
-        if (existingIndex !== -1) {
-            sessions[existingIndex] = sessionEntry;
-        } else {
-            sessions.push(sessionEntry);
-        }
-
-        // Limit to MAX_SESSIONS_PER_DIR
-        if (sessions.length > MAX_SESSIONS_PER_DIR) {
-            sessions.sort((a, b) => b.storedAt - a.storedAt);
-            sessions.splice(MAX_SESSIONS_PER_DIR);
-        }
-
-        localStorage.setItem(storageKey, JSON.stringify(sessions));
-        console.log('[Session] Saved metadata for:', filePath);
-    } catch (error) {
-        console.error('[Session] Failed to save metadata:', error);
-    }
-}
-
-// Get session metadata for a file path
-function getSessionMetadata(filePath) {
-    try {
-        const storageKey = getSessionStorageKey();
-        const sessions = getSessionsFromStorage(storageKey);
-
-        const entry = sessions.find(s => s.filePath === filePath);
-        if (!entry) return null;
-
-        // Check if expired (7 days)
-        const age = Date.now() - entry.storedAt;
-        const maxAge = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
-
-        if (age > maxAge) {
-            console.log('[Session] Metadata expired for:', filePath);
-            return null;
-        }
-
-        return entry.sessionData;
-    } catch (error) {
-        console.error('[Session] Failed to retrieve metadata:', error);
-        return null;
-    }
-}
-
-// Get all sessions from localStorage (with pruning)
-function getSessionsFromStorage(storageKey) {
-    try {
-        const stored = localStorage.getItem(storageKey);
-        if (!stored) return [];
-
-        const sessions = JSON.parse(stored);
-
-        // Prune expired entries
-        const maxAge = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
-        const now = Date.now();
-        const validSessions = sessions.filter(s => (now - s.storedAt) <= maxAge);
-
-        // Update storage if we pruned anything
-        if (validSessions.length !== sessions.length) {
-            localStorage.setItem(storageKey, JSON.stringify(validSessions));
-            console.log('[Session] Pruned', sessions.length - validSessions.length, 'expired entries');
-        }
-
-        return validSessions;
-    } catch (error) {
-        console.error('[Session] Failed to load sessions:', error);
-        return [];
-    }
-}
-
-// Clear all session metadata for current directory
-function clearSessionMetadata() {
-    try {
-        const storageKey = getSessionStorageKey();
-        localStorage.removeItem(storageKey);
-        console.log('[Session] Cleared all metadata');
-    } catch (error) {
-        console.error('[Session] Failed to clear metadata:', error);
     }
 }
 

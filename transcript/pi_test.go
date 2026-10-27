@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,15 +142,22 @@ func TestNormalizePiToolInput(t *testing.T) {
 	}
 }
 
-func TestIsPiSessionFile(t *testing.T) {
-	path := piFixturePath
-	if !IsPiSessionFile(path) {
+func TestSniffPiHeader(t *testing.T) {
+	sniff := func(path string) bool {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		return sniffPiHeader(bufio.NewReader(f))
+	}
+	if !sniff(piFixturePath) {
 		t.Error("pi fixture not detected as pi session")
 	}
 
 	claude := filepath.Join(t.TempDir(), "claude.jsonl")
 	os.WriteFile(claude, []byte(`{"type":"user","message":{"role":"user","content":"hi"}}`+"\n"), 0644)
-	if IsPiSessionFile(claude) {
+	if sniff(claude) {
 		t.Error("claude transcript misdetected as pi session")
 	}
 }

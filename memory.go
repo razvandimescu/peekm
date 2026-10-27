@@ -62,14 +62,9 @@ const (
 )
 
 func serveMemory(w http.ResponseWriter, r *http.Request) {
-	memFiles, projectIndex := collectMemoryFiles("")
-	home, _ := os.UserHomeDir()
-	projectsDir := filepath.Join(home, ".claude", "projects")
-
-	fileMutex.RLock()
-	urlBase := browseDir
-	fileMutex.RUnlock()
-
+	memFiles, projectIndex := collectMemoryFiles()
+	projectsDir := claudeProjectsDir()
+	urlBase := currentBrowseDir()
 	projects := groupMemoryByProject(memFiles, projectsDir, projectIndex)
 	treeHTML := buildMemoryTreeHTML(projects, urlBase, "")
 	now := time.Now()
@@ -124,14 +119,13 @@ func serveMemory(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeProjectName(encoded string) string {
-	s := strings.TrimPrefix(encoded, "-")
-	if s == "" {
-		return encoded
-	}
-	if path, ok := resolveEncodedPath(strings.Split(s, "-"), 0, string(filepath.Separator)); ok {
+	if path := resolveProjectDir(encoded); path != "" {
 		return filepath.Base(path)
 	}
-	return s
+	if s := strings.TrimPrefix(encoded, "-"); s != "" {
+		return s
+	}
+	return encoded
 }
 
 // resolveEncodedPath recursively tries all ways to split dash-separated parts
@@ -186,14 +180,11 @@ func resolveProjectDir(encoded string) string {
 // collectMemoryFiles scans ~/.claude/projects/*/memory/*.md and each project's .claude/CLAUDE.md.
 // Returns sorted absolute paths and a projectIndex mapping external files (CLAUDE.md) to their
 // encoded project directory name (for groupMemoryByProject).
-// If filter is non-empty, only projects whose decoded name contains the filter are included.
-func collectMemoryFiles(filter string) ([]string, map[string]string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+func collectMemoryFiles() ([]string, map[string]string) {
+	projectsDir := claudeProjectsDir()
+	if projectsDir == "" {
 		return nil, nil
 	}
-
-	projectsDir := filepath.Join(home, ".claude", "projects")
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return nil, nil
@@ -204,13 +195,6 @@ func collectMemoryFiles(filter string) ([]string, map[string]string) {
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
-		}
-
-		if filter != "" {
-			decoded := decodeProjectName(entry.Name())
-			if !strings.Contains(strings.ToLower(decoded), strings.ToLower(filter)) {
-				continue
-			}
 		}
 
 		// Collect memory/*.md files

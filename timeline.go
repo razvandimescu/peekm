@@ -102,7 +102,7 @@ type timelineEntry struct {
 
 func dayLabel(t time.Time) string {
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := startOfDay(now)
 	yesterday := today.AddDate(0, 0, -1)
 	switch {
 	case !t.Before(today):
@@ -164,18 +164,28 @@ func dirWithinBase(dir, baseDir string) bool {
 // Every project under baseDir is scanned, matching how eventsForDir walks the
 // subtree — browsing a parent folder must still surface its projects' sessions.
 func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool) []timelineSession {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
+	var sessions []timelineSession
+	forEachClaudeStore(baseDir, func(sessionsDir, projectDir string) {
+		sessions = append(sessions, transcriptSessionsIn(sessionsDir, projectDir, knownSessionIDs)...)
+	})
+	// Sort newest first for merge
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].newestTime.After(sessions[j].newestTime)
+	})
+	return sessions
+}
 
-	projectsDir := filepath.Join(home, ".claude", "projects")
+// forEachClaudeStore calls fn for each Claude Code session store whose decoded
+// project directory lies within baseDir.
+func forEachClaudeStore(baseDir string, fn func(sessionsDir, projectDir string)) {
+	projectsDir := claudeProjectsDir()
+	if projectsDir == "" {
+		return
+	}
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
-		return nil
+		return
 	}
-
-	var sessions []timelineSession
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -184,28 +194,31 @@ func discoverTranscriptSessions(baseDir string, knownSessionIDs map[string]bool)
 		if projectDir == "" || !dirWithinBase(projectDir, baseDir) {
 			continue
 		}
-		sessions = append(sessions, transcriptSessionsIn(
-			filepath.Join(projectsDir, entry.Name()), projectDir, knownSessionIDs)...)
+		fn(filepath.Join(projectsDir, entry.Name()), projectDir)
 	}
-	// Sort newest first for merge
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].newestTime.After(sessions[j].newestTime)
-	})
-	return sessions
+}
+
+// jsonlFiles lists the session transcripts (*.jsonl files) in dir.
+func jsonlFiles(dir string) []os.DirEntry {
+	entries, _ := os.ReadDir(dir)
+	files := entries[:0]
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+			files = append(files, entry)
+		}
+	}
+	return files
+}
+
+// startOfDay returns midnight of t's calendar day in t's location.
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // transcriptSessionsIn builds a session per transcript in one project's session directory.
 func transcriptSessionsIn(sessionsDir, projectDir string, knownSessionIDs map[string]bool) []timelineSession {
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		return nil
-	}
-
 	var sessions []timelineSession
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
+	for _, entry := range jsonlFiles(sessionsDir) {
 		sessionID := strings.TrimSuffix(entry.Name(), ".jsonl")
 		if knownSessionIDs[sessionID] {
 			continue
@@ -578,25 +591,23 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
 	var events []SessionEvent
 	if globalEventLog != nil {
-		events = globalEventLog.eventsForDir(currentBrowseDir)
+		events = globalEventLog.eventsForDir(browse)
 	}
 
-	groups := buildSessionTimeline(events, currentBrowseDir, true)
+	groups := buildSessionTimeline(events, browse, true)
 
 	data := timelineTemplateData{
 		baseTemplateData: newBaseTemplateData(),
 		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
 		Title:            "AI Timeline",
-		Subtitle:         fmt.Sprintf("Session history for %s", currentBrowseDir),
-		BrowsePath:       currentBrowseDir,
+		Subtitle:         fmt.Sprintf("Session history for %s", browse),
+		BrowsePath:       browse,
 		Groups:           groups,
-		RepoInfo:         detectRepoInfo(currentBrowseDir),
+		RepoInfo:         detectRepoInfo(browse),
 	}
 
 	renderTemplatePair(w, r, timelineTmpl, timelinePartialTmpl, data)

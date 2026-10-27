@@ -166,10 +166,6 @@ func serveSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func notifyClients() {
-	notifyClientsWithMessage("reload")
-}
-
 func notifyClientsWithMessage(message string) {
 	// Assign event ID and add to buffer for replay
 	id := globalEventBuffer.add(message)
@@ -188,15 +184,16 @@ func notifyClientsWithMessage(message string) {
 	}
 }
 
-func broadcastConnectionStatus(count int) {
-	msg := connectionStatusMessage{
-		Type:  "connection_status",
-		Count: count,
-	}
-	msgBytes, err := json.Marshal(msg)
+// broadcastJSON sends v to every SSE client as a JSON message.
+func broadcastJSON(v any) {
+	msgBytes, err := json.Marshal(v)
 	if err != nil {
-		log.Printf("Error marshaling connection status: %v", err)
+		log.Printf("Error marshaling SSE message: %v", err)
 		return
 	}
 	notifyClientsWithMessage(string(msgBytes))
+}
+
+func broadcastConnectionStatus(count int) {
+	broadcastJSON(connectionStatusMessage{Type: "connection_status", Count: count})
 }

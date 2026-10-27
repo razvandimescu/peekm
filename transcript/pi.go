@@ -40,13 +40,6 @@ type piMessage struct {
 	ExitCode   *int            `json:"exitCode"`
 }
 
-// IsPiSessionFile sniffs the header line pi writes as the first record:
-// {"type":"session","version":3,...}. Claude transcripts never start this way.
-func IsPiSessionFile(path string) bool {
-	header, err := readPiHeader(path)
-	return err == nil && header.Type == "session"
-}
-
 // PiSessionCwd reads the working directory from a pi session header line.
 func PiSessionCwd(path string) string {
 	header, err := readPiHeader(path)

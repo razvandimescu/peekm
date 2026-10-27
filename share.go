@@ -55,7 +55,7 @@ func isWithinDir(path, baseDir string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(resolved, resolvedBase+string(filepath.Separator))
+	return isSubpath(resolved, resolvedBase)
 }
 
 // shareEntry represents one active share
@@ -89,9 +89,8 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// activeLocked returns filePath's unexpired share. Callers hold s.mu.
+func (s *shareStore) activeLocked(filePath string) (*shareEntry, bool) {
 	for _, e := range s.entries {
 		if e.FilePath == filePath && time.Now().Before(e.ExpiresAt) {
 			return e, true
@@ -100,13 +99,17 @@ func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
 	return nil, false
 }
 
+func (s *shareStore) findByPath(filePath string) (*shareEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeLocked(filePath)
+}
+
 func (s *shareStore) create(filePath string, ttl time.Duration) *shareEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, e := range s.entries {
-		if e.FilePath == filePath && time.Now().Before(e.ExpiresAt) {
-			return e
-		}
+	if e, ok := s.activeLocked(filePath); ok {
+		return e
 	}
 	resolvedBase, _ := filepath.EvalSymlinks(filepath.Dir(filePath))
 	entry := &shareEntry{
@@ -128,20 +131,25 @@ func (s *shareStore) get(token string) (*shareEntry, bool) {
 		return nil, false
 	}
 	if time.Now().After(entry.ExpiresAt) {
-		s.cancelTunnel(token)
-		s.mu.Lock()
-		delete(s.entries, token)
-		s.mu.Unlock()
+		s.revoke(token)
 		return nil, false
 	}
 	return entry, true
 }
 
 func (s *shareStore) revoke(token string) {
-	s.cancelTunnel(token)
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removeLocked(token)
+}
+
+// removeLocked cancels token's tunnel and drops the share. Callers hold s.mu.
+func (s *shareStore) removeLocked(token string) {
+	if cancel, ok := s.tunnels[token]; ok {
+		cancel()
+		delete(s.tunnels, token)
+	}
 	delete(s.entries, token)
-	s.mu.Unlock()
 }
 
 func (s *shareStore) startTunnelForToken(token string) {
@@ -175,22 +183,9 @@ func (s *shareStore) reapExpired() {
 	now := time.Now()
 	for token, entry := range s.entries {
 		if now.After(entry.ExpiresAt) {
-			if cancel, ok := s.tunnels[token]; ok {
-				cancel()
-				delete(s.tunnels, token)
-			}
-			delete(s.entries, token)
+			s.removeLocked(token)
 		}
 	}
-}
-
-func (s *shareStore) cancelTunnel(token string) {
-	s.mu.Lock()
-	if cancel, ok := s.tunnels[token]; ok {
-		cancel()
-		delete(s.tunnels, token)
-	}
-	s.mu.Unlock()
 }
 
 var lanIP string
@@ -250,10 +245,6 @@ func newShareResponse(entry *shareEntry) shareResponse {
 	return resp
 }
 
-func cleanInputPath(raw string) string {
-	return resolveFilePath(filepath.Clean(strings.TrimPrefix(strings.TrimSpace(raw), "/")))
-}
-
 // handleShare dispatches GET (status), POST (create), DELETE (revoke) for LAN sharing
 func handleShare(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -278,9 +269,7 @@ func isShareableFile(absPath string) bool {
 	if !shareableRawExts[ext] {
 		return false
 	}
-	fileMutex.RLock()
-	dir := browseDir
-	fileMutex.RUnlock()
+	dir := currentBrowseDir()
 	return isWithinDir(absPath, dir)
 }
 
@@ -292,7 +281,7 @@ func handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	absPath, err := validateAndResolvePath(cleanInputPath(req.Path))
+	absPath, err := validateAndResolvePath(resolveFilePath(strings.TrimSpace(req.Path)))
 	if err != nil || !isShareableFile(absPath) {
 		http.Error(w, "file not found or not accessible", http.StatusNotFound)
 		return
@@ -343,7 +332,7 @@ func handleShareStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	absPath, err := validateAndResolvePath(cleanInputPath(filePath))
+	absPath, err := validateAndResolvePath(resolveFilePath(strings.TrimSpace(filePath)))
 	if err != nil {
 		json.NewEncoder(w).Encode(shareResponse{})
 		return
@@ -436,14 +425,7 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 			FileName:         "Expired Link",
 			IsExpired:        true,
 		}
-		var renderBuf bytes.Buffer
-		if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
-			http.Error(w, "This shared link has expired.", http.StatusGone)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusGone)
-		renderBuf.WriteTo(w)
+		renderBuffered(w, sharedViewTmpl, http.StatusGone, data)
 		return
 	}
 
@@ -541,13 +523,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 		ReadMin:          readingMinutes(content),
 		IsTunnel:         isTunnelRequest(r),
 	}
-	var renderBuf bytes.Buffer
-	if err := sharedViewTmpl.Execute(&renderBuf, data); err != nil {
-		http.Error(w, "template error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	renderBuf.WriteTo(w)
+	renderBuffered(w, sharedViewTmpl, http.StatusOK, data)
 }
 
 // serveSharedAsset serves a file co-located with a shared HTML file.
@@ -570,7 +546,7 @@ func serveSharedAsset(w http.ResponseWriter, r *http.Request, entry *shareEntry,
 		http.NotFound(w, r)
 		return
 	}
-	if entry.ResolvedBaseDir == "" || !strings.HasPrefix(resolved, entry.ResolvedBaseDir+string(filepath.Separator)) {
+	if !isSubpath(resolved, entry.ResolvedBaseDir) {
 		http.NotFound(w, r)
 		return
 	}

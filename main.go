@@ -403,21 +403,21 @@ func (el *eventLog) append(event SessionEvent) error {
 }
 
 // claudePlansDir returns the ~/.claude/plans/ directory path, or "" if $HOME is unavailable.
-func claudePlansDir() string {
-	homeDir, _ := os.UserHomeDir()
-	if homeDir == "" {
-		return ""
-	}
-	return filepath.Join(homeDir, ".claude", "plans")
-}
+func claudePlansDir() string { return homeSubdir(".claude", "plans") }
+
+// claudeProjectsDir returns ~/.claude/projects, the Claude Code session store root.
+func claudeProjectsDir() string { return homeSubdir(".claude", "projects") }
 
 // plansCacheDir returns the ~/.cache/peekm/plans/ directory path, or "" if $HOME is unavailable.
-func plansCacheDir() string {
+func plansCacheDir() string { return homeSubdir(".cache", "peekm", "plans") }
+
+// homeSubdir joins elem under $HOME, or returns "" when $HOME is unknown.
+func homeSubdir(elem ...string) string {
 	homeDir, _ := os.UserHomeDir()
 	if homeDir == "" {
 		return ""
 	}
-	return filepath.Join(homeDir, ".cache", "peekm", "plans")
+	return filepath.Join(append([]string{homeDir}, elem...)...)
 }
 
 // readPlanFile reads a plan file, falling back to the cache if the original is missing.
@@ -435,25 +435,19 @@ func readPlanFile(planPath string) ([]byte, error) {
 
 // isPlanFile checks whether a path is under ~/.claude/plans/.
 func isPlanFile(path string) bool {
-	plansDir := claudePlansDir()
-	return plansDir != "" && strings.HasPrefix(path, plansDir+string(os.PathSeparator))
+	return isSubpath(path, claudePlansDir())
 }
 
 // eventsForDir returns events under dir (plus plan files), newest first.
 func (el *eventLog) eventsForDir(dir string) []SessionEvent {
-	prefix := dir + string(filepath.Separator)
-	var plansPrefix string
-	if plansDir := claudePlansDir(); plansDir != "" {
-		plansPrefix = plansDir + string(filepath.Separator)
-	}
+	plansDir := claudePlansDir()
 
 	el.mu.RLock()
 	defer el.mu.RUnlock()
 	var out []SessionEvent
 	for i := len(el.events) - 1; i >= 0; i-- {
 		evt := el.events[i]
-		if strings.HasPrefix(evt.FilePath, prefix) || evt.FilePath == dir ||
-			(plansPrefix != "" && strings.HasPrefix(evt.FilePath, plansPrefix)) {
+		if evt.FilePath == dir || isSubpath(evt.FilePath, dir) || isSubpath(evt.FilePath, plansDir) {
 			out = append(out, evt)
 		}
 	}
@@ -494,17 +488,28 @@ func newBaseTemplateData() baseTemplateData {
 	}
 }
 
-func (m *watcherManager) watch(filePath string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Stop existing watcher
+// stopLocked tears down the active watcher. Callers hold m.mu.
+func (m *watcherManager) stopLocked() {
 	if m.cancel != nil {
 		m.cancel()
 	}
 	if m.current != nil {
 		m.current.Close()
 	}
+}
+
+// discardWatcher closes a watcher that failed setup and cancels its context.
+func discardWatcher(watcher *fsnotify.Watcher, cancel context.CancelFunc, reason string) {
+	if err := watcher.Close(); err != nil {
+		log.Printf("Failed to close watcher after %s: %v", reason, err)
+	}
+	cancel()
+}
+
+func (m *watcherManager) watch(filePath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopLocked()
 
 	// Start new watcher
 	ctx, cancel := context.WithCancel(context.Background())
@@ -517,10 +522,7 @@ func (m *watcherManager) watch(filePath string) error {
 	m.current = watcher
 
 	if err := watcher.Add(filePath); err != nil {
-		if closeErr := watcher.Close(); closeErr != nil {
-			log.Printf("Failed to close watcher after add error: %v", closeErr)
-		}
-		cancel()
+		discardWatcher(watcher, cancel, "add error")
 		return err
 	}
 
@@ -530,14 +532,7 @@ func (m *watcherManager) watch(filePath string) error {
 
 func (m *watcherManager) watchDirectory(rootDir string) error {
 	m.mu.Lock()
-
-	// Stop existing watcher (under lock)
-	if m.cancel != nil {
-		m.cancel()
-	}
-	if m.current != nil {
-		m.current.Close()
-	}
+	m.stopLocked()
 
 	// Start new watcher
 	ctx, cancel := context.WithCancel(context.Background())
@@ -552,10 +547,7 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 
 	// Add root directory
 	if err := watcher.Add(rootDir); err != nil {
-		if closeErr := watcher.Close(); closeErr != nil {
-			log.Printf("Failed to close watcher after add error: %v", closeErr)
-		}
-		cancel()
+		discardWatcher(watcher, cancel, "add error")
 		m.current = nil
 		m.cancel = nil
 		m.mu.Unlock()
@@ -571,10 +563,7 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 		m.mu.Lock()
 		// Clean up if we still own this watcher
 		if m.current == watcher {
-			if closeErr := watcher.Close(); closeErr != nil {
-				log.Printf("Failed to close watcher after directory walk error: %v", closeErr)
-			}
-			cancel()
+			discardWatcher(watcher, cancel, "directory walk error")
 			m.current = nil
 			m.cancel = nil
 		}
@@ -589,10 +578,7 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	// Check if watcher was replaced during walk
 	if m.current != watcher {
 		// Another call won the race, abandon this setup
-		if closeErr := watcher.Close(); closeErr != nil {
-			log.Printf("Failed to close abandoned watcher: %v", closeErr)
-		}
-		cancel()
+		discardWatcher(watcher, cancel, "losing setup race")
 		return fmt.Errorf("watcher setup cancelled (replaced during walk)")
 	}
 
@@ -618,12 +604,9 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 		}
 
 		// Security: Skip symlinks outside $HOME
-		resolvedInfo, _, resolveErr := validateSymlinkSecurity(path, info, homeDir)
+		info, resolveErr := validateSymlinkSecurity(path, info, homeDir)
 		if resolveErr != nil {
 			return nil
-		}
-		if resolvedInfo != nil {
-			info = resolvedInfo
 		}
 
 		if info.IsDir() && path != rootDir {
@@ -646,13 +629,7 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 func (m *watcherManager) close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if m.cancel != nil {
-		m.cancel()
-	}
-	if m.current != nil {
-		m.current.Close()
-	}
+	m.stopLocked()
 }
 
 var mermaidFenceRe = regexp.MustCompile("(?ms)^```mermaid[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*$")
@@ -730,6 +707,17 @@ func withCSRFCheck(next http.HandlerFunc) http.HandlerFunc {
 		log.Printf("CSRF: rejected cross-origin POST from %s", origin)
 		http.Error(w, "Forbidden: cross-origin request", http.StatusForbidden)
 	}
+}
+
+// postOnly admits same-origin POST requests only.
+func postOnly(next http.HandlerFunc) http.HandlerFunc {
+	return withCSRFCheck(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		next(w, r)
+	})
 }
 
 // isTunnelRequest reports whether a request arrived via the public tunnel relay.
@@ -830,28 +818,28 @@ func registerRoutes() {
 	// Local-only routes (owner's browser)
 	http.HandleFunc("/", localOnly(withRecovery(serveBrowser)))
 	http.HandleFunc("/healthz", localOnly(withRecovery(handleHealthz)))
-	http.HandleFunc("/open", localOnly(withRecovery(withCSRFCheck(handleOpen))))
+	http.HandleFunc("/open", localOnly(withRecovery(postOnly(handleOpen))))
 	http.HandleFunc("/view/", localOnly(withRecovery(serveFile)))
-	http.HandleFunc("/navigate", localOnly(withRecovery(withCSRFCheck(handleNavigate))))
-	http.HandleFunc("/folder", localOnly(withRecovery(withCSRFCheck(handleCreateFolder))))
-	http.HandleFunc("/delete", localOnly(withRecovery(withCSRFCheck(handleDelete))))
-	http.HandleFunc("/move", localOnly(withRecovery(withCSRFCheck(handleMove))))
+	http.HandleFunc("/navigate", localOnly(withRecovery(postOnly(handleNavigate))))
+	http.HandleFunc("/folder", localOnly(withRecovery(postOnly(handleCreateFolder))))
+	http.HandleFunc("/delete", localOnly(withRecovery(postOnly(handleDelete))))
+	http.HandleFunc("/move", localOnly(withRecovery(postOnly(handleMove))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
-	http.HandleFunc("/save", localOnly(withRecovery(withCSRFCheck(handleSave))))
-	http.HandleFunc("/download", localOnly(withRecovery(withCSRFCheck(handleDownload))))
+	http.HandleFunc("/save", localOnly(withRecovery(postOnly(handleSave))))
+	http.HandleFunc("/download", localOnly(withRecovery(postOnly(handleDownload))))
 	http.HandleFunc("/preview-content/", localOnly(withRecovery(servePreviewContent)))
 	http.HandleFunc("/tree-html", localOnly(withRecovery(serveTreeHTML)))
 	http.HandleFunc("/timeline", localOnly(withRecovery(serveTimeline)))
 	http.HandleFunc("/memory", localOnly(withRecovery(serveMemory)))
 	http.HandleFunc("/transcript", localOnly(withRecovery(serveTranscript)))
-	http.HandleFunc("/transcript/reply", localOnly(withRecovery(withCSRFCheck(blockTunnel(handleTranscriptReply)))))
+	http.HandleFunc("/transcript/reply", localOnly(withRecovery(postOnly(blockTunnel(handleTranscriptReply)))))
 	http.HandleFunc("/standup", localOnly(withRecovery(serveStandup)))
-	http.HandleFunc("/standup/save", localOnly(withRecovery(withCSRFCheck(handleStandupSave))))
+	http.HandleFunc("/standup/save", localOnly(withRecovery(postOnly(handleStandupSave))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
-	http.HandleFunc("/share/public", localOnly(withRecovery(withCSRFCheck(handleShareMakePublic))))
+	http.HandleFunc("/share/public", localOnly(withRecovery(postOnly(handleShareMakePublic))))
 
 	// LAN-accessible routes (token-gated)
 	http.HandleFunc("/s/", withRecovery(serveSharedFile))
@@ -863,41 +851,36 @@ func registerRoutes() {
 
 	// AI session tracking endpoint (always on unless --no-ai-tracking)
 	if !*disableHook {
-		http.HandleFunc("/hook/file-modified", localOnly(withRecovery(handleClaudeHook)))
+		http.HandleFunc("/hook/file-modified", localOnly(withRecovery(postOnly(handleClaudeHook))))
 	}
 }
 
-// validateSymlinkSecurity checks if a symlink is safe to follow
-// Returns the resolved FileInfo and whether to skip (for directories)
-func validateSymlinkSecurity(path string, info os.FileInfo, homeDir string) (os.FileInfo, bool, error) {
+// validateSymlinkSecurity returns info unchanged for a non-symlink, the
+// target's info for a symlink resolving inside $HOME, and an error otherwise.
+func validateSymlinkSecurity(path string, info os.FileInfo, homeDir string) (os.FileInfo, error) {
 	if info.Mode()&os.ModeSymlink == 0 {
-		return info, false, nil // Not a symlink, OK to proceed
+		return info, nil
 	}
 
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		log.Printf("Warning: Skipping unresolvable symlink: %s", path)
-		return nil, false, err
+		return nil, err
 	}
 
-	// Check if resolved path is within $HOME
-	if homeDir != "" && !strings.HasPrefix(resolved, homeDir) {
+	if homeDir != "" && resolved != filepath.Clean(homeDir) && !isSubpath(resolved, homeDir) {
 		log.Printf("Security: Skipping symlink outside home directory: %s -> %s", path, resolved)
-		return nil, false, fmt.Errorf("symlink outside home")
+		return nil, fmt.Errorf("symlink outside home")
 	}
 
-	// Update info to reflect the resolved target
 	resolvedInfo, err := os.Stat(resolved)
 	if err != nil {
 		log.Printf("Warning: Cannot stat symlink target: %s", resolved)
-		return nil, false, err
+		return nil, err
 	}
-
-	return resolvedInfo, false, nil
+	return resolvedInfo, nil
 }
 
-// validateAndResolvePath validates and resolves a path with security checks
-// Returns the validated absolute path or an error if validation fails
 // isPartialRequest detects if the request is an AJAX/fetch request for partial content
 func isPartialRequest(r *http.Request) bool {
 	return r.Header.Get("X-Requested-With") == "XMLHttpRequest"
@@ -910,6 +893,12 @@ func renderTemplatePair(w http.ResponseWriter, r *http.Request, full, partial *t
 	if isPartialRequest(r) {
 		tmpl = partial
 	}
+	return renderBuffered(w, tmpl, http.StatusOK, data)
+}
+
+// renderBuffered executes tmpl into a buffer before writing it with status, so
+// a template error never leaves a half-written page.
+func renderBuffered(w http.ResponseWriter, tmpl *template.Template, status int, data any) bool {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		log.Printf("Template execution error: %v", err)
@@ -917,6 +906,7 @@ func renderTemplatePair(w http.ResponseWriter, r *http.Request, full, partial *t
 		return false
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	buf.WriteTo(w)
 	return true
 }
@@ -926,79 +916,63 @@ func renderTemplate(w http.ResponseWriter, r *http.Request, data any) bool {
 	return renderTemplatePair(w, r, fileBrowserTmpl, fileBrowserPartialTmpl, data)
 }
 
+// isSubpath reports whether the clean path lies strictly inside dir. The
+// separator keeps a sibling sharing a name prefix (~/projects-old against
+// ~/projects) out; an empty dir contains nothing.
+func isSubpath(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if !strings.HasSuffix(dir, string(filepath.Separator)) {
+		dir += string(filepath.Separator)
+	}
+	return len(path) > len(dir) && strings.HasPrefix(path, dir)
+}
+
+// validateAndResolvePath expands ~, makes the path absolute, resolves symlinks
+// and rejects anything outside $HOME.
 func validateAndResolvePath(targetPath string) (string, error) {
-	// Expand ~ to home directory
-	if strings.HasPrefix(targetPath, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("cannot determine home directory: %w", err)
-		}
-		targetPath = filepath.Join(homeDir, targetPath[2:])
-	} else if targetPath == "~" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("cannot determine home directory: %w", err)
-		}
-		targetPath = homeDir
-	}
-
-	// Clean the path to prevent traversal
-	targetPath = filepath.Clean(targetPath)
-
-	// Make absolute if relative
-	if !filepath.IsAbs(targetPath) {
-		absPath, err := filepath.Abs(targetPath)
-		if err != nil {
-			return "", fmt.Errorf("invalid path: %w", err)
-		}
-		targetPath = absPath
-	}
-
-	// Resolve symlinks
-	resolvedPath, err := filepath.EvalSymlinks(targetPath)
-	if err != nil {
-		return "", fmt.Errorf("path does not exist: %w", err)
-	}
-	targetPath = resolvedPath
-
-	// Security: Restrict to $HOME directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
-	if !strings.HasPrefix(targetPath, homeDir) {
+	if targetPath == "~" || strings.HasPrefix(targetPath, "~/") {
+		targetPath = filepath.Join(homeDir, targetPath[1:])
+	}
+
+	// Abs also cleans, which collapses traversal segments.
+	targetPath, err = filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("path does not exist: %w", err)
+	}
+
+	if resolvedPath != filepath.Clean(homeDir) && !isSubpath(resolvedPath, homeDir) {
 		return "", fmt.Errorf("access denied: path must be within home directory")
 	}
-
-	return targetPath, nil
+	return resolvedPath, nil
 }
 
-// resolveFilePath converts a relative file path to absolute using browseDir
-// Thread-safe helper to eliminate duplication across handlers
-func resolveFilePath(relativePath string) string {
-	// Handle ~/... paths (files outside browseDir, e.g. plan files)
-	if strings.HasPrefix(relativePath, "~/") {
-		homeDir, _ := os.UserHomeDir()
-		if homeDir != "" {
-			return filepath.Clean(filepath.Join(homeDir, relativePath[2:]))
+// resolveFilePath maps a web path (relative to browseDir, or ~/... for files
+// outside it such as plans) to a clean absolute path. One leading slash is
+// ignored. The result is not validated.
+func resolveFilePath(webPath string) string {
+	webPath = strings.TrimPrefix(webPath, "/")
+	if strings.HasPrefix(webPath, "~/") {
+		if homeDir, _ := os.UserHomeDir(); homeDir != "" {
+			return filepath.Join(homeDir, webPath[2:])
 		}
 	}
-
-	// Get current browse directory (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
-
-	// Convert relative path to absolute by joining with browseDir
-	var absFilePath string
-	if filepath.IsAbs(relativePath) {
-		absFilePath = relativePath
-	} else {
-		absFilePath = filepath.Join(currentBrowseDir, relativePath)
+	if filepath.IsAbs(webPath) {
+		return filepath.Clean(webPath)
 	}
-
-	// Clean the absolute path
-	return filepath.Clean(absFilePath)
+	fileMutex.RLock()
+	defer fileMutex.RUnlock()
+	return filepath.Join(browseDir, webPath)
 }
 
 // isMemoryFile checks if an absolute path is a valid Claude Code memory file
@@ -1009,13 +983,13 @@ func isMemoryFile(absPath string) bool {
 	if err != nil || home == "" {
 		return false
 	}
-	if !strings.HasPrefix(absPath, home+string(filepath.Separator)) {
+	if !isSubpath(absPath, home) {
 		return false
 	}
 
 	// Memory file: ~/.claude/projects/<project>/memory/<file>.md
-	projectsDir := filepath.Join(home, ".claude", "projects")
-	if strings.HasPrefix(absPath, projectsDir+string(filepath.Separator)) {
+	projectsDir := claudeProjectsDir()
+	if isSubpath(absPath, projectsDir) {
 		rel, err := filepath.Rel(projectsDir, absPath)
 		if err != nil {
 			return false
@@ -1251,26 +1225,19 @@ func initSessionTracking() {
 	globalEventLog = el
 
 	plansDir := claudePlansDir()
-	plansDirPrefix := ""
-	if plansDir != "" {
-		plansDirPrefix = plansDir + string(os.PathSeparator)
-	}
-
 	cacheDir := plansCacheDir()
 
 	tracked := el.latestPerFile()
 	for path, meta := range tracked {
 		globalSessionStore.register(path, meta)
 		// Whitelist plan files if original or cached copy exists
-		if plansDirPrefix != "" && strings.HasPrefix(path, plansDirPrefix) && strings.HasSuffix(path, ".md") && !isWhitelistedFile(path) {
+		if isSubpath(path, plansDir) && strings.HasSuffix(path, ".md") && !isWhitelistedFile(path) {
 			_, origErr := os.Stat(path)
 			if origErr != nil && cacheDir != "" {
 				_, origErr = os.Stat(filepath.Join(cacheDir, filepath.Base(path)))
 			}
 			if origErr == nil {
-				fileMutex.Lock()
-				markdownFiles = append(markdownFiles, path)
-				fileMutex.Unlock()
+				addToWhitelist(path)
 			}
 		}
 	}
@@ -1314,11 +1281,7 @@ func scanUntrackedPlans(tracked map[string]*SessionMetadata, plansDir, cacheDir 
 			}
 			_ = atomicWriteFile(filepath.Join(cacheDir, entry.Name()), string(content))
 		}
-		if !isWhitelistedFile(absPath) {
-			fileMutex.Lock()
-			markdownFiles = append(markdownFiles, absPath)
-			fileMutex.Unlock()
-		}
+		addToWhitelist(absPath)
 		count++
 	}
 	if count > 0 {
@@ -1336,10 +1299,6 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 // its /view/ URL path. The path must resolve inside $HOME (validateAndResolvePath)
 // and be a file type peekm serves.
 func handleOpen(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	absPath, err := validateAndResolvePath(r.FormValue("path"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -1358,13 +1317,16 @@ func handleOpen(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "/view/%s", pathEscapeSegments(filepath.ToSlash(getRelativePath(absPath))))
 }
 
-// addToWhitelist appends path to the served-files whitelist if absent.
-func addToWhitelist(path string) {
+// addToWhitelist appends path to the served-files whitelist if absent and
+// reports whether it did.
+func addToWhitelist(path string) bool {
 	fileMutex.Lock()
 	defer fileMutex.Unlock()
-	if !isWhitelistedLocked(path) {
-		markdownFiles = append(markdownFiles, path)
+	if isWhitelistedLocked(path) {
+		return false
 	}
+	markdownFiles = append(markdownFiles, path)
+	return true
 }
 
 // handoffToRunning probes the occupied port for a peekm instance and delegates
@@ -1630,24 +1592,11 @@ func removeFromWhitelist(filePath string) bool {
 // notifySessionActivity pushes a lightweight SSE event on every received hook
 // so an open transcript view can refresh while its session is active.
 func notifySessionActivity(sessionID, tool string) {
-	msgBytes, err := json.Marshal(map[string]string{
+	broadcastJSON(map[string]string{
 		"type":    "session_activity",
 		"session": sessionID,
 		"tool":    tool,
 	})
-	if err == nil {
-		notifyClientsWithMessage(string(msgBytes))
-	}
-}
-
-// sendFileEvent sends a file event notification to clients
-func sendFileEvent(msg fileEventMessage) {
-	msgBytes, err := json.Marshal(msg)
-	if err != nil {
-		log.Printf("Error marshaling %s message: %v", msg.Type, err)
-	} else {
-		notifyClientsWithMessage(string(msgBytes))
-	}
 }
 
 func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePath string) {
@@ -1663,16 +1612,7 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 				log.Println("File modified, sending reload notification...")
 
 				// Send file_modified event with path so client can auto-refresh if viewing this file
-				msgBytes, err := json.Marshal(map[string]string{
-					"type": "file_modified",
-					"path": filePath,
-				})
-				if err != nil {
-					log.Printf("Error marshaling file modified message: %v", err)
-					notifyClients() // Fallback to plain reload
-				} else {
-					notifyClientsWithMessage(string(msgBytes))
-				}
+				broadcastJSON(fileEventMessage{Type: "file_modified", Path: filePath})
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -1688,7 +1628,7 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 	if homeDir == "" {
 		return
 	}
-	if resolved, err := filepath.EvalSymlinks(dirPath); err != nil || !strings.HasPrefix(resolved, homeDir) {
+	if resolved, err := filepath.EvalSymlinks(dirPath); err != nil || !isSubpath(resolved, homeDir) {
 		return
 	}
 	if isInLinkedWorktree(dirPath) {
@@ -1701,12 +1641,9 @@ func handleDirCreated(watcher *fsnotify.Watcher, dirPath string) {
 		if err != nil {
 			return nil
 		}
-		resolvedInfo, _, resolveErr := validateSymlinkSecurity(path, info, homeDir)
+		info, resolveErr := validateSymlinkSecurity(path, info, homeDir)
 		if resolveErr != nil {
 			return nil
-		}
-		if resolvedInfo != nil {
-			info = resolvedInfo
 		}
 		if info.IsDir() {
 			if path != dirPath && isExcludedDir(path, info) {
@@ -1757,11 +1694,11 @@ func announceNewFiles(dirPath string, newFiles []string) {
 	}
 
 	if len(newFiles) >= bulkFileThreshold {
-		sendFileEvent(fileEventMessage{Type: "files_added", Path: getRelativePath(dirPath), Count: len(newFiles)})
+		broadcastJSON(fileEventMessage{Type: "files_added", Path: getRelativePath(dirPath), Count: len(newFiles)})
 		return
 	}
 	for _, f := range newFiles {
-		sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(f)})
+		broadcastJSON(fileEventMessage{Type: "file_added", Path: getRelativePath(f)})
 	}
 }
 
@@ -1776,7 +1713,7 @@ func handleMarkdownCreated(filePath string) {
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
-		sendFileEvent(fileEventMessage{Type: "file_added", Path: getRelativePath(filePath), Session: sessionID})
+		broadcastJSON(fileEventMessage{Type: "file_added", Path: getRelativePath(filePath), Session: sessionID})
 	}()
 }
 
@@ -1810,7 +1747,7 @@ func handleMarkdownRemoved(filePath string, reason string) {
 		return
 	}
 	log.Printf("%s file: %s", reason, filePath)
-	sendFileEvent(fileEventMessage{Type: "file_removed", Path: getRelativePath(filePath)})
+	broadcastJSON(fileEventMessage{Type: "file_removed", Path: getRelativePath(filePath)})
 }
 
 func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
@@ -1854,14 +1791,7 @@ func watchDirectoryWithContext(ctx context.Context, watcher *fsnotify.Watcher) {
 }
 
 func serveRaw(w http.ResponseWriter, r *http.Request) {
-	filePath := strings.TrimPrefix(r.URL.Path, "/raw")
-	filePath = strings.TrimPrefix(filePath, "/")
-
-	// Clean the path
-	filePath = filepath.Clean(filePath)
-
-	// Resolve to absolute path using browseDir
-	absFilePath := resolveFilePath(filePath)
+	absFilePath := resolveFilePath(strings.TrimPrefix(r.URL.Path, "/raw"))
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -1893,24 +1823,13 @@ func serveRaw(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSave(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Failed to parse form", http.StatusBadRequest)
 		return
 	}
 
-	filePath := r.FormValue("file")
 	content := r.FormValue("content")
-
-	// Clean the path and strip leading slash (web paths are relative to browse dir)
-	filePath = filepath.Clean(strings.TrimPrefix(filePath, "/"))
-
-	// Resolve to absolute path using browseDir
-	absFilePath := resolveFilePath(filePath)
+	absFilePath := resolveFilePath(r.FormValue("file"))
 
 	validated, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -1963,11 +1882,6 @@ func atomicWriteFile(path, content string) error {
 }
 
 func handleDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Accept file path from request body (avoids global state race between tabs)
 	var req struct {
 		Path string `json:"path"`
@@ -1977,7 +1891,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absFilePath := cleanInputPath(req.Path)
+	absFilePath := resolveFilePath(strings.TrimSpace(req.Path))
 
 	filePath, err := validateAndResolvePath(absFilePath)
 	if err != nil {
@@ -2047,9 +1961,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 
 func serveTreeHTML(w http.ResponseWriter, r *http.Request) {
 	// Get state snapshot (thread-safe)
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
 	// Generate tree HTML (Recent mode flattens the tree chronologically)
 	var treeHTML string
@@ -2066,7 +1978,7 @@ func serveTreeHTML(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to write tree HTML response: %v", err)
 	}
 
-	log.Printf("Served tree HTML for directory: %s", currentBrowseDir)
+	log.Printf("Served tree HTML for directory: %s", browse)
 }
 
 func serveBrowser(w http.ResponseWriter, r *http.Request) {
@@ -2148,8 +2060,7 @@ func handlePlanFile(filePath, content, sessionID string) (string, string) {
 	if !strings.HasSuffix(filePath, ".md") {
 		return filePath, ""
 	}
-	plansDir := claudePlansDir()
-	if plansDir == "" || !strings.HasPrefix(filePath, plansDir+string(os.PathSeparator)) {
+	if !isPlanFile(filePath) {
 		return filePath, ""
 	}
 
@@ -2163,14 +2074,11 @@ func handlePlanFile(filePath, content, sessionID string) (string, string) {
 		}
 	}
 
-	if !isWhitelistedFile(filePath) {
-		fileMutex.Lock()
-		markdownFiles = append(markdownFiles, filePath)
-		fileMutex.Unlock()
+	if addToWhitelist(filePath) {
 		log.Printf("Whitelisted Claude plan: %s", filePath)
 	}
 	planTitle := extractPlanTitle(content)
-	sendFileEvent(fileEventMessage{
+	broadcastJSON(fileEventMessage{
 		Type:      "file_modified",
 		Path:      getRelativePath(filePath),
 		Session:   sessionID,
@@ -2181,11 +2089,6 @@ func handlePlanFile(filePath, content, sessionID string) (string, string) {
 
 // handleClaudeHook receives file modification events from Claude Code hooks
 func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req struct {
 		// Long-form field names (legacy hook / plan file payloads)
 		SessionID      string `json:"session_id"`
@@ -2275,10 +2178,6 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	var req struct {
 		Name   string `json:"name"`
 		Parent string `json:"parent"`
@@ -2297,9 +2196,7 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.RLock()
-	root := browseDir
-	fileMutex.RUnlock()
+	root := currentBrowseDir()
 
 	parentDir := filepath.Join(root, req.Parent)
 	validatedParent, err := validateAndResolvePath(parentDir)
@@ -2333,27 +2230,21 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func handleNavigate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// decodeRequestPath reads {"path": ...} from the body and validates it,
+// writing the error response and returning false on failure.
+func decodeRequestPath(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req struct {
 		Path string `json:"path"`
 	}
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+		return "", false
 	}
-
 	targetPath := strings.TrimSpace(req.Path)
 	if targetPath == "" {
 		http.Error(w, "Path cannot be empty", http.StatusBadRequest)
-		return
+		return "", false
 	}
-
-	// Validate and resolve path with security checks
 	validatedPath, err := validateAndResolvePath(targetPath)
 	if err != nil {
 		statusCode := http.StatusBadRequest
@@ -2363,9 +2254,16 @@ func handleNavigate(w http.ResponseWriter, r *http.Request) {
 			statusCode = http.StatusInternalServerError
 		}
 		http.Error(w, err.Error(), statusCode)
+		return "", false
+	}
+	return validatedPath, true
+}
+
+func handleNavigate(w http.ResponseWriter, r *http.Request) {
+	targetPath, ok := decodeRequestPath(w, r)
+	if !ok {
 		return
 	}
-	targetPath = validatedPath
 
 	// Check if path exists and is a directory
 	info, err := os.Stat(targetPath)
@@ -2443,39 +2341,10 @@ func moveToTrash(filePath string) error {
 }
 
 func handleDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	targetPath, ok := decodeRequestPath(w, r)
+	if !ok {
 		return
 	}
-
-	var req struct {
-		Path string `json:"path"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	targetPath := strings.TrimSpace(req.Path)
-	if targetPath == "" {
-		http.Error(w, "Path cannot be empty", http.StatusBadRequest)
-		return
-	}
-
-	// Validate and resolve path with security checks
-	validatedPath, err := validateAndResolvePath(targetPath)
-	if err != nil {
-		statusCode := http.StatusBadRequest
-		if strings.Contains(err.Error(), "access denied") {
-			statusCode = http.StatusForbidden
-		} else if strings.Contains(err.Error(), "cannot determine home directory") {
-			statusCode = http.StatusInternalServerError
-		}
-		http.Error(w, err.Error(), statusCode)
-		return
-	}
-	targetPath = validatedPath
 
 	if !isWhitelistedFile(targetPath) {
 		http.Error(w, "File not found or access denied", http.StatusForbidden)
@@ -2504,7 +2373,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 // Returns the validated path, file info, and error message (empty on success).
 func validateMoveSource(relPath, root, validatedRoot string) (string, os.FileInfo, string) {
 	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
-	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+	if err != nil || !isSubpath(validated, validatedRoot) {
 		return "", nil, "Access denied"
 	}
 	info, err := os.Stat(validated)
@@ -2520,7 +2389,7 @@ func validateMoveSource(relPath, root, validatedRoot string) (string, os.FileInf
 // validateMoveDest resolves and validates a move destination directory.
 func validateMoveDest(relPath, root, validatedRoot string) (string, string) {
 	validated, err := validateAndResolvePath(filepath.Join(root, relPath))
-	if err != nil || !strings.HasPrefix(validated, validatedRoot) {
+	if err != nil || (validated != validatedRoot && !isSubpath(validated, validatedRoot)) {
 		return "", "Access denied"
 	}
 	if info, err := os.Stat(validated); err != nil || !info.IsDir() {
@@ -2530,10 +2399,6 @@ func validateMoveDest(relPath, root, validatedRoot string) (string, string) {
 }
 
 func handleMove(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	var req struct {
 		Source string `json:"source"`
 		Dest   string `json:"dest"`
@@ -2543,9 +2408,7 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.RLock()
-	root := browseDir
-	fileMutex.RUnlock()
+	root := currentBrowseDir()
 
 	validatedRoot, err := validateAndResolvePath(root)
 	if err != nil {
@@ -2566,8 +2429,7 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prevent circular move (directory into itself or its subtree)
-	sep := string(filepath.Separator)
-	if sourceInfo.IsDir() && strings.HasPrefix(validatedDest+sep, validatedSource+sep) {
+	if sourceInfo.IsDir() && (validatedDest == validatedSource || isSubpath(validatedDest, validatedSource)) {
 		http.Error(w, "Cannot move a folder into itself", http.StatusBadRequest)
 		return
 	}
@@ -2602,14 +2464,12 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 }
 
 func applyMoveState(oldPath, newPath string, isDir bool) {
-	sep := string(filepath.Separator)
 	fileMutex.Lock()
 	defer fileMutex.Unlock()
 	// Surgical whitelist update: rewrite matching prefixes instead of re-walking the directory
 	if isDir {
-		prefix := oldPath + sep
 		for i, f := range markdownFiles {
-			if strings.HasPrefix(f, prefix) {
+			if isSubpath(f, oldPath) {
 				markdownFiles[i] = newPath + f[len(oldPath):]
 			}
 		}
@@ -2631,26 +2491,22 @@ func applyMoveState(oldPath, newPath string, isDir bool) {
 	}
 	if currentFile == oldPath {
 		currentFile = newPath
-	} else if isDir && strings.HasPrefix(currentFile, oldPath+sep) {
+	} else if isDir && isSubpath(currentFile, oldPath) {
 		currentFile = filepath.Join(newPath, currentFile[len(oldPath):])
 	}
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request) {
-	filePath := strings.TrimPrefix(r.URL.Path, "/view/")
-	filePath = strings.TrimPrefix(filePath, "/")
-	filePath = filepath.Clean(filePath)
+	filePath := filepath.Clean(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/view/"), "/"))
 	absFilePath := resolveFilePath(filePath)
 
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
 	if !isWhitelistedFile(absFilePath) {
 		// Serve co-located assets (images, CSS, JS) referenced by markdown files
 		ext := strings.ToLower(filepath.Ext(absFilePath))
 		if _, ok := allowedAssetExts[ext]; ok {
-			if validated, err := validateAndResolvePath(absFilePath); err == nil && isWithinDir(validated, currentBrowseDir) {
+			if validated, err := validateAndResolvePath(absFilePath); err == nil && isWithinDir(validated, browse) {
 				http.ServeFile(w, r, validated)
 				return
 			}
@@ -2693,7 +2549,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		TreeHTML:         template.HTML(treeHTML),
 		Content:          contentHTML,
 		ShowBackButton:   true,
-		BrowsePath:       currentBrowseDir,
+		BrowsePath:       browse,
 		SessionData:      sessionData,
 		IsPreview:        isPreview,
 	}
@@ -2763,8 +2619,7 @@ func servePreviewContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleaned := filepath.Clean(relPath)
-	absPath := resolveFilePath(cleaned)
+	absPath := resolveFilePath(relPath)
 
 	validated, err := validateAndResolvePath(absPath)
 	if err != nil {
@@ -2797,9 +2652,7 @@ func servePreviewContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileMutex.RLock()
-	dir := browseDir
-	fileMutex.RUnlock()
+	dir := currentBrowseDir()
 
 	if !isWithinDir(validated, dir) {
 		http.NotFound(w, r)
@@ -2915,7 +2768,7 @@ func (c *ignoreCache) accumulate(dir, homeDir string) []string {
 	var combined []string
 	if dir != homeDir {
 		// Also terminates the recursion: filepath.Dir("/") is "/".
-		if !strings.HasPrefix(dir, homeDir+string(filepath.Separator)) {
+		if !isSubpath(dir, homeDir) {
 			return nil
 		}
 		combined = c.accumulate(filepath.Dir(dir), homeDir)
@@ -3103,17 +2956,12 @@ func isLinkedWorktree(dir string) bool {
 // arrive per file, with no directory event to reject, and `git worktree add`
 // can create the worktree directory before writing its gitfile.
 func isInLinkedWorktree(path string) bool {
-	fileMutex.RLock()
-	root := browseDir
-	fileMutex.RUnlock()
+	root := currentBrowseDir()
 	if root == "" {
 		return false
 	}
 
-	// The trailing separator keeps a sibling that merely shares a name prefix
-	// (~/projects-old against ~/projects) out of the walk.
-	prefix := root + string(filepath.Separator)
-	for dir := path; strings.HasPrefix(dir, prefix); dir = filepath.Dir(dir) {
+	for dir := path; isSubpath(dir, root); dir = filepath.Dir(dir) {
 		if isLinkedWorktree(dir) {
 			return true
 		}
@@ -3151,18 +2999,11 @@ func collectMarkdownFilesWalk(walkDir, homeDir string, visited map[string]bool, 
 			return nil
 		}
 
+		isSymlink := info.Mode()&os.ModeSymlink != 0
 		// Security: Skip symlinks that point outside $HOME
-		resolvedInfo, shouldSkip, resolveErr := validateSymlinkSecurity(path, info, homeDir)
-		if shouldSkip {
-			return filepath.SkipDir
-		}
+		info, resolveErr := validateSymlinkSecurity(path, info, homeDir)
 		if resolveErr != nil {
 			return nil
-		}
-
-		isSymlink := info.Mode()&os.ModeSymlink != 0
-		if resolvedInfo != nil {
-			info = resolvedInfo
 		}
 
 		if info.IsDir() {
@@ -3294,11 +3135,9 @@ func generateSmartFolders() []smartFolder {
 		return nil
 	}
 
-	fileMutex.RLock()
-	currentBrowseDir := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
-	events := globalEventLog.eventsForDir(currentBrowseDir)
+	events := globalEventLog.eventsForDir(browse)
 	if len(events) == 0 {
 		return nil
 	}
@@ -3317,7 +3156,7 @@ func generateSmartFolders() []smartFolder {
 			continue
 		}
 
-		relPath := tildeRelPath(path, currentBrowseDir)
+		relPath := tildeRelPath(path, browse)
 
 		recentAI = append(recentAI, smartFolderFile{
 			RelPath:   relPath,
@@ -3424,11 +3263,7 @@ func generateTreeHTML() string {
 
 	// Build directory structure
 	for _, path := range currentMarkdownFiles {
-		// Make file path absolute first
-		absPath := path
-		if !filepath.IsAbs(path) {
-			absPath, _ = filepath.Abs(path)
-		}
+		absPath, _ := filepath.Abs(path)
 
 		// Make path relative to browse directory (~/... for out-of-browseDir files)
 		relPath := tildeRelPath(absPath, absDir)
@@ -3579,10 +3414,7 @@ func generateRecentTreeHTML(all bool) string {
 
 	rows := make([]recentFile, 0, len(currentMarkdownFiles))
 	for _, path := range currentMarkdownFiles {
-		absPath := path
-		if !filepath.IsAbs(path) {
-			absPath, _ = filepath.Abs(path)
-		}
+		absPath, _ := filepath.Abs(path)
 		mod, fromEvent := eventTimes[absPath]
 		if !fromEvent {
 			info, err := os.Stat(path)
@@ -3830,7 +3662,7 @@ func addPinnedDirs(absDir string, dirNodes map[string]*fileNode) map[string]bool
 	fileMutex.RUnlock()
 
 	for absPath := range pinned {
-		if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+		if !isSubpath(absPath, absDir) {
 			continue
 		}
 		if _, err := os.Stat(absPath); err != nil {
