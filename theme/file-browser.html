@@ -3221,212 +3221,14 @@
             }
         }
 
-        // Initialize session info timestamps on page load
+        // Render session timestamps as relative times.
         function initializeSessionInfo() {
-            // Format timestamps
-            const timestampElements = document.querySelectorAll('.session-timestamp');
-            timestampElements.forEach(element => {
+            document.querySelectorAll('.session-timestamp').forEach(element => {
                 const isoTime = element.getAttribute('datetime');
                 if (isoTime) {
                     element.textContent = formatRelativeTime(isoTime);
                 }
             });
-
-            // Handle session persistence via localStorage
-            handleSessionPersistence();
-        }
-
-        // Handle session persistence - save to/restore from localStorage
-        function handleSessionPersistence() {
-            const panel = document.getElementById('sessionInfoPanel');
-            const content = document.getElementById('content');
-            if (!content) return;
-
-            // Get current file path from URL
-            const match = window.location.pathname.match(/\/view\/(.+)/);
-            if (!match) return; // Not a file view
-
-            const filePath = '/' + decodeURIComponent(match[1]);
-
-            // If server provided session data, save it to localStorage
-            if (panel && panel.querySelector('.session-info-content')) {
-                const sessionData = extractSessionDataFromDOM(panel);
-                if (sessionData && typeof saveSessionMetadata === 'function') {
-                    saveSessionMetadata(filePath, sessionData);
-                    console.log('[Session] Saved to localStorage:', filePath);
-                }
-            }
-            // If no server data, try to restore from localStorage
-            else if (typeof getSessionMetadata === 'function') {
-                const storedData = getSessionMetadata(filePath);
-                if (storedData) {
-                    console.log('[Session] Restoring from localStorage:', filePath);
-                    renderSessionPanel(filePath, storedData);
-                }
-            }
-        }
-
-        // Extract session data from existing DOM panel
-        function extractSessionDataFromDOM(panel) {
-            try {
-                const sessionIdEl = panel.querySelector('.session-id-value');
-                const operationEl = panel.querySelector('.session-operation-badge');
-                const permissionEl = panel.querySelector('.session-permission-badge');
-                const timestampEl = panel.querySelector('.session-timestamp');
-                const cwdEl = panel.querySelector('.session-info-value code');
-                const toolUseIdEl = Array.from(panel.querySelectorAll('.session-info-label'))
-                    .find(el => el.textContent.includes('Tool Use ID'))
-                    ?.nextElementSibling?.querySelector('code');
-                const transcriptEl = Array.from(panel.querySelectorAll('.session-info-label'))
-                    .find(el => el.textContent.includes('Transcript Path'))
-                    ?.nextElementSibling?.querySelector('code');
-
-                if (!sessionIdEl || !operationEl || !timestampEl) return null;
-
-                return {
-                    session_id: sessionIdEl.textContent.trim(),
-                    tool_name: operationEl.textContent.trim(),
-                    permission_mode: permissionEl ? permissionEl.textContent.trim() : '',
-                    timestamp: timestampEl.getAttribute('datetime'),
-                    cwd: cwdEl ? cwdEl.textContent.trim() : '',
-                    tool_use_id: toolUseIdEl ? toolUseIdEl.textContent.trim() : '',
-                    transcript_path: transcriptEl ? transcriptEl.textContent.trim() : ''
-                };
-            } catch (error) {
-                console.error('[Session] Failed to extract session data:', error);
-                return null;
-            }
-        }
-
-        // Render session panel from localStorage data
-        // Sanitize a string for safe use in textContent (strips control chars)
-        function sanitizeSessionValue(val) {
-            return String(val || '').replace(/[\x00-\x1f]/g, '');
-        }
-
-        // Safe CSS class suffix: only allow alphanumeric, hyphen, underscore
-        function safeCssClass(val) {
-            return String(val || '').replace(/[^a-zA-Z0-9_-]/g, '');
-        }
-
-        function renderSessionPanel(filePath, sessionData) {
-            if (document.getElementById('sessionInfoPanel')) return;
-
-            const content = document.getElementById('content');
-            if (!content) return;
-
-            const headerActions = content.querySelector('.file-action-bar');
-            if (!headerActions) return;
-
-            // DOM construction helpers (no innerHTML with user data)
-            function el(tag, className, children) {
-                const node = document.createElement(tag);
-                if (className) node.className = className;
-                if (Array.isArray(children)) children.forEach(function(c) { node.appendChild(c); });
-                else if (typeof children === 'string') node.textContent = children;
-                return node;
-            }
-
-            function field(label, valueEl) {
-                const labelSpan = el('span', 'session-info-label', label);
-                return el('div', 'session-info-field', [labelSpan, valueEl]);
-            }
-
-            function badgeField(label, badgeClass, modifierPrefix, value) {
-                const badge = el('span', badgeClass + ' ' + modifierPrefix + '-' + safeCssClass(value), sanitizeSessionValue(value));
-                return field(label, el('span', 'session-info-value', [badge]));
-            }
-
-            function codeField(label, value) {
-                return field(label, el('code', 'session-info-value', sanitizeSessionValue(value)));
-            }
-
-            // Session info button (static HTML, no user data)
-            const button = document.createElement('button');
-            button.id = 'sessionInfoButton';
-            button.className = 'session-info-button';
-            button.setAttribute('onclick', 'toggleSessionInfo()');
-            button.setAttribute('aria-label', 'Show session information');
-            button.setAttribute('aria-expanded', 'false');
-            button.innerHTML = '<span style="display:inline-flex;align-items:center;gap:4px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span class="session-ai-badge">AI</span></span>';
-
-            const editBtn = headerActions.querySelector('button[onclick*="editFile"]');
-            if (editBtn) {
-                headerActions.insertBefore(button, editBtn);
-            } else {
-                headerActions.appendChild(button);
-            }
-
-            // Session ID field with copy button
-            const sanitizedId = sanitizeSessionValue(sessionData.session_id);
-            const copyBtn = document.createElement('button');
-            copyBtn.className = 'session-copy-button';
-            copyBtn.setAttribute('aria-label', 'Copy session ID');
-            copyBtn.title = 'Copy session ID';
-            copyBtn.addEventListener('click', function() {
-                copyToClipboard(sanitizedId);
-                copyBtn.classList.add('copied');
-                copyBtn.setAttribute('aria-label', 'Copied!');
-                setTimeout(function() {
-                    copyBtn.classList.remove('copied');
-                    copyBtn.setAttribute('aria-label', 'Copy session ID');
-                }, 2000);
-            });
-            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-
-            const idGroup = el('div', 'session-info-value-group', [
-                el('code', 'session-info-value session-id-value', sanitizedId),
-                copyBtn
-            ]);
-
-            // Timestamp field
-            const timeEl = el('time', 'session-timestamp', formatRelativeTime(sessionData.timestamp));
-            timeEl.setAttribute('datetime', sanitizeSessionValue(sessionData.timestamp));
-
-            // Main section
-            const mainSection = el('div', 'session-info-main', [
-                field('Session ID:', idGroup),
-                badgeField('Operation:', 'session-operation-badge', 'session-operation', sessionData.tool_name),
-                badgeField('Permission Mode:', 'session-permission-badge', 'session-permission', sessionData.permission_mode),
-                field('Timestamp:', el('span', 'session-info-value', [timeEl]))
-            ]);
-
-            // Technical details (optional)
-            const techEntries = [
-                ['Working Directory:', sessionData.cwd],
-                ['Tool Use ID:', sessionData.tool_use_id],
-                ['Transcript Path:', sessionData.transcript_path]
-            ].filter(function(e) { return e[1]; });
-
-            const panelChildren = [mainSection];
-
-            if (techEntries.length > 0) {
-                const toggleBtn = document.createElement('button');
-                toggleBtn.className = 'session-technical-toggle';
-                toggleBtn.setAttribute('aria-expanded', 'false');
-                toggleBtn.addEventListener('click', function() { toggleTechnicalDetails(); });
-                toggleBtn.innerHTML = '<span class="session-technical-chevron">&#9654;</span> Technical Details';
-
-                const techContent = el('div', 'session-technical-content');
-                techContent.style.display = 'none';
-                techEntries.forEach(function(e) { techContent.appendChild(codeField(e[0], e[1])); });
-
-                panelChildren.push(el('div', 'session-technical-details', [toggleBtn, techContent]));
-            }
-
-            // Assemble panel
-            const panel = el('div', 'session-info-panel', [el('div', 'session-info-content', panelChildren)]);
-            panel.id = 'sessionInfoPanel';
-            panel.setAttribute('aria-hidden', 'true');
-            panel.style.display = 'none';
-
-            // Insert panel after subtitle
-            const subtitle = content.querySelector('.subtitle');
-            if (subtitle && subtitle.parentNode) {
-                subtitle.parentNode.insertBefore(panel, subtitle.nextSibling);
-            }
-
-            console.log('[Session] Rendered panel from localStorage');
         }
 
         function formatIdleDuration(ms) {
@@ -3454,31 +3256,13 @@
         }
         window.renderIdleReadout = renderIdleReadout;
 
-        // Call initialization when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
+        // First render happens in navigation.js reinitializeScripts(); this keeps
+        // relative times current.
+        setInterval(() => {
             initializeSessionInfo();
             renderIdleReadout();
+        }, 60000);
 
-            // Restore tree state from localStorage (function defined in navigation.js)
-            if (typeof restoreTreeState === 'function') {
-                restoreTreeState();
-            }
-
-            // Update timestamps every minute
-            setInterval(() => {
-                const timestampElements = document.querySelectorAll('.session-timestamp');
-                timestampElements.forEach(element => {
-                    const isoTime = element.getAttribute('datetime');
-                    if (isoTime) {
-                        element.textContent = formatRelativeTime(isoTime);
-                    }
-                });
-                renderIdleReadout();
-            }, 60000); // Update every 60 seconds
-        });
-
-        // Note: setupCollapse() and findParentItem() are defined in navigation.js
-        // They will be called automatically by the DOMContentLoaded handler in navigation.js
 
         // Handle toast click to navigate to file (uses SPA navigation)
         // Note: toast functions (showToast, hideToast) are defined in navigation.js

@@ -94,11 +94,10 @@ func resolveClaudeTranscriptPath(sessionID string) string {
 	if !sessionIDRe.MatchString(sessionID) {
 		return ""
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	projectsDir := claudeProjectsDir()
+	if projectsDir == "" {
 		return ""
 	}
-	projectsDir := filepath.Join(home, ".claude", "projects")
 	fileName := sessionID + ".jsonl"
 	probe := func(dir string) string {
 		candidate := filepath.Join(dir, fileName)
@@ -637,10 +636,7 @@ func formatWriteInput(m map[string]interface{}) template.HTML {
 	}
 	content := toolInputStr(m, "content")
 	lines := strings.Count(content, "\n") + 1
-	label := fmt.Sprintf("%d line", lines)
-	if lines != 1 {
-		label += "s"
-	}
+	label := fmt.Sprintf("%d %s", lines, plural(lines, "line"))
 	var b strings.Builder
 	writeFileLabel(&b, fp, label)
 	b.WriteString(lineDiffHTML("", content, diffMaxLines))

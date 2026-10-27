@@ -43,11 +43,7 @@ func setupClaudeCode(args []string) {
 	hookPort := setupFlags.Int("port", 6419, "Port peekm runs on")
 	setupFlags.Parse(args)
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
-		os.Exit(1)
-	}
+	homeDir := mustHomeDir()
 
 	claudeDir := filepath.Join(homeDir, ".claude")
 	settingsPath := filepath.Join(claudeDir, "settings.json")
@@ -289,16 +285,21 @@ func containsPeekmHook(hooks []interface{}, hookScriptPath string) bool {
 	return false
 }
 
+// removeAndReport deletes path and prints the outcome. A missing file is silent.
+func removeAndReport(path string) {
+	if err := os.Remove(path); err == nil {
+		fmt.Printf("    Removed %s\n", path)
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "    Warning: %v\n", err)
+	}
+}
+
 func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	fmt.Println("\n  Removing AI Session Tracking")
 	fmt.Println("  " + strings.Repeat("\u2500", 30))
 
 	// Remove hook script
-	if err := os.Remove(hookScriptPath); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "    Warning: %v\n", err)
-	} else if err == nil {
-		fmt.Printf("    Removed %s\n", hookScriptPath)
-	}
+	removeAndReport(hookScriptPath)
 
 	// Remove hooks from settings.json
 	settings, postToolUse, err := loadPostToolUseHooks(settingsPath)
@@ -352,11 +353,7 @@ func installAutostart() {
 		os.Exit(1)
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
-		os.Exit(1)
-	}
+	homeDir := mustHomeDir()
 
 	switch detectServiceManager() {
 	case "launchd":
@@ -372,11 +369,7 @@ func installAutostart() {
 }
 
 func removeAutostart() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
-		os.Exit(1)
-	}
+	homeDir := mustHomeDir()
 
 	switch detectServiceManager() {
 	case "launchd":
@@ -389,6 +382,16 @@ func removeAutostart() {
 		fmt.Fprintf(os.Stderr, "Error: unsupported platform\n")
 		os.Exit(1)
 	}
+}
+
+// mustHomeDir returns $HOME or exits: setup commands cannot proceed without it.
+func mustHomeDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
+		os.Exit(1)
+	}
+	return homeDir
 }
 
 func detectServiceManager() string {
@@ -474,11 +477,7 @@ func removeLaunchd(homeDir string) {
 		fmt.Println("    Service stopped")
 	}
 
-	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "    Error removing plist: %v\n", err)
-	} else {
-		fmt.Printf("    Removed %s\n", plistPath)
-	}
+	removeAndReport(plistPath)
 
 	fmt.Print("\n  Done.\n\n")
 }
@@ -539,11 +538,7 @@ func removeSystemd(homeDir string) {
 		fmt.Println("    Service stopped and disabled")
 	}
 
-	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "    Error removing unit file: %v\n", err)
-	} else {
-		fmt.Printf("    Removed %s\n", unitPath)
-	}
+	removeAndReport(unitPath)
 
 	runCommand("systemctl", "--user", "daemon-reload")
 	fmt.Print("\n  Done.\n\n")
@@ -582,11 +577,7 @@ func removeStartupFolder(homeDir string) {
 	fmt.Println("\n  Removing peekm autostart (Windows)")
 	fmt.Println("  ====================================")
 
-	if err := os.Remove(vbsPath); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "    Error removing startup script: %v\n", err)
-	} else {
-		fmt.Printf("    Removed %s\n", vbsPath)
-	}
+	removeAndReport(vbsPath)
 
 	fmt.Print("\n  Done.\n\n")
 }

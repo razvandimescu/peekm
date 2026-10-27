@@ -694,7 +694,7 @@ func TestHandleOpen(t *testing.T) {
 
 	getReq := httptest.NewRequest(http.MethodGet, "http://localhost/open?path="+mdPath, nil)
 	getRec := httptest.NewRecorder()
-	handleOpen(getRec, getReq)
+	postOnly(handleOpen)(getRec, getReq)
 	if getRec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET: got status %d, want %d", getRec.Code, http.StatusMethodNotAllowed)
 	}

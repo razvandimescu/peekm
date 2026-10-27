@@ -23,6 +23,26 @@ func TestTruncateSessionID(t *testing.T) {
 	}
 }
 
+func TestIsSubpath(t *testing.T) {
+	tests := []struct {
+		path, dir string
+		want      bool
+	}{
+		{"/home/u/projects/a.md", "/home/u/projects", true},
+		{"/home/u/projects-old/a.md", "/home/u/projects", false},
+		{"/home/u/projects", "/home/u/projects", false},
+		{"/home/u/projects/a.md", "/home/u/projects/", true},
+		{"/home/u/projects/", "/home/u/projects/", false},
+		{"/home/u/a.md", "", false},
+		{"/etc/hosts", "/", true},
+	}
+	for _, tt := range tests {
+		if got := isSubpath(tt.path, tt.dir); got != tt.want {
+			t.Errorf("isSubpath(%q, %q) = %v, want %v", tt.path, tt.dir, got, tt.want)
+		}
+	}
+}
+
 func TestParseTimestamp(t *testing.T) {
 	tests := []struct {
 		name   string

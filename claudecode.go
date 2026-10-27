@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +35,6 @@ const (
 	// without limit. Overflow clears the set — a stale branch merely re-forks.
 	maxOwnedBranches = 512
 )
-
-var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{7,}$`)
 
 // sessionSteerer serialises replies and tracks which session ids are peekm-owned
 // branches (safe to resume in place versus a session that may be live in a terminal).
@@ -174,11 +171,6 @@ func (s *sessionSteerer) reply(cwd, session, text string) (branch, result string
 
 // handleTranscriptReply continues a session from the transcript page (fork-once-then-chain).
 func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Cap the body before reading it; maxReplyLength alone is only enforced post-decode.
 	// Slack covers the JSON envelope plus worst-case escaping of a max-length reply.
 	r.Body = http.MaxBytesReader(w, r.Body, 2*maxReplyLength+1024)
@@ -201,7 +193,7 @@ func handleTranscriptReply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reply too long", http.StatusBadRequest)
 		return
 	}
-	if !sessionIDPattern.MatchString(session) {
+	if !sessionIDRe.MatchString(session) {
 		http.Error(w, "invalid session id", http.StatusBadRequest)
 		return
 	}

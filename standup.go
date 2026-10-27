@@ -52,7 +52,7 @@ const standupHeadlineCap = 5
 // edits is a tail entry, not a headline block.
 const standupTailEditThreshold = 10
 
-var standupEditTools = map[string]bool{"Edit": true, "Write": true, "NotebookEdit": true}
+var standupEditTools = map[string]bool{"Edit": true, "MultiEdit": true, "Write": true, "NotebookEdit": true}
 
 // standupFileRowsShown caps the visible rows of the "files AI edited" list; the
 // remainder is marked Extra and hides behind "+N more".
@@ -445,44 +445,19 @@ type projectAccum struct {
 // cheap head/tail read, fully parses the survivors, and groups their per-day
 // metrics by git repo root.
 func collectProjectSlices(browseDir, dayStr string) map[string]*projectAccum {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	projectsDir := filepath.Join(home, ".claude", "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return nil
-	}
-
 	accums := map[string]*projectAccum{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		projectDir := resolveProjectDir(entry.Name())
-		if projectDir == "" || !dirWithinBase(projectDir, browseDir) {
-			continue
-		}
+	forEachClaudeStore(browseDir, func(sessionsDir, projectDir string) {
 		root := projectDir
 		if gr, err := findGitRoot(projectDir); err == nil {
 			root = gr
 		}
-		sessionsDir := filepath.Join(projectsDir, entry.Name())
 		addSessionsForProject(accums, sessionsDir, projectDir, root, dayStr)
-	}
+	})
 	return accums
 }
 
 func addSessionsForProject(accums map[string]*projectAccum, sessionsDir, projectDir, root, dayStr string) {
-	files, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		return
-	}
-	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-			continue
-		}
+	for _, f := range jsonlFiles(sessionsDir) {
 		path := filepath.Join(sessionsDir, f.Name())
 		_, first, last := extractTranscriptMeta(path) // cheap gate
 		if !spansDay(first, last, dayStr) {
@@ -575,7 +550,7 @@ func buildStandupDay(browseDir string, day time.Time) standupDay {
 	splitHeadlineTail(&sd, projects)
 
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := startOfDay(now)
 	sd.PrevDate = day.AddDate(0, 0, -1).Format("2006-01-02")
 	if next := day.AddDate(0, 0, 1); !next.After(today) {
 		sd.NextDate = next.Format("2006-01-02")
@@ -904,53 +879,27 @@ func formatCompact(n int) string {
 // nearestActiveDay finds the most recent day on or before `before`-1 with any
 // transcript activity, for the empty-state "jump to a real day" affordance.
 func nearestActiveDay(browseDir string, before time.Time) (time.Time, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return time.Time{}, false
-	}
-	projectsDir := filepath.Join(home, ".claude", "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return time.Time{}, false
-	}
-	cutoff := before // strictly before the target day
 	var best time.Time
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		projectDir := resolveProjectDir(entry.Name())
-		if projectDir == "" || !dirWithinBase(projectDir, browseDir) {
-			continue
-		}
-		sessionsDir := filepath.Join(projectsDir, entry.Name())
-		files, err := os.ReadDir(sessionsDir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
-			}
+	forEachClaudeStore(browseDir, func(sessionsDir, _ string) {
+		for _, f := range jsonlFiles(sessionsDir) {
 			_, _, last := extractTranscriptMeta(filepath.Join(sessionsDir, f.Name()))
 			if last.IsZero() {
 				continue
 			}
-			d := time.Date(last.Year(), last.Month(), last.Day(), 0, 0, 0, 0, last.Location())
-			if d.Before(cutoff) && d.After(best) {
+			// Transcript timestamps are UTC; the day boundary is the user's.
+			d := startOfDay(last.Local())
+			if d.Before(before) && d.After(best) {
 				best = d
 			}
 		}
-	}
+	})
 	return best, !best.IsZero()
 }
 
 // ---- handlers ----
 
 func serveStandup(w http.ResponseWriter, r *http.Request) {
-	fileMutex.RLock()
-	browse := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
 	day := standupTargetDay(r.URL.Query().Get("d"))
 	data := standupTemplateData{
@@ -966,7 +915,7 @@ func serveStandup(w http.ResponseWriter, r *http.Request) {
 // (bounded at today), else calendar yesterday, local time.
 func standupTargetDay(q string) time.Time {
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := startOfDay(now)
 	if q != "" {
 		if t, err := time.ParseInLocation("2006-01-02", q, now.Location()); err == nil {
 			if t.After(today) {
@@ -988,9 +937,7 @@ func handleStandupSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	fileMutex.RLock()
-	browse := browseDir
-	fileMutex.RUnlock()
+	browse := currentBrowseDir()
 
 	day := standupTargetDay(req.Date)
 	sd := buildStandupDay(browse, day)

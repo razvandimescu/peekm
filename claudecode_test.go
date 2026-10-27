@@ -26,7 +26,7 @@ func TestHandleTranscriptReplyValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, "/transcript/reply", strings.NewReader(tc.body))
 			rec := httptest.NewRecorder()
-			handleTranscriptReply(rec, req)
+			postOnly(handleTranscriptReply)(rec, req)
 			if rec.Code != tc.want {
 				t.Fatalf("got %d, want %d (body=%q)", rec.Code, tc.want, rec.Body.String())
 			}

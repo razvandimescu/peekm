@@ -19,13 +19,7 @@ import (
 
 // ---------- extension auto-setup ----------
 
-func piAgentDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(homeDir, ".pi", "agent")
-}
+func piAgentDir() string { return homeSubdir(".pi", "agent") }
 
 func piSessionsDir() string {
 	agentDir := piAgentDir()
@@ -305,16 +299,9 @@ func discoverPiSessions(baseDir string, knownSessionIDs map[string]bool) []timel
 // piSessionsIn builds a timeline session per pi session file in one project
 // directory. The header's cwd (not the encoded dir name) scopes it to baseDir.
 func piSessionsIn(sessionsDir, baseDir string, knownSessionIDs map[string]bool) []timelineSession {
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		return nil
-	}
 	var sessions []timelineSession
-	for _, entry := range entries {
+	for _, entry := range jsonlFiles(sessionsDir) {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") {
-			continue
-		}
 		sessionID := piSessionIDFromName(name)
 		if sessionID == "" || knownSessionIDs[sessionID] {
 			continue

@@ -20,6 +20,14 @@ function setTheme(mode) {
     updateThemeButton(mode);
 }
 
+// isDarkMode reports the effective theme: a forced data-color-mode, else the OS preference.
+function isDarkMode() {
+    const mode = document.documentElement.getAttribute('data-color-mode');
+    if (mode === 'dark') return true;
+    if (mode === 'light') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 // github-markdown.css redeclares its color vars on .markdown-body itself inside
 // prefers-color-scheme queries, so a forced theme on the root never reaches the
 // content pane. Stamp the attribute on every .markdown-body so the !important
