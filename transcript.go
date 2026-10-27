@@ -29,6 +29,7 @@ type transcriptTemplateData struct {
 	NotFound     bool
 	CanReply     bool // reply composer resumes via claude; Claude sessions only
 	SessionStats *sessionStats
+	Usage        *transcript.Usage // anchors the idle readout
 }
 
 // transcriptTurn represents a single user or assistant turn in the conversation
@@ -242,12 +243,12 @@ func extractUserText(content json.RawMessage) string {
 
 // parseTranscript reads a session transcript (Claude Code or pi, detected by
 // content) and renders it into view-model turns.
-func parseTranscript(path string) ([]transcriptTurn, error) {
+func parseTranscript(path string) (*transcript.Session, []transcriptTurn, error) {
 	sess, err := transcript.ParseFile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return renderSessionTurns(sess), nil
+	return sess, renderSessionTurns(sess), nil
 }
 
 // renderSessionTurns maps the neutral transcript model onto the view model:
@@ -899,10 +900,11 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 
 	if path == "" {
 		data.NotFound = true
-	} else if turns, err := parseTranscript(path); err != nil {
+	} else if sess, turns, err := parseTranscript(path); err != nil {
 		data.NotFound = true
 	} else {
 		data.Turns = turns
+		data.Usage = sess.Usage
 		model := ""
 		for _, t := range turns {
 			if t.Role == "assistant" && t.Model != "" {

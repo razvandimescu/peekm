@@ -411,6 +411,9 @@ function reinitializeScripts() {
             initTranscriptLightbox();
             initReplyBox();
             revealHashTarget();
+            if (typeof window.renderIdleReadout === 'function') {
+                window.renderIdleReadout();
+            }
         }
 
         // Re-render mermaid diagrams after SPA content swap
