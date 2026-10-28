@@ -332,20 +332,27 @@ function copyFallback(text, done) {
     t.remove();
 }
 
+// sendJSON sends body as JSON and resolves to the response; a non-2xx status
+// rejects with the server's error text.
+async function sendJSON(url, body, method = 'POST') {
+    const resp = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error((await resp.text()).trim() || 'HTTP ' + resp.status);
+    return resp;
+}
+
 // Standup: write standup-YYYY-MM-DD.md into the browse dir, then open it.
 function saveStandup(date) {
-    fetch('/standup/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: date })
-    }).then(function (r) {
-        if (!r.ok) throw new Error('save failed');
+    sendJSON('/standup/save', { date: date }).then(function (r) {
         return r.json();
     }).then(function (data) {
-        if (typeof showToast === 'function') showToast('Saved ' + data.path);
+        showToast('Saved ' + data.path);
         navigate('/view/' + encodeURIComponent(data.path));
     }).catch(function () {
-        if (typeof showToast === 'function') showToast('Could not save standup');
+        showToast('Could not save standup');
     });
 }
 
@@ -896,7 +903,6 @@ async function refreshTree() {
         // mode has no directories to restore)
         if (!recent) {
             restoreTreeState();
-            restoreSmartFolderState();
         }
 
         // 5. Restore scroll position
@@ -935,15 +941,8 @@ function downloadHTML() {
         return;
     }
 
-    fetch('/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: filePath })
-    })
+    sendJSON('/download', { path: filePath })
     .then(response => {
-        if (!response.ok) {
-            throw new Error('Download failed');
-        }
         // Get filename from Content-Disposition header
         const contentDisposition = response.headers.get('Content-Disposition');
         let filename = 'download.html';
@@ -1023,13 +1022,7 @@ async function toggleShare() {
     }
     shareBtn.disabled = true;
     try {
-        var resp = await fetch('/share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filePath })
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        var data = await resp.json();
+        var data = await (await sendJSON('/share', { path: filePath })).json();
         updateSharePanel(data);
         shareBtn.classList.add('share-active');
         setSharePanelOpen(true);
@@ -1047,13 +1040,7 @@ async function makeSharePublic() {
     btn.disabled = true;
     btn.textContent = 'Connecting...';
     try {
-        var resp = await fetch('/share/public', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token })
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        var data = await resp.json();
+        var data = await (await sendJSON('/share/public', { token: token })).json();
         updateSharePanel(data);
         copyText(data.public_url, function () { showToast('Public link copied'); });
     } catch (err) {
@@ -1067,11 +1054,7 @@ async function stopSharing() {
     var shareBtn = document.getElementById('share-btn');
     var token = document.getElementById('share-panel').dataset.token;
     try {
-        await fetch('/share', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token })
-        });
+        await sendJSON('/share', { token: token }, 'DELETE');
         shareBtn.classList.remove('share-active');
         setSharePanelOpen(false);
         showToast('Share revoked');
@@ -1098,13 +1081,7 @@ async function submitReply() {
     input.disabled = true;
     btn.textContent = 'Sending…';
     try {
-        var resp = await fetch('/transcript/reply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: session, text: text })
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        var data = await resp.json();
+        var data = await (await sendJSON('/transcript/reply', { session: session, text: text })).json();
         input.value = '';
         showToast('Reply sent');
         // The reply forks/continues a peekm-owned branch whose new turns land in a
@@ -1332,6 +1309,7 @@ function saveTreeState() {
 
 // Restore tree expansion state and scroll position from localStorage
 function restoreTreeState() {
+    restoreSmartFolderState();
     try {
         const storageKey = getTreeStateKey();
         if (!storageKey) return;
@@ -1388,6 +1366,21 @@ function restoreTreeState() {
 
 const SMART_FOLDER_STATE_KEY = 'peekm_smart_folder_state';
 
+function setSmartFolderCollapsed(folder, collapsed) {
+    const header = folder.querySelector('.smart-folder-header');
+    const children = folder.querySelector('.smart-folder-children');
+    const icon = header?.querySelector('.expand-icon');
+    if (!children || !icon) return;
+    children.style.display = collapsed ? 'none' : 'block';
+    icon.textContent = collapsed ? '▶' : '▼';
+    header.dataset.collapsed = String(collapsed);
+}
+
+function toggleSmartFolder(header) {
+    setSmartFolderCollapsed(header.closest('.smart-folder'), header.dataset.collapsed !== 'true');
+    saveSmartFolderState();
+}
+
 function saveSmartFolderState() {
     try {
         const folders = document.querySelectorAll('.smart-folder-header');
@@ -1410,18 +1403,8 @@ function restoreSmartFolderState() {
         const stored = localStorage.getItem(SMART_FOLDER_STATE_KEY);
         if (!stored) return;
         const state = JSON.parse(stored);
-        const folders = document.querySelectorAll('.smart-folder');
-        folders.forEach(folder => {
-            const id = folder.dataset.folder;
-            if (id && state[id]) {
-                const children = folder.querySelector('.smart-folder-children');
-                const icon = folder.querySelector('.smart-folder-header .expand-icon');
-                if (children && icon) {
-                    children.style.display = 'none';
-                    icon.textContent = '▶';
-                    folder.querySelector('.smart-folder-header').dataset.collapsed = 'true';
-                }
-            }
+        document.querySelectorAll('.smart-folder').forEach(folder => {
+            if (state[folder.dataset.folder]) setSmartFolderCollapsed(folder, true);
         });
     } catch (e) {
         console.error('[SmartFolders] Failed to restore state:', e);

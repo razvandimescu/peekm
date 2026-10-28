@@ -886,8 +886,8 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 	path, source := resolveTranscriptPath(sessionID)
 
 	data := transcriptTemplateData{
-		baseTemplateData: newBaseTemplateData(),
-		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
+		baseTemplateData: newBaseTemplateData(r),
+		TreeHTML:         shellTreeHTML(r),
 		Title:            "Transcript",
 		Subtitle:         "Session " + truncateSessionID(sessionID),
 		BrowsePath:       currentBrowseDir(),

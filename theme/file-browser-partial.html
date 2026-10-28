@@ -1,4 +1,5 @@
-<!-- Sidebar tree (for SPA navigation updates) -->
+{{if .Partial}}
+<!-- Sidebar tree for navigate() to swap in; full pages render it in the shell -->
 <div id="sidebar-tree" style="display: none;">
     {{if .TreeHTML}}
         <div class="tree sidebar-tree">{{.TreeHTML}}</div>
@@ -9,6 +10,7 @@
         </div>
     {{end}}
 </div>
+{{end}}
 
 <main id="content" data-view="{{if .Content}}{{if .IsPreview}}preview{{else}}file{{end}}{{else}}empty{{end}}" data-path="{{.BrowsePath}}" data-file="{{.FilePath}}" class="content-area">
     <div class="container">

@@ -107,7 +107,7 @@ func serveMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := memoryTemplateData{
-		baseTemplateData: newBaseTemplateData(),
+		baseTemplateData: newBaseTemplateData(r),
 		Title:            "Memory Browser",
 		Subtitle:         formatMemorySubtitle(cards),
 		TreeHTML:         template.HTML(treeHTML),

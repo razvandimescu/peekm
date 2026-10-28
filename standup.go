@@ -903,8 +903,8 @@ func serveStandup(w http.ResponseWriter, r *http.Request) {
 
 	day := standupTargetDay(r.URL.Query().Get("d"))
 	data := standupTemplateData{
-		baseTemplateData: newBaseTemplateData(),
-		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
+		baseTemplateData: newBaseTemplateData(r),
+		TreeHTML:         shellTreeHTML(r),
 		BrowsePath:       browse,
 		Day:              buildStandupDay(browse, day),
 	}

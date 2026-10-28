@@ -152,7 +152,8 @@ type baseTemplateData struct {
 	EditorJS          template.JS
 	NavigationJS      template.JS
 	AITrackingEnabled bool
-	FileCount         int // whitelist size, shown in the shared sidebar header across all shell views
+	FileCount         int  // whitelist size, shown in the shared sidebar header across all shell views
+	Partial           bool // SPA partial: the shell (and its sidebar) is already on the page
 }
 
 // browserTemplateData is used for rendering the file browser and file views
@@ -476,8 +477,9 @@ func (el *eventLog) close() error {
 }
 
 // newBaseTemplateData creates a baseTemplateData with embedded resources
-func newBaseTemplateData() baseTemplateData {
+func newBaseTemplateData(r *http.Request) baseTemplateData {
 	return baseTemplateData{
+		Partial:           isPartialRequest(r),
 		GitHubCSS:         template.CSS(githubCSS),
 		ThemeOverrides:    template.CSS(themeOverrides),
 		ThemeManagerJS:    template.JS(themeManagerJS),
@@ -2041,7 +2043,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := browserTemplateData{
-		baseTemplateData: newBaseTemplateData(),
+		baseTemplateData: newBaseTemplateData(r),
 		Title:            title,
 		Subtitle:         subtitle,
 		TreeHTML:         template.HTML(treeHTML),
@@ -2530,11 +2532,6 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var treeHTML string
-	if !isPartialRequest(r) {
-		treeHTML = sidebarTreeHTML(r)
-	}
-
 	var sessionData *SessionMetadata
 	if globalSessionStore != nil {
 		if metadata, found := globalSessionStore.get(absFilePath); found {
@@ -2543,10 +2540,10 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := browserTemplateData{
-		baseTemplateData: newBaseTemplateData(),
+		baseTemplateData: newBaseTemplateData(r),
 		Title:            filepath.Base(absFilePath),
 		Subtitle:         absFilePath,
-		TreeHTML:         template.HTML(treeHTML),
+		TreeHTML:         shellTreeHTML(r),
 		Content:          contentHTML,
 		ShowBackButton:   true,
 		BrowsePath:       browse,
@@ -3252,6 +3249,15 @@ func sidebarTreeHTML(r *http.Request) string {
 		return generateRecentTreeHTML(false)
 	}
 	return generateTreeHTML()
+}
+
+// shellTreeHTML renders the sidebar tree for full-page loads only; SPA
+// partials keep the sidebar already on the page.
+func shellTreeHTML(r *http.Request) template.HTML {
+	if isPartialRequest(r) {
+		return ""
+	}
+	return template.HTML(sidebarTreeHTML(r))
 }
 
 func generateTreeHTML() string {

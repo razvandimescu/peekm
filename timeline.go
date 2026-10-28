@@ -601,8 +601,8 @@ func serveTimeline(w http.ResponseWriter, r *http.Request) {
 	groups := buildSessionTimeline(events, browse, true)
 
 	data := timelineTemplateData{
-		baseTemplateData: newBaseTemplateData(),
-		TreeHTML:         template.HTML(sidebarTreeHTML(r)),
+		baseTemplateData: newBaseTemplateData(r),
+		TreeHTML:         shellTreeHTML(r),
 		Title:            "AI Timeline",
 		Subtitle:         fmt.Sprintf("Session history for %s", browse),
 		BrowsePath:       browse,

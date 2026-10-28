@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"html/template"
 	"strings"
 	"testing"
 	"time"
@@ -148,4 +150,33 @@ func TestFormatTimeRange(t *testing.T) {
 			t.Errorf("expected range with separator, got %q", got)
 		}
 	})
+}
+
+// Full pages render the sidebar tree in the shell; only SPA partials carry
+// the copy navigate() swaps in. A second copy duplicates the id and makes
+// saveSmartFolderState read the stale one.
+func TestSidebarTreeRenderedOnce(t *testing.T) {
+	tree := template.HTML(`<div class="tree-item">x</div>`)
+	partial := baseTemplateData{Partial: true}
+	tests := []struct {
+		name string
+		tmpl *template.Template
+		data any
+	}{
+		{"browser full", fileBrowserTmpl, browserTemplateData{TreeHTML: tree}},
+		{"browser partial", fileBrowserPartialTmpl, browserTemplateData{baseTemplateData: partial, TreeHTML: tree}},
+		{"memory full", memoryTmpl, memoryTemplateData{TreeHTML: tree}},
+		{"memory partial", memoryPartialTmpl, memoryTemplateData{baseTemplateData: partial, TreeHTML: tree}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := tt.tmpl.Execute(&buf, tt.data); err != nil {
+				t.Fatal(err)
+			}
+			if n := strings.Count(buf.String(), `id="sidebar-tree"`); n != 1 {
+				t.Errorf("rendered %d sidebar trees, want 1", n)
+			}
+		})
+	}
 }

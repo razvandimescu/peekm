@@ -421,7 +421,7 @@ func serveSharedFile(w http.ResponseWriter, r *http.Request) {
 	entry, ok := globalShareStore.get(token)
 	if !ok {
 		data := sharedViewData{
-			baseTemplateData: newBaseTemplateData(),
+			baseTemplateData: newBaseTemplateData(r),
 			FileName:         "Expired Link",
 			IsExpired:        true,
 		}
@@ -512,7 +512,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 	}
 	head, tail := splitHeading(title)
 	data := sharedViewData{
-		baseTemplateData: newBaseTemplateData(),
+		baseTemplateData: newBaseTemplateData(r),
 		Content:          template.HTML(buf.String()),
 		Token:            token,
 		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
