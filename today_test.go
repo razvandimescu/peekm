@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestTodayTargetDay(t *testing.T) {
+func TestTargetDay(t *testing.T) {
 	today := time.Date(2026, 10, 28, 0, 0, 0, 0, time.Local)
 	tomorrow := today.AddDate(0, 0, 1)
 	tests := map[string]time.Time{
@@ -22,8 +22,8 @@ func TestTodayTargetDay(t *testing.T) {
 		"2026-12-01": tomorrow,
 	}
 	for q, want := range tests {
-		if got := todayTargetDay(q, today, tomorrow); !got.Equal(want) {
-			t.Errorf("todayTargetDay(%q) = %v, want %v", q, got, want)
+		if got := targetDay(q, today, tomorrow); !got.Equal(want) {
+			t.Errorf("targetDay(%q) = %v, want %v", q, got, want)
 		}
 	}
 }
@@ -40,19 +40,14 @@ func TestOpenTasksAndCount(t *testing.T) {
 
 func setTempHome(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	return filepath.Join(home, ".peekm", "days")
+	t.Setenv("HOME", t.TempDir())
+	return daysDir()
 }
 
 func writeDay(t *testing.T, dir, date, content string) {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, date+".md"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustMkdir(t, dir)
+	mustWrite(t, filepath.Join(dir, date+".md"), content)
 }
 
 func TestCarryOverCandidates(t *testing.T) {
