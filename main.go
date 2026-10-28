@@ -661,6 +661,7 @@ func buildMarkdownRenderer(allowRawHTML bool) goldmark.Markdown {
 	opts := []goldmark.Option{
 		goldmark.WithExtensions(
 			extension.GFM,
+			taskListHTML{},
 			extension.Typographer,
 			highlighting.NewHighlighting(
 				highlighting.WithFormatOptions(
@@ -828,6 +829,7 @@ func registerRoutes() {
 	http.HandleFunc("/move", localOnly(withRecovery(postOnly(handleMove))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(postOnly(handleSave))))
+	http.HandleFunc("/task/toggle", localOnly(withRecovery(postOnly(handleTaskToggle))))
 	http.HandleFunc("/download", localOnly(withRecovery(postOnly(handleDownload))))
 	http.HandleFunc("/preview-content/", localOnly(withRecovery(servePreviewContent)))
 	http.HandleFunc("/tree-html", localOnly(withRecovery(serveTreeHTML)))

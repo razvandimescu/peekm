@@ -113,9 +113,13 @@ function connectSSE() {
                     const currentPath = decodeURIComponent(window.location.pathname.replace('/view/', ''));
 
                     if (currentPath === data.path) {
-                        // Auto-refresh the current page
+                        // Auto-refresh the current page, keeping the reader's place
                         console.log('[SSE] Auto-refreshing current page');
-                        navigate(window.location.pathname, false);
+                        const scrollTop = content.scrollTop;
+                        navigate(window.location.pathname, false).then(function () {
+                            const fresh = document.getElementById('content');
+                            if (fresh) fresh.scrollTop = scrollTop;
+                        });
 
                         // Show notification if modified by Claude Code session
                         if (data.planTitle) {
@@ -356,6 +360,24 @@ function saveStandup(date) {
     });
 }
 
+// Task-list checkboxes write their state back to the "[ ]" in the source file.
+function initTaskCheckboxes() {
+    document.querySelectorAll('#content input.task-list-item-checkbox').forEach(function (box, index) {
+        box.disabled = false;
+        box.addEventListener('change', function () {
+            sendJSON('/task/toggle', {
+                file: getCurrentFilePath(),
+                index: index,
+                task: box.dataset.task,
+                checked: box.checked
+            }).catch(function (err) {
+                box.checked = !box.checked;
+                showErrorToast('Could not update task: ' + err.message);
+            });
+        });
+    });
+}
+
 function reinitializeScripts() {
     const content = document.getElementById('content');
     if (!content) return;
@@ -380,6 +402,10 @@ function reinitializeScripts() {
         // Initialize session info timestamps (if present)
         if (typeof initializeSessionInfo === 'function') {
             initializeSessionInfo();
+        }
+
+        if (viewType === 'file') {
+            initTaskCheckboxes();
         }
 
         // Restore timeline filter on SPA navigation

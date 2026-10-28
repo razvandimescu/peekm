@@ -105,6 +105,11 @@ body {
     letter-spacing: -0.015em;
 }
 
+/* Task-list boxes are enabled only in the local file view (navigation.js) */
+.markdown-body .task-list-item-checkbox:enabled {
+    cursor: pointer;
+}
+
 /* Note: .container styles for unified layout are defined in file-browser.html */
 
 /* Theme dropdown container */
