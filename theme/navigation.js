@@ -104,31 +104,17 @@ function connectSSE() {
             } else if (data.type === 'file_modified') {
                 console.log('[SSE] Handling file_modified for:', data.path);
 
-                // Check if we're currently viewing this file
+                // Viewing this file (at /view/ or as the default file at /): refresh in place
                 const content = document.getElementById('content');
-                const viewType = content ? content.dataset.view : null;
+                if (content && content.dataset.view === 'file' && getCurrentFilePath() === '/' + data.path) {
+                    console.log('[SSE] Auto-refreshing current page');
+                    reloadContent();
 
-                if (viewType === 'file') {
-                    // Extract current file path from URL (/view/{filepath})
-                    const currentPath = decodeURIComponent(window.location.pathname.replace('/view/', ''));
-
-                    if (currentPath === data.path) {
-                        // Auto-refresh the current page, keeping the reader's place
-                        console.log('[SSE] Auto-refreshing current page');
-                        const scrollTop = content.scrollTop;
-                        navigate(window.location.pathname, false).then(function () {
-                            const fresh = document.getElementById('content');
-                            if (fresh) fresh.scrollTop = scrollTop;
-                        });
-
-                        // Show notification if modified by Claude Code session
-                        if (data.planTitle) {
-                            showToast(`Plan updated: ${data.planTitle}`, data.path, data.session);
-                        } else if (data.session) {
-                            showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
-                        }
-                    } else {
-                        fileModifiedToast(data);
+                    // Show notification if modified by Claude Code session
+                    if (data.planTitle) {
+                        showToast(`Plan updated: ${data.planTitle}`, data.path, data.session);
+                    } else if (data.session) {
+                        showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
                     }
                 } else {
                     fileModifiedToast(data);
@@ -381,25 +367,26 @@ function scheduleTodayRefresh(date) {
     todayRefreshTimer = setTimeout(refreshToday, 150);
 }
 
-// Re-render in place, keeping the scroll position and a half-typed task.
+// Re-render the current page in place, keeping the reader's scroll position.
+async function reloadContent() {
+    const scrollTop = document.getElementById('content').scrollTop;
+    await navigate(window.location.pathname + window.location.search, false);
+    const fresh = document.getElementById('content');
+    if (fresh) fresh.scrollTop = scrollTop;
+}
+
+// Live refresh of Today that also keeps a half-typed task and its focus.
 async function refreshToday() {
     const content = document.getElementById('content');
     if (!content || content.dataset.view !== 'today') return;
-    const scrollTop = content.scrollTop;
     const input = document.getElementById('today-add-input');
     const draft = input ? input.value : '';
     const focused = input !== null && document.activeElement === input;
 
     todayRefreshing = true;
-    try {
-        await navigate(window.location.pathname + window.location.search, false);
-    } finally {
-        todayRefreshing = false;
-    }
+    await reloadContent();
+    todayRefreshing = false;
 
-    const fresh = document.getElementById('content');
-    if (!fresh) return;
-    fresh.scrollTop = scrollTop;
     const freshInput = document.getElementById('today-add-input');
     if (freshInput) {
         freshInput.value = draft;
@@ -412,9 +399,10 @@ function addTodayTask(e, form) {
     const input = form.elements.task;
     const task = input.value.trim();
     if (!task) return;
-    sendJSON('/today/add', { date: form.dataset.date, items: [task] }).then(function () {
+    const date = document.getElementById('content').dataset.date;
+    sendJSON('/today/add', { date: date, items: [task] }).then(function () {
         input.value = '';
-        refreshToday();
+        scheduleTodayRefresh(date);
     }).catch(function (err) {
         showErrorToast('Could not add task: ' + err.message);
     });
@@ -427,9 +415,8 @@ function carryOver(btn, bringOver) {
     const items = bringOver
         ? Array.from(banner.querySelectorAll('input:checked'), function (box) { return box.value; })
         : [];
-    sendJSON('/today/add', { date: banner.dataset.date, items: items }).then(function () {
-        return refreshToday();
-    }).then(focusTodayInput).catch(function (err) {
+    const date = document.getElementById('content').dataset.date;
+    sendJSON('/today/add', { date: date, items: items }).then(refreshToday).then(focusTodayInput).catch(function (err) {
         showErrorToast('Could not update the plan: ' + err.message);
     });
 }

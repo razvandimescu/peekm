@@ -525,7 +525,9 @@ func (m *watcherManager) watch(filePath string) error {
 	}
 	m.current = watcher
 
-	if err := watcher.Add(filePath); err != nil {
+	// Watch the parent dir: saves replace the file (temp file + rename), which
+	// would end a watch on the file itself after the first save.
+	if err := watcher.Add(filepath.Dir(filePath)); err != nil {
 		discardWatcher(watcher, cancel, "add error")
 		return err
 	}
@@ -1098,35 +1100,19 @@ func init() {
 	fileBrowserPartialTmpl = template.Must(template.New("file-browser-partial").Funcs(funcMap).Parse(fileBrowserContentHTML))
 	fileBrowserPartialTmpl = template.Must(fileBrowserPartialTmpl.Parse(sessionInfoPanelHTML))
 
-	// Timeline
-	timelinePartialHTML := mustReadThemeFile("theme/timeline-partial.html")
-	timelinePartialTmpl = template.Must(template.New("timeline-partial").Funcs(funcMap).Parse(timelinePartialHTML))
-	timelineTmpl = template.Must(template.New("timeline").Funcs(funcMap).Parse(fileBrowserHTML))
-	template.Must(timelineTmpl.New("content").Funcs(funcMap).Parse(timelinePartialHTML))
-
-	// Transcript
-	transcriptPartialHTML := mustReadThemeFile("theme/transcript-partial.html")
-	transcriptPartialTmpl = template.Must(template.New("transcript-partial").Funcs(funcMap).Parse(transcriptPartialHTML))
-	transcriptTmpl = template.Must(template.New("transcript").Funcs(funcMap).Parse(fileBrowserHTML))
-	template.Must(transcriptTmpl.New("content").Funcs(funcMap).Parse(transcriptPartialHTML))
-
-	// Standup
-	standupPartialHTML := mustReadThemeFile("theme/standup-partial.html")
-	standupPartialTmpl = template.Must(template.New("standup-partial").Funcs(funcMap).Parse(standupPartialHTML))
-	standupTmpl = template.Must(template.New("standup").Funcs(funcMap).Parse(fileBrowserHTML))
-	template.Must(standupTmpl.New("content").Funcs(funcMap).Parse(standupPartialHTML))
-
-	// Today
-	todayPartialHTML := mustReadThemeFile("theme/today-partial.html")
-	todayPartialTmpl = template.Must(template.New("today-partial").Funcs(funcMap).Parse(todayPartialHTML))
-	todayTmpl = template.Must(template.New("today").Funcs(funcMap).Parse(fileBrowserHTML))
-	template.Must(todayTmpl.New("content").Funcs(funcMap).Parse(todayPartialHTML))
-
-	// Memory
-	memoryPartialHTML := mustReadThemeFile("theme/memory-partial.html")
-	memoryPartialTmpl = template.Must(template.New("memory-partial").Funcs(funcMap).Parse(memoryPartialHTML))
-	memoryTmpl = template.Must(template.New("memory").Funcs(funcMap).Parse(fileBrowserHTML))
-	template.Must(memoryTmpl.New("content").Funcs(funcMap).Parse(memoryPartialHTML))
+	// Pages shown inside the file-browser shell: full page + SPA partial
+	pagePair := func(name string) (full, partial *template.Template) {
+		partialHTML := mustReadThemeFile("theme/" + name + "-partial.html")
+		partial = template.Must(template.New(name + "-partial").Funcs(funcMap).Parse(partialHTML))
+		full = template.Must(template.New(name).Funcs(funcMap).Parse(fileBrowserHTML))
+		template.Must(full.New("content").Funcs(funcMap).Parse(partialHTML))
+		return full, partial
+	}
+	timelineTmpl, timelinePartialTmpl = pagePair("timeline")
+	transcriptTmpl, transcriptPartialTmpl = pagePair("transcript")
+	standupTmpl, standupPartialTmpl = pagePair("standup")
+	todayTmpl, todayPartialTmpl = pagePair("today")
+	memoryTmpl, memoryPartialTmpl = pagePair("memory")
 
 	// Shared view (standalone, not using file-browser shell)
 	sharedViewHTML := mustReadThemeFile("theme/shared-view.html")
@@ -1624,11 +1610,9 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 			if !ok {
 				return
 			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Name == filePath && event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 				log.Println("File modified, sending reload notification...")
-
-				// Send file_modified event with path so client can auto-refresh if viewing this file
-				broadcastJSON(fileEventMessage{Type: "file_modified", Path: filePath})
+				broadcastJSON(fileEventMessage{Type: "file_modified", Path: getRelativePath(filePath)})
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -1720,12 +1704,11 @@ func announceNewFiles(dirPath string, newFiles []string) {
 
 // handleMarkdownCreated adds a new markdown file to the whitelist and notifies clients.
 func handleMarkdownCreated(filePath string) {
-	if isInLinkedWorktree(filePath) {
+	// Already listed: a save replaced the file (temp file + rename)
+	if isInLinkedWorktree(filePath) || !addToWhitelist(filePath) {
 		return
 	}
 	log.Printf("New markdown file created: %s", filePath)
-
-	addToWhitelist(filePath)
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
@@ -1759,6 +1742,10 @@ func awaitSessionID(filePath string) string {
 
 // handleMarkdownRemoved removes a markdown file from the whitelist and notifies clients.
 func handleMarkdownRemoved(filePath string, reason string) {
+	// Still there: a save replaced it (temp file + rename), nothing was removed
+	if _, err := os.Stat(filePath); err == nil {
+		return
+	}
 	if !removeFromWhitelist(filePath) {
 		return
 	}
@@ -1932,9 +1919,8 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	md := newMarkdownRenderer()
-	var buf bytes.Buffer
-	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
+	rendered, err := renderMarkdownBytes(content)
+	if err != nil {
 		http.Error(w, "Failed to render markdown", http.StatusInternalServerError)
 		return
 	}
@@ -1961,7 +1947,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	html := fmt.Sprintf(htmlTemplate,
 		template.HTMLEscapeString(filepath.Base(filePath)),
 		githubCSS,
-		buf.String(),
+		rendered,
 	)
 
 	// Set headers for download
@@ -2024,10 +2010,9 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		// Render markdown content for the selected file
 		markdownContent, err := os.ReadFile(defaultFile)
 		if err == nil {
-			md := newMarkdownRenderer()
-			var buf bytes.Buffer
-			if err := md.Convert(preprocessMermaid(markdownContent), &buf); err == nil {
-				content = template.HTML(buf.String())
+			if rendered, err := renderMarkdownBytes(markdownContent); err == nil {
+				content = rendered
+				watchOpenFile(defaultFile)
 				showBackButton = true
 				title = filepath.Base(defaultFile)
 
@@ -2565,17 +2550,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		IsPreview:        isPreview,
 	}
 
-	fileMutex.Lock()
-	oldFile := currentFile
-	currentFile = absFilePath
-	fileMutex.Unlock()
-
-	if oldFile != absFilePath {
-		if err := fileWatcher.watch(absFilePath); err != nil {
-			log.Printf("Error watching file: %v", err)
-		}
-	}
-
+	watchOpenFile(absFilePath)
 	renderTemplate(w, r, data)
 }
 
@@ -2591,6 +2566,20 @@ func renderMarkdownContent(absFilePath string) (template.HTML, error) {
 		return "", err
 	}
 	return renderMarkdownBytes(content)
+}
+
+// watchOpenFile makes absPath the open file, so its changes reach the page.
+func watchOpenFile(absPath string) {
+	fileMutex.Lock()
+	oldFile := currentFile
+	currentFile = absPath
+	fileMutex.Unlock()
+
+	if oldFile != absPath {
+		if err := fileWatcher.watch(absPath); err != nil {
+			log.Printf("Error watching file: %v", err)
+		}
+	}
 }
 
 func renderMarkdownBytes(content []byte) (template.HTML, error) {

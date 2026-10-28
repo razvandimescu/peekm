@@ -1,5 +1,5 @@
 <main id="content" data-view="today" data-date="{{.Date}}" data-file="{{.WebPath}}" data-path="{{.BrowsePath}}" class="content-area">
-    <div class="container standup today">
+    <div class="container standup">
         <div class="standup-head">
             <div class="standup-head-row">
                 <div class="standup-title">
@@ -22,7 +22,7 @@
         </div>
 
         {{if .CarryItems}}
-        <div class="today-carry" data-date="{{.Date}}">
+        <div class="today-carry">
             <p class="today-carry-title">{{len .CarryItems}} open from {{.CarryLabel}}</p>
             <ul class="today-carry-items">
                 {{range .CarryItems}}<li><label><input type="checkbox" value="{{.}}" checked> {{.}}</label></li>{{end}}
@@ -33,7 +33,7 @@
             </div>
         </div>
         {{else if .Editable}}
-        <form class="today-add" data-date="{{.Date}}" onsubmit="addTodayTask(event, this)">
+        <form class="today-add" onsubmit="addTodayTask(event, this)">
             <input id="today-add-input" name="task" autocomplete="off" maxlength="500" placeholder="What's the plan {{if .IsToday}}today{{else}}for tomorrow{{end}}?" aria-label="Add a task">
         </form>
         {{end}}

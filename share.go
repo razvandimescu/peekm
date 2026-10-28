@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -494,15 +493,14 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
-	md := newMarkdownRenderer()
-	var buf bytes.Buffer
-	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
+	rendered, err := renderMarkdownBytes(content)
+	if err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)
 		return
 	}
 	if isPartialRequest(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(buf.Bytes())
+		w.Write([]byte(rendered))
 		return
 	}
 	fileName := filepath.Base(entry.FilePath)
@@ -513,7 +511,7 @@ func serveSharedMarkdown(w http.ResponseWriter, r *http.Request, entry *shareEnt
 	head, tail := splitHeading(title)
 	data := sharedViewData{
 		baseTemplateData: newBaseTemplateData(r),
-		Content:          template.HTML(buf.String()),
+		Content:          rendered,
 		Token:            token,
 		ExpiresAt:        entry.ExpiresAt.Format(time.RFC3339),
 		FileName:         fileName,
