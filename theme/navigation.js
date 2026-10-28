@@ -133,6 +133,8 @@ function connectSSE() {
                 } else {
                     fileModifiedToast(data);
                 }
+            } else if (data.type === 'day_modified') {
+                scheduleTodayRefresh(data.path);
             } else if (data.type === 'session_activity') {
                 scheduleTranscriptRefresh(data.session);
                 scheduleTimelineRefresh();
@@ -267,10 +269,12 @@ function updateNavButtons() {
     const filesBtn = document.getElementById('files-btn');
     const timelineBtn = document.getElementById('timeline-btn');
     const standupBtn = document.getElementById('standup-btn');
+    const todayBtn = document.getElementById('today-btn');
     const memoryBtn = document.getElementById('memory-btn');
     if (filesBtn) filesBtn.classList.toggle('active', path === '/' || (isView && !inMemoryMode));
     if (timelineBtn) timelineBtn.classList.toggle('active', path.startsWith('/timeline') || path.startsWith('/transcript'));
     if (standupBtn) standupBtn.classList.toggle('active', path.startsWith('/standup'));
+    if (todayBtn) todayBtn.classList.toggle('active', path.startsWith('/today'));
     if (memoryBtn) memoryBtn.classList.toggle('active', path.startsWith('/memory') || (isView && inMemoryMode));
 }
 
@@ -360,6 +364,76 @@ function saveStandup(date) {
     });
 }
 
+// Today: the add box takes focus on arrival, but not on live refreshes (they
+// restore it themselves) or touch screens (it would pop the keyboard).
+let todayRefreshing = false;
+let todayRefreshTimer = null;
+
+function focusTodayInput() {
+    const input = document.getElementById('today-add-input');
+    if (input && !todayRefreshing && !window.matchMedia('(hover: none)').matches) input.focus();
+}
+
+function scheduleTodayRefresh(date) {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'today' || content.dataset.date !== date) return;
+    clearTimeout(todayRefreshTimer);
+    todayRefreshTimer = setTimeout(refreshToday, 150);
+}
+
+// Re-render in place, keeping the scroll position and a half-typed task.
+async function refreshToday() {
+    const content = document.getElementById('content');
+    if (!content || content.dataset.view !== 'today') return;
+    const scrollTop = content.scrollTop;
+    const input = document.getElementById('today-add-input');
+    const draft = input ? input.value : '';
+    const focused = input !== null && document.activeElement === input;
+
+    todayRefreshing = true;
+    try {
+        await navigate(window.location.pathname + window.location.search, false);
+    } finally {
+        todayRefreshing = false;
+    }
+
+    const fresh = document.getElementById('content');
+    if (!fresh) return;
+    fresh.scrollTop = scrollTop;
+    const freshInput = document.getElementById('today-add-input');
+    if (freshInput) {
+        freshInput.value = draft;
+        if (focused) freshInput.focus();
+    }
+}
+
+function addTodayTask(e, form) {
+    e.preventDefault();
+    const input = form.elements.task;
+    const task = input.value.trim();
+    if (!task) return;
+    sendJSON('/today/add', { date: form.dataset.date, items: [task] }).then(function () {
+        input.value = '';
+        refreshToday();
+    }).catch(function (err) {
+        showErrorToast('Could not add task: ' + err.message);
+    });
+}
+
+// Carry-over copies the ticked leftovers into this day's plan; the old plan
+// keeps them as written. Either button creates the file, which ends the offer.
+function carryOver(btn, bringOver) {
+    const banner = btn.closest('.today-carry');
+    const items = bringOver
+        ? Array.from(banner.querySelectorAll('input:checked'), function (box) { return box.value; })
+        : [];
+    sendJSON('/today/add', { date: banner.dataset.date, items: items }).then(function () {
+        return refreshToday();
+    }).then(focusTodayInput).catch(function (err) {
+        showErrorToast('Could not update the plan: ' + err.message);
+    });
+}
+
 // Task-list checkboxes write their state back to the "[ ]" in the source file.
 function initTaskCheckboxes() {
     document.querySelectorAll('#content input.task-list-item-checkbox').forEach(function (box, index) {
@@ -404,8 +478,11 @@ function reinitializeScripts() {
             initializeSessionInfo();
         }
 
-        if (viewType === 'file') {
+        if (viewType === 'file' || viewType === 'today') {
             initTaskCheckboxes();
+        }
+        if (viewType === 'today') {
+            focusTodayInput();
         }
 
         // Restore timeline filter on SPA navigation
@@ -494,7 +571,7 @@ function interceptLinks(e) {
     }
 
     // Intercept all internal navigation links (root, file views, timeline)
-    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/standup') || url.startsWith('/memory')) {
+    if (url === '/' || url.startsWith('/view/') || url.startsWith('/timeline') || url.startsWith('/transcript') || url.startsWith('/standup') || url.startsWith('/today') || url.startsWith('/memory')) {
         e.preventDefault();
         navigate(url);
     }

@@ -72,16 +72,30 @@ func taskBoxOffset(box ast.Node) int {
 	return box.Parent().Lines().At(0).Start
 }
 
-// taskFingerprint hashes the task's line after its "[ ]"/"[x]", so it is the
-// same in both states and changes when the task text does.
-func taskFingerprint(src []byte, off int) string {
+// taskText is the rest of the box's line after its "[ ]"/"[x]".
+func taskText(src []byte, off int) []byte {
 	line := src[off+len("[ ]"):]
 	if i := bytes.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}
+	return line
+}
+
+// taskFingerprint hashes the task's text, so it is the same in both states and
+// changes when the text does.
+func taskFingerprint(src []byte, off int) string {
 	h := fnv.New32a()
-	h.Write(line)
+	h.Write(taskText(src, off))
 	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+// parseTaskBoxes returns the task boxes of a markdown source in document order.
+func parseTaskBoxes(src []byte) []*extast.TaskCheckBox {
+	var boxes []*extast.TaskCheckBox
+	walkTaskBoxes(newMarkdownRenderer().Parser().Parse(text.NewReader(src)), func(box *extast.TaskCheckBox) {
+		boxes = append(boxes, box)
+	})
+	return boxes
 }
 
 var errTaskStale = errors.New("file changed since it was displayed")
@@ -89,11 +103,12 @@ var errTaskStale = errors.New("file changed since it was displayed")
 // setTaskState sets the index-th task box in src, after checking that the box
 // still carries the fingerprint the viewer rendered.
 func setTaskState(src []byte, index int, fingerprint string, checked bool) ([]byte, error) {
-	var offsets []int
-	walkTaskBoxes(newMarkdownRenderer().Parser().Parse(text.NewReader(src)), func(box *extast.TaskCheckBox) {
-		offsets = append(offsets, taskBoxOffset(box))
-	})
-	if index < 0 || index >= len(offsets) || taskFingerprint(src, offsets[index]) != fingerprint {
+	boxes := parseTaskBoxes(src)
+	if index < 0 || index >= len(boxes) {
+		return nil, errTaskStale
+	}
+	off := taskBoxOffset(boxes[index])
+	if taskFingerprint(src, off) != fingerprint {
 		return nil, errTaskStale
 	}
 	mark := byte(' ')
@@ -101,12 +116,13 @@ func setTaskState(src []byte, index int, fingerprint string, checked bool) ([]by
 		mark = 'x'
 	}
 	out := bytes.Clone(src)
-	out[offsets[index]+1] = mark
+	out[off+1] = mark
 	return out, nil
 }
 
-// taskToggleMu serializes read-modify-write so rapid clicks don't drop updates.
-var taskToggleMu sync.Mutex
+// fileEditMu serializes read-modify-write of task files so rapid clicks and
+// adds don't drop updates.
+var fileEditMu sync.Mutex
 
 func handleTaskToggle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -125,8 +141,8 @@ func handleTaskToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskToggleMu.Lock()
-	defer taskToggleMu.Unlock()
+	fileEditMu.Lock()
+	defer fileEditMu.Unlock()
 	src, err := os.ReadFile(path)
 	if err != nil {
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)

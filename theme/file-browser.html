@@ -1738,6 +1738,30 @@
         .standup-empty { color: var(--fgColor-muted); }
         .standup-empty a { color: var(--peekm-accent); }
 
+        /* Today: plan for the day; reuses the Recap header and buttons. */
+        .today-links { display: inline-flex; gap: 14px; font-size: 13px; }
+        .today-links a, .today-file a { color: var(--peekm-accent); text-decoration: none; }
+        .today-add input {
+            width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px 12px;
+            border: 1px solid var(--borderColor-default); border-radius: 8px;
+            background: var(--bgColor-default); color: var(--fgColor-default);
+        }
+        .today-add input:focus { outline: none; border-color: var(--peekm-accent); }
+        .today-plan { margin-top: 20px; }
+        .today-carry { padding: 14px 16px; border: 1px solid var(--borderColor-default); border-radius: 8px; background: var(--bgColor-muted); }
+        .today-carry .today-carry-title { margin: 0 0 8px; font-weight: 600; }
+        .today-carry ul.today-carry-items { list-style: none; margin: 0 0 12px; padding: 0; }
+        .today-carry-items li { margin: 4px 0; }
+        .today-carry-items label { cursor: pointer; }
+        .today-carry-actions { display: flex; gap: 8px; }
+        .today-file {
+            display: flex; align-items: center; gap: 6px; margin-top: 28px; padding-top: 12px;
+            border-top: 1px solid var(--borderColor-muted); font-size: 12.5px; color: var(--fgColor-muted);
+        }
+        .today-path { font-family: var(--font-mono); }
+        .today-file .standup-fcopy { opacity: 1; }
+        .today-file a { margin-left: auto; }
+
         /* Files AI edited — the reviewer's disclosure. Rows link to the viewer
            (markdown) or to the transcript anchored at the edit (everything else). */
         .standup-files { margin-top: 12px; }
@@ -2431,8 +2455,12 @@
                 {{if .AITrackingEnabled}}<a href="/timeline" id="timeline-btn" class="nav-btn" aria-label="AI Timeline" title="AI Timeline — tracks Claude Code sessions">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 0 1 .76-1.3L8.5 7.82V4.75Z"/></svg>
                     <span class="nav-btn-label">Timeline</span>
+                </a>{{end}}
+                <a href="/today" id="today-btn" class="nav-btn" aria-label="Today" title="Today — what you plan to do">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 1.75v11.5c0 .138.112.25.25.25h3.17a.75.75 0 0 1 0 1.5H2.75A1.75 1.75 0 0 1 1 13.25V1.75C1 .784 1.784 0 2.75 0h8.5C12.216 0 13 .784 13 1.75v7.736a.75.75 0 0 1-1.5 0V1.75a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13.274 9.537v-.001l-4.557 4.45a.75.75 0 0 1-1.055-.008l-1.943-1.95a.75.75 0 0 1 1.062-1.058l1.419 1.425 4.026-3.932a.75.75 0 1 1 1.048 1.074ZM4.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM4 7.75A.75.75 0 0 1 4.75 7h2a.75.75 0 0 1 0 1.5h-2A.75.75 0 0 1 4 7.75Z"/></svg>
+                    <span class="nav-btn-label">Today</span>
                 </a>
-                <a href="/standup" id="standup-btn" class="nav-btn" aria-label="Recap" title="Recap — what you shipped, ready to read at standup">
+                {{if .AITrackingEnabled}}<a href="/standup" id="standup-btn" class="nav-btn" aria-label="Recap" title="Recap — what you shipped, ready to read at standup">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1h12.5c.966 0 1.75.784 1.75 1.75v9.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-9.5C0 1.784.784 1 1.75 1ZM1.5 2.75v9.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25ZM3.5 5.25A.75.75 0 0 1 4.25 4.5h5a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1-.75-.75Zm0 3A.75.75 0 0 1 4.25 7.5h7.5a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z"/></svg>
                     <span class="nav-btn-label">Recap</span>
                 </a>{{end}}
