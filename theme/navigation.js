@@ -104,27 +104,17 @@ function connectSSE() {
             } else if (data.type === 'file_modified') {
                 console.log('[SSE] Handling file_modified for:', data.path);
 
-                // Check if we're currently viewing this file
+                // Viewing this file (at /view/ or as the default file at /): refresh in place
                 const content = document.getElementById('content');
-                const viewType = content ? content.dataset.view : null;
+                if (content && content.dataset.view === 'file' && getCurrentFilePath() === '/' + data.path) {
+                    console.log('[SSE] Auto-refreshing current page');
+                    reloadContent();
 
-                if (viewType === 'file') {
-                    // Extract current file path from URL (/view/{filepath})
-                    const currentPath = decodeURIComponent(window.location.pathname.replace('/view/', ''));
-
-                    if (currentPath === data.path) {
-                        // Auto-refresh the current page, keeping the reader's place
-                        console.log('[SSE] Auto-refreshing current page');
-                        reloadContent();
-
-                        // Show notification if modified by Claude Code session
-                        if (data.planTitle) {
-                            showToast(`Plan updated: ${data.planTitle}`, data.path, data.session);
-                        } else if (data.session) {
-                            showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
-                        }
-                    } else {
-                        fileModifiedToast(data);
+                    // Show notification if modified by Claude Code session
+                    if (data.planTitle) {
+                        showToast(`Plan updated: ${data.planTitle}`, data.path, data.session);
+                    } else if (data.session) {
+                        showToast(`Updated by Claude: ${data.path}`, data.path, data.session);
                     }
                 } else {
                     fileModifiedToast(data);

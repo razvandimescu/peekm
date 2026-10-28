@@ -525,7 +525,9 @@ func (m *watcherManager) watch(filePath string) error {
 	}
 	m.current = watcher
 
-	if err := watcher.Add(filePath); err != nil {
+	// Watch the parent dir: saves replace the file (temp file + rename), which
+	// would end a watch on the file itself after the first save.
+	if err := watcher.Add(filepath.Dir(filePath)); err != nil {
 		discardWatcher(watcher, cancel, "add error")
 		return err
 	}
@@ -1608,11 +1610,9 @@ func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePa
 			if !ok {
 				return
 			}
-			if event.Op&fsnotify.Write == fsnotify.Write {
+			if event.Name == filePath && event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 				log.Println("File modified, sending reload notification...")
-
-				// Send file_modified event with path so client can auto-refresh if viewing this file
-				broadcastJSON(fileEventMessage{Type: "file_modified", Path: filePath})
+				broadcastJSON(fileEventMessage{Type: "file_modified", Path: getRelativePath(filePath)})
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -1704,12 +1704,11 @@ func announceNewFiles(dirPath string, newFiles []string) {
 
 // handleMarkdownCreated adds a new markdown file to the whitelist and notifies clients.
 func handleMarkdownCreated(filePath string) {
-	if isInLinkedWorktree(filePath) {
+	// Already listed: a save replaced the file (temp file + rename)
+	if isInLinkedWorktree(filePath) || !addToWhitelist(filePath) {
 		return
 	}
 	log.Printf("New markdown file created: %s", filePath)
-
-	addToWhitelist(filePath)
 
 	go func() {
 		sessionID := awaitSessionID(filePath)
@@ -1743,6 +1742,10 @@ func awaitSessionID(filePath string) string {
 
 // handleMarkdownRemoved removes a markdown file from the whitelist and notifies clients.
 func handleMarkdownRemoved(filePath string, reason string) {
+	// Still there: a save replaced it (temp file + rename), nothing was removed
+	if _, err := os.Stat(filePath); err == nil {
+		return
+	}
 	if !removeFromWhitelist(filePath) {
 		return
 	}
@@ -2009,6 +2012,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			if rendered, err := renderMarkdownBytes(markdownContent); err == nil {
 				content = rendered
+				watchOpenFile(defaultFile)
 				showBackButton = true
 				title = filepath.Base(defaultFile)
 
@@ -2546,17 +2550,7 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		IsPreview:        isPreview,
 	}
 
-	fileMutex.Lock()
-	oldFile := currentFile
-	currentFile = absFilePath
-	fileMutex.Unlock()
-
-	if oldFile != absFilePath {
-		if err := fileWatcher.watch(absFilePath); err != nil {
-			log.Printf("Error watching file: %v", err)
-		}
-	}
-
+	watchOpenFile(absFilePath)
 	renderTemplate(w, r, data)
 }
 
@@ -2572,6 +2566,20 @@ func renderMarkdownContent(absFilePath string) (template.HTML, error) {
 		return "", err
 	}
 	return renderMarkdownBytes(content)
+}
+
+// watchOpenFile makes absPath the open file, so its changes reach the page.
+func watchOpenFile(absPath string) {
+	fileMutex.Lock()
+	oldFile := currentFile
+	currentFile = absPath
+	fileMutex.Unlock()
+
+	if oldFile != absPath {
+		if err := fileWatcher.watch(absPath); err != nil {
+			log.Printf("Error watching file: %v", err)
+		}
+	}
 }
 
 func renderMarkdownBytes(content []byte) (template.HTML, error) {
