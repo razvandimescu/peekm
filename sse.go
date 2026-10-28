@@ -11,7 +11,7 @@ import (
 
 // fileEventMessage is used for SSE notifications about file changes
 type fileEventMessage struct {
-	Type      string `json:"type"` // "file_added", "files_added" or "file_removed"
+	Type      string `json:"type"` // "file_added", "files_added", "file_removed", "file_modified" or "day_modified"
 	Path      string `json:"path"`
 	Session   string `json:"session,omitempty"`   // Optional Claude Code session ID
 	PlanTitle string `json:"planTitle,omitempty"` // Non-empty for plan file events

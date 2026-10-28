@@ -119,6 +119,8 @@ var (
 	transcriptPartialTmpl  *template.Template
 	standupTmpl            *template.Template
 	standupPartialTmpl     *template.Template
+	todayTmpl              *template.Template
+	todayPartialTmpl       *template.Template
 	sharedViewTmpl         *template.Template
 
 	// SSE event replay buffer (50 events = ~2 min of AI file creation)
@@ -661,6 +663,7 @@ func buildMarkdownRenderer(allowRawHTML bool) goldmark.Markdown {
 	opts := []goldmark.Option{
 		goldmark.WithExtensions(
 			extension.GFM,
+			taskListHTML{},
 			extension.Typographer,
 			highlighting.NewHighlighting(
 				highlighting.WithFormatOptions(
@@ -828,6 +831,7 @@ func registerRoutes() {
 	http.HandleFunc("/move", localOnly(withRecovery(postOnly(handleMove))))
 	http.HandleFunc("/raw/", localOnly(withRecovery(serveRaw)))
 	http.HandleFunc("/save", localOnly(withRecovery(postOnly(handleSave))))
+	http.HandleFunc("/task/toggle", localOnly(withRecovery(postOnly(handleTaskToggle))))
 	http.HandleFunc("/download", localOnly(withRecovery(postOnly(handleDownload))))
 	http.HandleFunc("/preview-content/", localOnly(withRecovery(servePreviewContent)))
 	http.HandleFunc("/tree-html", localOnly(withRecovery(serveTreeHTML)))
@@ -837,6 +841,8 @@ func registerRoutes() {
 	http.HandleFunc("/transcript/reply", localOnly(withRecovery(postOnly(blockTunnel(handleTranscriptReply)))))
 	http.HandleFunc("/standup", localOnly(withRecovery(serveStandup)))
 	http.HandleFunc("/standup/save", localOnly(withRecovery(postOnly(handleStandupSave))))
+	http.HandleFunc("/today", localOnly(withRecovery(serveToday)))
+	http.HandleFunc("/today/add", localOnly(withRecovery(postOnly(handleTodayAdd))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
@@ -1005,7 +1011,7 @@ func isMemoryFile(absPath string) bool {
 }
 
 // isWhitelistedFile checks if a path is in the current markdownFiles whitelist (thread-safe),
-// falling back to isMemoryFile for Claude Code memory files.
+// falling back to Claude Code memory files and Today's day plans.
 func isWhitelistedFile(path string) bool {
 	fileMutex.RLock()
 	defer fileMutex.RUnlock()
@@ -1019,7 +1025,7 @@ func isWhitelistedLocked(path string) bool {
 			return true
 		}
 	}
-	return isMemoryFile(path)
+	return isMemoryFile(path) || isDayFile(path)
 }
 
 // serveFontAsset serves an embedded woff2 from theme/fonts with a long-lived,
@@ -1109,6 +1115,12 @@ func init() {
 	standupPartialTmpl = template.Must(template.New("standup-partial").Funcs(funcMap).Parse(standupPartialHTML))
 	standupTmpl = template.Must(template.New("standup").Funcs(funcMap).Parse(fileBrowserHTML))
 	template.Must(standupTmpl.New("content").Funcs(funcMap).Parse(standupPartialHTML))
+
+	// Today
+	todayPartialHTML := mustReadThemeFile("theme/today-partial.html")
+	todayPartialTmpl = template.Must(template.New("today-partial").Funcs(funcMap).Parse(todayPartialHTML))
+	todayTmpl = template.Must(template.New("today").Funcs(funcMap).Parse(fileBrowserHTML))
+	template.Must(todayTmpl.New("content").Funcs(funcMap).Parse(todayPartialHTML))
 
 	// Memory
 	memoryPartialHTML := mustReadThemeFile("theme/memory-partial.html")
@@ -1513,6 +1525,8 @@ func main() {
 		autoSetupPiHooks()
 		initSessionTracking()
 	}
+
+	watchDaysDir()
 
 	globalShareStore = newShareStore()
 	go func() {
@@ -2576,9 +2590,12 @@ func renderMarkdownContent(absFilePath string) (template.HTML, error) {
 	if err != nil {
 		return "", err
 	}
-	md := newMarkdownRenderer()
+	return renderMarkdownBytes(content)
+}
+
+func renderMarkdownBytes(content []byte) (template.HTML, error) {
 	var buf bytes.Buffer
-	if err := md.Convert(preprocessMermaid(content), &buf); err != nil {
+	if err := newMarkdownRenderer().Convert(preprocessMermaid(content), &buf); err != nil {
 		return "", err
 	}
 	return template.HTML(buf.String()), nil

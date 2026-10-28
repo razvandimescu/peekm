@@ -1,0 +1,53 @@
+<main id="content" data-view="today" data-date="{{.Date}}" data-file="{{.WebPath}}" data-path="{{.BrowsePath}}" class="content-area">
+    <div class="container standup today">
+        <div class="standup-head">
+            <div class="standup-head-row">
+                <div class="standup-title">
+                    <span class="standup-eyebrow">{{.Eyebrow}}</span>
+                    <h1 class="standup-date-label">{{.Label}}</h1>
+                </div>
+                <div class="standup-datenav">
+                    <a href="/today?d={{.PrevDate}}" class="standup-arrow" aria-label="Previous day">‹</a>
+                    <input type="date" class="standup-date-input" value="{{.Date}}" max="{{.MaxDate}}" onchange="if(this.value)navigate('/today?d='+this.value)" aria-label="Pick a day">
+                    {{if .NextDate}}<a href="/today?d={{.NextDate}}" class="standup-arrow" aria-label="Next day">›</a>{{else}}<span class="standup-arrow disabled" aria-disabled="true">›</span>{{end}}
+                </div>
+            </div>
+            <div class="standup-summary-row">
+                <div class="standup-summary">{{if or .Open .Done}}{{.Open}} open · {{.Done}} done{{end}}</div>
+                <div class="today-links">
+                    {{if not .IsToday}}<a href="/today">Today →</a>{{end}}
+                    {{if and .ShowRecap .AITrackingEnabled}}<a href="/standup?d={{.Date}}">What you shipped →</a>{{end}}
+                </div>
+            </div>
+        </div>
+
+        {{if .CarryItems}}
+        <div class="today-carry" data-date="{{.Date}}">
+            <p class="today-carry-title">{{len .CarryItems}} open from {{.CarryLabel}}</p>
+            <ul class="today-carry-items">
+                {{range .CarryItems}}<li><label><input type="checkbox" value="{{.}}" checked> {{.}}</label></li>{{end}}
+            </ul>
+            <div class="today-carry-actions">
+                <button class="standup-save" onclick="carryOver(this, true)">Bring over</button>
+                <button class="standup-copy" onclick="carryOver(this, false)">Start fresh</button>
+            </div>
+        </div>
+        {{else if .Editable}}
+        <form class="today-add" data-date="{{.Date}}" onsubmit="addTodayTask(event, this)">
+            <input id="today-add-input" name="task" autocomplete="off" maxlength="500" placeholder="What's the plan {{if .IsToday}}today{{else}}for tomorrow{{end}}?" aria-label="Add a task">
+        </form>
+        {{end}}
+
+        {{if .Plan}}
+        <div class="today-plan">{{.Plan}}</div>
+        {{else if not .Editable}}
+        <div class="timeline-empty standup-empty"><p>No plan for {{.Label}}.</p></div>
+        {{end}}
+
+        <div class="today-file">
+            <span class="today-path">{{.WebPath}}</span>
+            <button class="standup-fcopy" aria-label="Copy file path" title="Copy path" onclick="copyStandupPath(event,this,'{{.AbsPath}}')">⧉</button>
+            {{if .Exists}}<a href="/view/{{pathEscape .WebPath}}">Open file</a>{{end}}
+        </div>
+    </div>
+</main>
