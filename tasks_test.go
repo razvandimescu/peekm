@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"regexp"
 	"strings"
@@ -17,15 +16,15 @@ var dataTaskRe = regexp.MustCompile(`data-task="([0-9a-f]{8})"`)
 
 func renderTasks(t *testing.T, src string) (string, []string) {
 	t.Helper()
-	var buf bytes.Buffer
-	if err := newMarkdownRenderer().Convert(preprocessMermaid([]byte(src)), &buf); err != nil {
+	html, err := renderMarkdownBytes([]byte(src))
+	if err != nil {
 		t.Fatal(err)
 	}
 	var fps []string
-	for _, m := range dataTaskRe.FindAllStringSubmatch(buf.String(), -1) {
+	for _, m := range dataTaskRe.FindAllStringSubmatch(string(html), -1) {
 		fps = append(fps, m[1])
 	}
-	return buf.String(), fps
+	return string(html), fps
 }
 
 func TestTaskListMarkup(t *testing.T) {

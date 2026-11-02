@@ -20,15 +20,16 @@ import (
 // It stays plain markdown so agents can read and tick it too; Recap remains
 // the record of what shipped.
 
-const dayFormat = "2006-01-02"
-
 var dayFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\.md$`)
 
 // maxTaskLen bounds one added task; anything longer belongs in the file.
 const maxTaskLen = 500
 
+// daysRelDir is the plan folder under $HOME.
+const daysRelDir = ".peekm/days"
+
 func daysDir() string {
-	return homeSubdir(".peekm", "days")
+	return homeSubdir(daysRelDir)
 }
 
 func dayFilePath(date string) string {
@@ -38,8 +39,7 @@ func dayFilePath(date string) string {
 // isDayFile reports whether absPath is a day plan. Like memory files, these
 // are whitelisted although they live outside the browse dir.
 func isDayFile(absPath string) bool {
-	dir := daysDir()
-	return dir != "" && filepath.Dir(absPath) == dir && dayFileRe.MatchString(filepath.Base(absPath))
+	return filepath.Dir(absPath) == daysDir() && dayFileRe.MatchString(filepath.Base(absPath))
 }
 
 type todayTemplateData struct {
@@ -67,8 +67,8 @@ type todayTemplateData struct {
 func serveToday(w http.ResponseWriter, r *http.Request) {
 	today := startOfDay(time.Now())
 	tomorrow := today.AddDate(0, 0, 1)
-	day := todayTargetDay(r.URL.Query().Get("d"), today, tomorrow)
-	date := day.Format(dayFormat)
+	day := targetDay(r.URL.Query().Get("d"), today, tomorrow)
+	date := day.Format(time.DateOnly)
 
 	data := todayTemplateData{
 		baseTemplateData: newBaseTemplateData(r),
@@ -77,16 +77,16 @@ func serveToday(w http.ResponseWriter, r *http.Request) {
 		Date:             date,
 		Label:            day.Format("Monday, 2 January 2006"),
 		Eyebrow:          todayEyebrow(day, today, tomorrow),
-		PrevDate:         day.AddDate(0, 0, -1).Format(dayFormat),
-		MaxDate:          tomorrow.Format(dayFormat),
+		PrevDate:         day.AddDate(0, 0, -1).Format(time.DateOnly),
+		MaxDate:          tomorrow.Format(time.DateOnly),
 		IsToday:          day.Equal(today),
 		Editable:         !day.Before(today),
 		ShowRecap:        !day.After(today),
-		WebPath:          "~/.peekm/days/" + date + ".md",
+		WebPath:          "~/" + daysRelDir + "/" + date + ".md",
 		AbsPath:          dayFilePath(date),
 	}
 	if day.Before(tomorrow) {
-		data.NextDate = day.AddDate(0, 0, 1).Format(dayFormat)
+		data.NextDate = day.AddDate(0, 0, 1).Format(time.DateOnly)
 	}
 
 	if src, err := os.ReadFile(data.AbsPath); err == nil {
@@ -98,25 +98,11 @@ func serveToday(w http.ResponseWriter, r *http.Request) {
 	} else if data.Editable {
 		from, items := carryOverCandidates(date)
 		data.CarryItems = items
-		if t, err := time.ParseInLocation(dayFormat, from, today.Location()); err == nil {
+		if t, err := time.ParseInLocation(time.DateOnly, from, today.Location()); err == nil {
 			data.CarryLabel = t.Format("Mon 2 Jan")
 		}
 	}
 	renderTemplatePair(w, r, todayTmpl, todayPartialTmpl, data)
-}
-
-// todayTargetDay resolves ?d=YYYY-MM-DD, bounded at tomorrow (planning ahead
-// at the end of a day); defaults to today, local time.
-func todayTargetDay(q string, today, tomorrow time.Time) time.Time {
-	t, err := time.ParseInLocation(dayFormat, q, today.Location())
-	switch {
-	case err != nil:
-		return today
-	case t.After(tomorrow):
-		return tomorrow
-	default:
-		return t
-	}
 }
 
 func todayEyebrow(day, today, tomorrow time.Time) string {
@@ -157,13 +143,14 @@ func openTasks(src []byte) []string {
 // carryOverCandidates returns the open tasks of the latest plan before date.
 // Older plans are not searched: their leftovers were already declined once.
 func carryOverCandidates(date string) (from string, items []string) {
-	entries, _ := os.ReadDir(daysDir())
+	dir := daysDir()
+	entries, _ := os.ReadDir(dir)
 	for i := len(entries) - 1; i >= 0; i-- {
 		name := entries[i].Name()
 		if !dayFileRe.MatchString(name) || name >= date+".md" {
 			continue
 		}
-		src, err := os.ReadFile(filepath.Join(daysDir(), name))
+		src, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return "", nil
 		}
@@ -183,7 +170,7 @@ func handleTodayAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if _, err := time.Parse(dayFormat, req.Date); err != nil {
+	if _, err := time.Parse(time.DateOnly, req.Date); err != nil {
 		http.Error(w, "invalid date", http.StatusBadRequest)
 		return
 	}
@@ -207,15 +194,16 @@ func handleTodayAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func appendToDayFile(date, lines string) error {
-	if daysDir() == "" {
+	dir := daysDir()
+	if dir == "" {
 		return errors.New("no home directory")
 	}
 	fileEditMu.Lock()
 	defer fileEditMu.Unlock()
-	path := dayFilePath(date)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	path := dayFilePath(date)
 	src, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err

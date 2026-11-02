@@ -911,20 +911,25 @@ func serveStandup(w http.ResponseWriter, r *http.Request) {
 	renderTemplatePair(w, r, standupTmpl, standupPartialTmpl, data)
 }
 
-// standupTargetDay resolves the requested day: an explicit ?d=YYYY-MM-DD
-// (bounded at today), else calendar yesterday, local time.
+// standupTargetDay resolves the requested day, bounded at today; defaults to
+// calendar yesterday.
 func standupTargetDay(q string) time.Time {
-	now := time.Now()
-	today := startOfDay(now)
-	if q != "" {
-		if t, err := time.ParseInLocation("2006-01-02", q, now.Location()); err == nil {
-			if t.After(today) {
-				return today
-			}
-			return t
-		}
+	today := startOfDay(time.Now())
+	return targetDay(q, today.AddDate(0, 0, -1), today)
+}
+
+// targetDay resolves ?d=YYYY-MM-DD in local time, clamped at latest, or
+// fallback when q is absent or invalid.
+func targetDay(q string, fallback, latest time.Time) time.Time {
+	t, err := time.ParseInLocation(time.DateOnly, q, latest.Location())
+	switch {
+	case err != nil:
+		return fallback
+	case t.After(latest):
+		return latest
+	default:
+		return t
 	}
-	return today.AddDate(0, 0, -1)
 }
 
 // handleStandupSave writes standup-YYYY-MM-DD.md into the browse dir and
