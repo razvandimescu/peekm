@@ -1,948 +1,419 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>peekm — Read, review, and continue what Claude Code did</title>
-    <meta name="description" content="A local dashboard that turns every Claude Code session into something you can read — the full conversation, line-level diffs, and what the AI learned. Reply to continue a session, or share any file it produced. Single binary.">
-    <meta property="og:title" content="peekm — read, review & continue any Claude Code session">
-    <meta property="og:description" content="Every Claude Code session, rendered so you can read it: the conversation, line-level diffs, and what the AI learned — across all your projects. Reply to continue, or share what it built. Local, open source.">
-    <meta property="og:image" content="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero.png">
-    <meta property="og:url" content="https://peekm.dev">
-    <meta property="og:type" content="website">
-    <meta name="twitter:card" content="summary_large_image">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁</text></svg>">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #0d1117;
-            --bg-surface: #151b23;
-            --bg-hover: #1c2333;
-            --fg: #f0f6fc;
-            --fg-muted: #9198a1;
-            --fg-accent: #4493f8;
-            --fg-success: #3fb950;
-            --fg-attention: #d29922;
-            --fg-done: #ab7df8;
-            --border: #3d444d;
-            --border-muted: #3d444db3;
-            --font-heading: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-            --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-            --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            --max-width: 880px;
-        }
-
-        @media (prefers-color-scheme: light) {
-            :root {
-                --bg: #ffffff;
-                --bg-surface: #f6f8fa;
-                --bg-hover: #eef1f5;
-                --fg: #1f2328;
-                --fg-muted: #59636e;
-                --fg-accent: #0969da;
-                --fg-success: #1a7f37;
-                --fg-attention: #9a6700;
-                --fg-done: #8250df;
-                --border: #d1d9e0;
-                --border-muted: #d1d9e0b3;
-            }
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg);
-            color: var(--fg);
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-            background-image: radial-gradient(circle at 1px 1px, var(--border-muted) 0.5px, transparent 0);
-            background-size: 32px 32px;
-        }
-
-        /* --- Animations --- */
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(16px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes glowPulse {
-            0%, 100% { opacity: 0.4; }
-            50% { opacity: 0.7; }
-        }
-
-        .animate {
-            opacity: 0;
-            animation: fadeUp 0.6s ease-out forwards;
-        }
-
-        .animate-d1 { animation-delay: 0.1s; }
-        .animate-d2 { animation-delay: 0.2s; }
-        .animate-d3 { animation-delay: 0.3s; }
-        .animate-d4 { animation-delay: 0.4s; }
-        .animate-d5 { animation-delay: 0.5s; }
-
-        /* --- Layout --- */
-        .container {
-            max-width: var(--max-width);
-            margin: 0 auto;
-            padding: 0 24px;
-        }
-
-        /* --- Nav --- */
-        nav {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: var(--bg);
-            border-bottom: 1px solid var(--border-muted);
-            backdrop-filter: blur(12px);
-            background: color-mix(in srgb, var(--bg) 85%, transparent);
-        }
-
-        nav .container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            height: 56px;
-        }
-
-        .nav-brand {
-            font-family: var(--font-heading);
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--fg);
-            text-decoration: none;
-        }
-
-        .nav-links {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-
-        .nav-links a {
-            font-size: 14px;
-            color: var(--fg-muted);
-            text-decoration: none;
-            transition: color 0.15s;
-        }
-
-        .nav-links a:hover { color: var(--fg); }
-
-        .nav-github {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-github svg {
-            width: 20px;
-            height: 20px;
-            fill: currentColor;
-        }
-
-        /* --- Hero --- */
-        .hero {
-            padding: 80px 0 60px;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .hero::before {
-            content: '';
-            position: absolute;
-            top: -120px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 600px;
-            height: 400px;
-            background: radial-gradient(ellipse, rgba(68, 147, 248, 0.12) 0%, rgba(171, 125, 248, 0.06) 40%, transparent 70%);
-            pointer-events: none;
-            animation: glowPulse 6s ease-in-out infinite;
-        }
-
-        @media (prefers-color-scheme: light) {
-            .hero::before {
-                background: radial-gradient(ellipse, rgba(9, 105, 218, 0.08) 0%, rgba(130, 80, 223, 0.04) 40%, transparent 70%);
-            }
-        }
-
-        .hero-badge {
-            display: inline-block;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 4px 12px;
-            border-radius: 20px;
-            background: rgba(63, 185, 80, 0.12);
-            color: var(--fg-success);
-            border: 1px solid rgba(63, 185, 80, 0.2);
-            margin-bottom: 24px;
-        }
-
-        .hero h1 {
-            font-family: var(--font-heading);
-            font-size: clamp(30px, 5vw, 48px);
-            font-weight: 800;
-            line-height: 1.2;
-            letter-spacing: -0.03em;
-            margin-bottom: 16px;
-            position: relative;
-        }
-
-        .hero h1 span {
-            background: linear-gradient(135deg, var(--fg-accent), var(--fg-done));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .hero-subtitle {
-            font-size: clamp(16px, 2.5vw, 20px);
-            color: var(--fg-muted);
-            max-width: 600px;
-            margin: 0 auto 40px;
-            line-height: 1.5;
-        }
-
-        /* --- Install block --- */
-        .install-block {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 48px;
-        }
-
-        .install-cmd {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 20px;
-            font-family: var(--font-mono);
-            font-size: 15px;
-            max-width: 100%;
-        }
-
-        .install-cmd .prompt { color: var(--fg-muted); user-select: none; }
-        .install-cmd code { color: var(--fg-success); white-space: nowrap; }
-
-        .install-cmd button {
-            background: none;
-            border: none;
-            color: var(--fg-muted);
-            cursor: pointer;
-            padding: 4px;
-            border-radius: 4px;
-            transition: color 0.15s;
-            display: flex;
-            align-items: center;
-        }
-
-        .install-cmd button:hover { color: var(--fg); }
-
-        .install-alt {
-            font-size: 13px;
-            color: var(--fg-muted);
-        }
-
-        .install-alt code {
-            font-family: var(--font-mono);
-            background: var(--bg-surface);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-
-        /* --- Demo --- */
-        .demo {
-            margin-bottom: 80px;
-        }
-
-        .demo img,
-        .demo iframe {
-            width: 100%;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(68, 147, 248, 0.1);
-        }
-        .demo iframe {
-            height: 660px;
-            display: block;
-            background: #fbfcfe;
-            color-scheme: light;
-        }
-        .demo-caption {
-            text-align: center;
-            margin-top: 14px;
-            font-size: 0.9rem;
-            color: #59636e;
-        }
-        .demo-caption a {
-            color: #2f6fed;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        .demo-caption a:hover { text-decoration: underline; }
-        @media (max-width: 720px) {
-            .demo iframe { height: 580px; }
-        }
-
-        @media (prefers-color-scheme: light) {
-            .demo img {
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(9, 105, 218, 0.08);
-            }
-        }
-
-        /* --- Sharing callout --- */
-        .sharing-callout {
-            padding: 0 0 60px;
-        }
-
-        .sharing-callout-inner {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 40px;
-            align-items: center;
-            padding: 40px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-muted);
-            border-radius: 12px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .sharing-callout-inner::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, var(--fg-accent), var(--fg-done), var(--fg-success));
-        }
-
-        .sharing-callout-text h2 {
-            font-family: var(--font-heading);
-            font-size: 22px;
-            font-weight: 700;
-            margin-bottom: 12px;
-            letter-spacing: -0.02em;
-        }
-
-        .sharing-callout-text p {
-            color: var(--fg-muted);
-            font-size: 15px;
-            line-height: 1.6;
-            margin-bottom: 8px;
-        }
-
-        .sharing-callout-text p:last-child {
-            margin-bottom: 0;
-        }
-
-        .sharing-callout-text .highlight {
-            color: var(--fg);
-            font-weight: 500;
-        }
-
-        .sharing-flow {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .sharing-step {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 12px 16px;
-            background: var(--bg);
-            border: 1px solid var(--border-muted);
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.2s;
-        }
-
-        .sharing-step:hover {
-            border-color: var(--border);
-        }
-
-        .sharing-step-num {
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-            background: rgba(68, 147, 248, 0.12);
-            color: var(--fg-accent);
-            font-family: var(--font-mono);
-            font-size: 12px;
-            font-weight: 700;
-            flex-shrink: 0;
-        }
-
-        .sharing-step code {
-            font-family: var(--font-mono);
-            font-size: 13px;
-            color: var(--fg-success);
-            background: rgba(63, 185, 80, 0.08);
-            padding: 1px 6px;
-            border-radius: 4px;
-        }
-
-        @media (max-width: 640px) {
-            .sharing-callout-inner {
-                grid-template-columns: 1fr;
-                gap: 24px;
-                padding: 24px;
-            }
-        }
-
-        /* --- Comparison row highlight --- */
-        .row-highlight td {
-            background: rgba(68, 147, 248, 0.04);
-        }
-
-        .row-highlight td:last-child {
-            font-weight: 600;
-        }
-
-        @media (prefers-color-scheme: light) {
-            .row-highlight td {
-                background: rgba(9, 105, 218, 0.04);
-            }
-        }
-
-        /* --- Features --- */
-        .features {
-            padding: 60px 0;
-        }
-
-        .features-header {
-            text-align: center;
-            margin-bottom: 48px;
-        }
-
-        .features-header h2 {
-            font-family: var(--font-heading);
-            font-size: 26px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .features-header p {
-            color: var(--fg-muted);
-            font-size: 16px;
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 16px;
-        }
-
-        .feature-card {
-            padding: 24px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-muted);
-            border-radius: 10px;
-            transition: border-color 0.2s, background 0.2s, transform 0.2s;
-        }
-
-        .feature-card:hover {
-            border-color: var(--border);
-            background: var(--bg-hover);
-            transform: translateY(-2px);
-        }
-
-        .feature-icon {
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            margin-bottom: 14px;
-            background: rgba(68, 147, 248, 0.1);
-            color: var(--fg-accent);
-        }
-
-        .feature-icon svg {
-            width: 18px;
-            height: 18px;
-            fill: currentColor;
-        }
-
-        .feature-card h3 {
-            font-family: var(--font-heading);
-            font-size: 14px;
-            font-weight: 700;
-            margin-bottom: 6px;
-            letter-spacing: -0.01em;
-        }
-
-        .feature-card p {
-            font-size: 14px;
-            color: var(--fg-muted);
-            line-height: 1.5;
-        }
-
-        /* --- Comparison --- */
-        .comparison {
-            padding: 60px 0;
-        }
-
-        .comparison h2 {
-            font-family: var(--font-heading);
-            font-size: 26px;
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .comparison-table-wrapper {
-            overflow-x: auto;
-            border: 1px solid var(--border-muted);
-            border-radius: 10px;
-        }
-
-        .comparison table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-
-        .comparison th,
-        .comparison td {
-            padding: 10px 14px;
-            text-align: left;
-            border-bottom: 1px solid var(--border-muted);
-            white-space: nowrap;
-        }
-
-        .comparison th {
-            background: var(--bg-surface);
-            font-weight: 600;
-            font-size: 13px;
-            color: var(--fg-muted);
-        }
-
-        .comparison th:last-child {
-            color: var(--fg-accent);
-        }
-
-        .comparison tr:last-child td { border-bottom: none; }
-
-        .comparison td:first-child {
-            font-weight: 500;
-        }
-
-        .comparison td:last-child {
-            color: var(--fg-success);
-            font-weight: 500;
-        }
-
-        .cell-empty { color: var(--fg-muted); opacity: 0.4; }
-
-        /* --- Install --- */
-        .install-section {
-            padding: 60px 0;
-        }
-
-        .install-section h2 {
-            font-family: var(--font-heading);
-            font-size: 26px;
-            font-weight: 700;
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .install-methods {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-        }
-
-        .install-method {
-            padding: 20px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-muted);
-            border-radius: 10px;
-        }
-
-        .install-method h3 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: var(--fg-muted);
-        }
-
-        .install-method pre {
-            font-family: var(--font-mono);
-            font-size: 13px;
-            color: var(--fg);
-            white-space: pre-wrap;
-            word-break: break-all;
-            line-height: 1.5;
-        }
-
-        /* --- CTA --- */
-        .cta {
-            padding: 80px 0;
-            text-align: center;
-        }
-
-        .cta h2 {
-            font-family: var(--font-heading);
-            font-size: 26px;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-
-        .cta p {
-            color: var(--fg-muted);
-            font-size: 16px;
-            margin-bottom: 32px;
-        }
-
-        .cta-buttons {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.15s;
-        }
-
-        .btn-primary {
-            background: var(--fg-accent);
-            color: #fff;
-        }
-
-        .btn-primary:hover { filter: brightness(1.15); }
-
-        .btn-secondary {
-            background: var(--bg-surface);
-            color: var(--fg);
-            border: 1px solid var(--border);
-        }
-
-        .btn-secondary:hover { background: var(--bg-hover); }
-
-        .btn svg {
-            width: 18px;
-            height: 18px;
-            fill: currentColor;
-        }
-
-        /* --- Footer --- */
-        footer {
-            padding: 32px 0;
-            border-top: 1px solid var(--border-muted);
-            text-align: center;
-            font-size: 13px;
-            color: var(--fg-muted);
-        }
-
-        footer a {
-            color: var(--fg-muted);
-            text-decoration: none;
-        }
-
-        footer a:hover { color: var(--fg); }
-
-        .footer-links {
-            display: flex;
-            gap: 24px;
-            justify-content: center;
-            margin-bottom: 12px;
-        }
-
-        /* --- Responsive --- */
-        @media (max-width: 640px) {
-            .hero { padding: 48px 0 40px; }
-            .nav-links a:not(.nav-github) { display: none; }
-            .install-cmd { font-size: 13px; padding: 10px 14px; }
-            .comparison th, .comparison td { padding: 8px 10px; font-size: 13px; }
-            .features-grid { grid-template-columns: 1fr; }
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>peekm: read, review, and share what Claude Code did</title>
+<meta name="description" content="peekm turns every Claude Code session on your machine into something you can read: the conversation, each line it changed, and what it remembers about the project.">
+<meta property="og:title" content="peekm: read, review, and share what Claude Code did">
+<meta property="og:description" content="Every Claude Code session on your machine, rendered so you can read it: the conversation, each line it changed, and what it remembers about the project. Local, no account.">
+<meta property="og:image" content="https://raw.githubusercontent.com/razvandimescu/peekm/main/assets/hero.png">
+<meta property="og:url" content="https://peekm.dev">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%232f6fed'/><path d='M16 8.5 23.5 16 16 23.5 8.5 16z' fill='white'/></svg>">
+<link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/DMSans.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/DMMono-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/DMMono-500.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face { font-family: 'Space Grotesk'; font-weight: 400 700; font-display: swap; src: url(fonts/SpaceGrotesk.woff2) format('woff2'); }
+@font-face { font-family: 'DM Sans'; font-weight: 300 700; font-display: swap; src: url(fonts/DMSans.woff2) format('woff2'); }
+@font-face { font-family: 'DM Mono'; font-weight: 400; font-display: swap; src: url(fonts/DMMono-400.woff2) format('woff2'); }
+@font-face { font-family: 'DM Mono'; font-weight: 500; font-display: swap; src: url(fonts/DMMono-500.woff2) format('woff2'); }
+
+:root {
+  --paper: #fbfcfe;
+  --surface: #ffffff;
+  --sunk: #f6f8fa;
+  --ink: #1f2328;
+  --graphite: #59636e;
+  --rule: #d1d9e0;
+  --rule-soft: #d1d9e0b3;
+  --blue: #2f6fed;
+  --blue-strong: #1f57c8;
+  --blue-text: #0969da;
+  --green: #2ea44f;
+  --amber: #e8952c;
+  --violet: #8250df;
+  --display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --mono: 'DM Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --margin: 256px;
+  --gutter: 48px;
+  --pad: 40px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 18px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: var(--blue-text); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+code { font-family: var(--mono); font-size: 0.9em; }
+figure { margin: 0; min-width: 0; }
+
+.page { max-width: calc(1240px + 2 * var(--pad)); margin: 0 auto; padding: 0 var(--pad); }
+.spine { display: grid; grid-template-columns: var(--margin) minmax(0, 1fr); column-gap: var(--gutter); }
+
+/* Masthead */
+.masthead { display: flex; align-items: center; justify-content: space-between; height: 76px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font: 600 19px/1 var(--display); letter-spacing: -0.01em; color: var(--ink); text-decoration: none; }
+.mark { width: 24px; height: 24px; border-radius: 7px; background: var(--blue); display: inline-grid; place-items: center; }
+.mark::after { content: ''; width: 9px; height: 9px; background: #fff; transform: rotate(45deg); border-radius: 1px; }
+.masthead nav { display: flex; gap: 28px; }
+.masthead nav a { color: var(--graphite); text-decoration: none; font-size: 15px; }
+.masthead nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* Hero */
+.hero h1 {
+  margin: 56px 0 0;
+  max-width: 14em;
+  font: 600 clamp(42px, 5.6vw, 78px)/1 var(--display);
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.hero-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 48px; margin-top: 28px; }
+.lede { margin: 0; max-width: 34em; font-size: 19px; line-height: 1.55; color: var(--graphite); text-wrap: pretty; }
+.install-cta { flex-shrink: 0; }
+.cmd { display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 16px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; font: 500 15px/1 var(--mono); }
+.cmd .prompt { color: var(--graphite); user-select: none; }
+.cmd code { font-size: inherit; }
+.copy {
+  margin-left: auto;
+  font: 600 13px/1 var(--display); color: #fff;
+  background: var(--blue); border: 1px solid var(--blue); border-radius: 7px;
+  padding: 9px 14px; cursor: pointer; min-width: 72px;
+}
+.copy:hover { background: var(--blue-strong); border-color: var(--blue-strong); }
+.install-more { display: inline-block; margin-top: 10px; font-size: 14px; color: var(--graphite); }
+
+/* Diptych: the log Claude Code writes, beside the same session in peekm */
+.diptych { margin-top: 48px; grid-template-rows: auto auto; }
+.diptych figure { display: grid; grid-row: span 2; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); }
+.raw-file { display: flex; flex-direction: column; min-height: 0; padding: 16px 0; }
+.raw-path { font: 500 11px/1.4 var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+.raw-log {
+  flex: 1 1 0; contain: size; overflow: hidden; margin-top: 10px;
+  font: 400 11px/16px var(--mono); color: var(--graphite);
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+.raw-log p { margin: 0 0 12px; white-space: pre-wrap; word-break: break-all; }
+.live iframe { display: block; width: calc(100% + 32px); height: 660px; margin: 0 -16px; border: 0; background: var(--paper); }
+figcaption { margin-top: 12px; font-size: 14px; line-height: 1.5; color: var(--graphite); max-width: 34em; }
+
+/* Parts: one verb per section, hung in the margin */
+.part { margin-top: 128px; align-items: baseline; }
+.part h2 { margin: 0; font: 600 44px/1 var(--display); letter-spacing: -0.035em; }
+.part-body { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr); column-gap: var(--gutter); align-items: start; }
+.part-body.single { grid-template-columns: minmax(0, 1fr); }
+.part-text p { margin: 0 0 16px; max-width: 26em; }
+.part-text p:last-child { margin-bottom: 0; }
+
+/* Fragments: excerpts of the real UI, flat on the page */
+.frag { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px; font-size: 13px; line-height: 1.5; }
+.frag-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.frag-title { font: 600 15px/1.2 var(--display); letter-spacing: -0.01em; }
+.frag-sub { font: 400 12px/1.2 var(--mono); color: var(--graphite); }
+
+/* Timeline fragment (mirrors .timeline-session) */
+.tl-day { font-size: 12px; font-weight: 600; color: var(--graphite); margin: 16px 0 8px; }
+.frag-head + .tl-day { margin-top: 0; }
+.tl-s { border: 1px solid var(--rule-soft); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+.tl-s.active { border-color: var(--green); }
+.tl-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; background: var(--sunk); }
+.tl-sid { font: 600 12px/1.4 var(--mono); background: var(--surface); padding: 1px 6px; border-radius: 4px; }
+.tl-proj { font: 600 10px/1.7 var(--mono); color: var(--violet); background: rgba(130, 80, 223, 0.1); padding: 0 8px; border-radius: 10px; }
+.tl-live { font: 600 10px/1.7 var(--body); color: #fff; background: var(--green); padding: 0 8px; border-radius: 10px; }
+.tl-dur { margin-left: auto; font: 400 12px/1.4 var(--mono); color: var(--graphite); }
+.tl-sum { flex-basis: 100%; color: var(--ink); }
+.tl-rib { display: flex; align-items: flex-end; gap: 3px; height: 34px; padding: 4px 12px 8px; }
+.tl-rib i { flex: 1; min-width: 3px; border-radius: 3px 3px 1px 1px; }
+.tl-rib .w { background: var(--green); }
+.tl-rib .e { background: var(--amber); }
+.tl-rib .b { background: var(--blue); }
+.tl-rib .o { background: var(--graphite); opacity: 0.45; }
+
+/* Memory fragment (mirrors .memory-card) */
+.mem { padding: 12px 16px; border: 1px solid var(--rule-soft); border-left: 3px solid var(--violet); border-radius: 6px; margin-bottom: 10px; }
+.mem:last-child { margin-bottom: 0; }
+.mem-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.mem-name { font-weight: 600; font-size: 14px; }
+.mem-meta { font-size: 12px; color: var(--graphite); }
+.mem-snip { font-size: 12px; color: var(--graphite); line-height: 1.45; margin-bottom: 8px; }
+.mem-tags, .mem-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.mem-tags { margin-bottom: 8px; }
+.mem-tags span { font-size: 11px; padding: 1px 6px; border-radius: 3px; color: var(--violet); background: rgba(130, 80, 223, 0.1); }
+.mem-files span { font: 400 11px/1.6 var(--mono); padding: 0 6px; border-radius: 3px; color: var(--graphite); background: rgba(175, 184, 193, 0.2); }
+.mem-files .pinned { color: var(--blue-text); background: rgba(56, 139, 253, 0.1); }
+.mem-files .stale { background: transparent; box-shadow: inset 0 0 0 1px var(--rule-soft); }
+
+/* Share fragment (mirrors .share-panel) */
+.doc-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); }
+.doc-name { font: 600 14px/1.2 var(--body); }
+.doc-share { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; color: var(--blue-text); background: rgba(56, 139, 253, 0.1); }
+.share-panel { margin: 12px 0 0 auto; max-width: 360px; padding: 12px; border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 4px 12px rgba(20, 38, 74, 0.12); }
+.share-label { font-size: 11px; color: var(--graphite); text-transform: uppercase; letter-spacing: 0.5px; }
+.share-url { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.share-url span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--sunk); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; font: 400 12px/1.2 var(--mono); }
+.share-url b { font-weight: 400; font-size: 12px; color: var(--graphite); background: var(--sunk); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; }
+.share-exp { font-size: 12px; color: var(--graphite); margin-bottom: 8px; }
+.share-stop { font-size: 12px; color: #cf222e; }
+
+/* Compare */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 11px 16px 11px 0; border-bottom: 1px solid var(--rule-soft); white-space: nowrap; vertical-align: baseline; }
+thead th { font: 600 13px/1.3 var(--display); color: var(--graphite); border-bottom-color: var(--rule); }
+tbody th { font-weight: 500; }
+.us { background: rgba(47, 111, 237, 0.06); padding-left: 16px; }
+thead .us { color: var(--blue-text); }
+tbody .us { font-weight: 500; }
+.nil { color: var(--graphite); opacity: 0.7; }
+
+/* Install */
+.installs { margin: 0; border-top: 1px solid var(--rule); }
+.installs div { display: grid; grid-template-columns: 128px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--rule-soft); }
+.installs dt { font-size: 15px; color: var(--graphite); }
+.installs dd { margin: 0; min-width: 0; }
+.installs code { font-size: 14px; overflow-wrap: anywhere; }
+.installs .copy { background: var(--surface); color: var(--ink); border-color: var(--rule); }
+.installs .copy:hover { background: var(--sunk); border-color: #b7bfc7; }
+.after { margin: 20px 0 0; max-width: 34em; color: var(--graphite); }
+
+/* Colophon */
+.colophon { margin-top: 160px; padding-top: 28px; padding-bottom: 56px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--graphite); }
+.colophon p { margin: 0 0 8px; }
+.colophon nav { display: flex; flex-wrap: wrap; gap: 20px; }
+.colophon a { color: var(--graphite); }
+.colophon a:hover { color: var(--ink); }
+
+@media (max-width: 1080px) {
+  :root { --margin: 200px; --gutter: 32px; }
+  .part-body { grid-template-columns: minmax(0, 1fr); row-gap: 28px; }
+  .part h2 { font-size: 38px; }
+}
+@media (max-width: 860px) {
+  .spine { grid-template-columns: minmax(0, 1fr); }
+  .hero-row { flex-direction: column; align-items: flex-start; gap: 24px; }
+  .raw { margin-bottom: 28px; }
+  .raw-file { padding: 0; }
+  .raw-log { flex: none; height: 150px; }
+  .part h2 { margin-bottom: 20px; }
+  .colophon .mark-cell { display: none; }
+}
+@media (max-width: 640px) {
+  :root { --pad: 20px; }
+  body { font-size: 17px; }
+  .masthead { height: 64px; }
+  .hero h1 { margin-top: 32px; }
+  .hero-row { align-items: stretch; }
+  .lede { font-size: 17px; }
+  .live iframe { height: 600px; }
+  .part { margin-top: 96px; }
+  .part h2 { font-size: 34px; }
+  .installs div { grid-template-columns: minmax(0, 1fr) auto; }
+  .installs dt { grid-column: 1 / -1; font-size: 13px; margin-bottom: -8px; }
+}
+</style>
 </head>
 <body>
 
-<nav>
-    <div class="container">
-        <a href="/" class="nav-brand">peekm</a>
-        <div class="nav-links">
-            <a href="#features">Features</a>
-            <a href="#comparison">Compare</a>
-            <a href="#install">Install</a>
-            <a href="https://github.com/razvandimescu/peekm" class="nav-github" target="_blank" rel="noopener">
-                <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            </a>
-        </div>
-    </div>
-</nav>
+<header class="page masthead">
+  <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>peekm</a>
+  <nav aria-label="Primary">
+    <a href="#install">Install</a>
+    <a href="https://github.com/razvandimescu/peekm">GitHub</a>
+  </nav>
+</header>
 
-<section class="hero">
-    <div class="container">
-        <div class="hero-badge animate">Works with Claude Code</div>
-        <h1 class="animate animate-d1">Read, review, and continue<br><span>what Claude Code did</span></h1>
-        <p class="hero-subtitle animate animate-d2">
-            peekm turns every Claude Code session into something you can read — the full conversation,
-            the line-level diffs, and what the AI learned about each project. Reply to continue a session,
-            or share any file it produced. All local, no account.
-        </p>
-
-        <div class="install-block animate animate-d3">
-            <div class="install-cmd">
-                <span class="prompt">$</span>
-                <code>npx @peekm/peekm .</code>
-                <button onclick="copyInstall()" title="Copy" aria-label="Copy install command">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25zM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>
-                </button>
-            </div>
-            <div class="install-alt">
-                Or install globally: <code>npm i -g @peekm/peekm</code> &middot; <code>brew install razvandimescu/tap/peekm</code>
-            </div>
-        </div>
+<main>
+  <section class="page hero" aria-labelledby="hero-title">
+    <h1 id="hero-title">Read, review, and share what Claude Code did.</h1>
+    <div class="hero-row">
+      <p class="lede">peekm turns every Claude Code session on your machine into something you can read: the conversation, each line it changed, and what it remembers about the project. It runs locally and needs no account.</p>
+      <div class="install-cta">
+        <div class="cmd"><span class="prompt" aria-hidden="true">$</span><code>npx @peekm/peekm .</code><button type="button" class="copy" data-copy="npx @peekm/peekm .">Copy</button></div>
+        <a class="install-more" href="#install">Homebrew, npm, Go and curl</a>
+      </div>
     </div>
-</section>
 
-<section class="demo animate animate-d4">
-    <div class="container">
-        <div id="demo">
-            <iframe src="demo.html" title="peekm — interactive demo: a live Claude Code transcript with line diffs and a reply box" loading="lazy"></iframe>
-            <p class="demo-caption">↑ This one's live — open a diff, expand a response, or hit Send. <a href="demo.html" target="_blank" rel="noopener">Open full demo →</a></p>
+    <div class="spine diptych" id="demo">
+      <figure class="raw">
+        <div class="raw-file">
+        <div class="raw-path" title="~/.claude/projects/-Users-you-acme-api/a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d.jsonl">~/.claude/projects/-Users-you-acme-api/a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d.jsonl</div>
+        <div class="raw-log" aria-hidden="true">
+<p>{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","type":"user","message":{"role":"user","content":"Add cursor-based pagination to the widgets endpoint. Keep the response shape backwards compatible — existing clients shouldn't break."},"uuid":"7c1e9f02-3b4a-4d5e-9f60-1a2b3c4d5e6f","timestamp":"2026-10-28T14:22:03.118Z"}</p>
+<p>{"parentUuid":"7c1e9f02-3b4a-4d5e-9f60-1a2b3c4d5e6f","isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","message":{"id":"msg_01JQ8vX3kP9mT2rLwYc4nB7e","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"thinking","thinking":"The list handler returns everything at once. I'll add optional `cursor` + `limit` query params, page the query, and add `next_cursor` to the response without removing `items`.","signature":"EpYECkYIBxgCKkDx2vQ8b3mJ0aZtL9kWfR1nYc5uXe7Hs2gPq4oTi6"}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":2178,"cache_read_input_tokens":14301,"output_tokens":9,"service_tier":"standard"}},"requestId":"req_011CUZ3n8fWq2b5kLx9RtY4m","type":"assistant","uuid":"d2a7b5c1-8e9f-4a0b-b1c2-d3e4f5a6b7c8","timestamp":"2026-10-28T14:22:07.442Z"}</p>
+<p>{"parentUuid":"d2a7b5c1-8e9f-4a0b-b1c2-d3e4f5a6b7c8","isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","message":{"id":"msg_01JQ8vX3kP9mT2rLwYc4nB7e","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"I'll add optional `cursor` and `limit` params and return a `next_cursor`, leaving `items` in place so nothing breaks."}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":2178,"cache_read_input_tokens":14301,"output_tokens":61,"service_tier":"standard"}},"requestId":"req_011CUZ3n8fWq2b5kLx9RtY4m","type":"assistant","uuid":"4f8e2d1c-0b9a-4c8d-9e7f-6a5b4c3d2e1f","timestamp":"2026-10-28T14:22:08.019Z"}</p>
+<p>{"parentUuid":"4f8e2d1c-0b9a-4c8d-9e7f-6a5b4c3d2e1f","isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","message":{"id":"msg_01JQ8vX3kP9mT2rLwYc4nB7e","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"tool_use","id":"toolu_01Hk3Vq8ZtR5mN2pLx7Wc9aD","name":"Read","input":{"file_path":"/Users/you/acme-api/src/widgets.ts"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":2178,"cache_read_input_tokens":14301,"output_tokens":118,"service_tier":"standard"}},"requestId":"req_011CUZ3n8fWq2b5kLx9RtY4m","type":"assistant","uuid":"9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d","timestamp":"2026-10-28T14:22:08.611Z"}</p>
+<p>{"parentUuid":"9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d","isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Hk3Vq8ZtR5mN2pLx7Wc9aD","type":"tool_result","content":"     1\texport async function listWidgets(req) {\n     2\t  const items = await db.widgets.all()\n     3\t  return {\n     4\t    items,\n     5\t  }\n     6\t}\n"}]},"uuid":"0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f","timestamp":"2026-10-28T14:22:08.702Z","toolUseResult":{"type":"text","file":{"filePath":"/Users/you/acme-api/src/widgets.ts","content":"export async function listWidgets(req) {\n  const items = await db.widgets.all()\n  return {\n    items,\n  }\n}\n","numLines":6,"startLine":1,"totalLines":6}}}</p>
+<p>{"parentUuid":"0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f","isSidechain":false,"userType":"external","cwd":"/Users/you/acme-api","sessionId":"a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d","version":"2.0.31","gitBranch":"main","message":{"id":"msg_01Rt5Wm2Xq8Lp4Nv7Bc1Kd9e","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"tool_use","id":"toolu_01Pq7Zx4Vb2Nm8Lk5Jh3Gf6d","name":"Edit","input":{"file_path":"/Users/you/acme-api/src/widgets.ts","old_string":"  const items = await db.widgets.all()","new_string":"  const limit  = clamp(req.query.limit ?? 20, 1, 100)\n  const cursor = req.query.cursor ?? null\n  const items  = await db.widgets.page({ cursor, limit })"}}],"stop_reason":"tool_use"},"type":"assistant","uuid":"5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9","timestamp":"2026-10-28T14:22:11.930Z"}</p>
         </div>
+        </div>
+        <figcaption>What Claude Code saves: one JSON object per event.</figcaption>
+      </figure>
+      <figure class="live">
+        <iframe src="demo.html" title="Live peekm demo: a Claude Code session with line diffs"></iframe>
+        <figcaption>The same session in peekm. This is the real interface: open the diff or expand the response. <a href="demo.html">Open it on its own page</a>.</figcaption>
+      </figure>
     </div>
-</section>
+  </section>
 
-<section class="sharing-callout">
-    <div class="container">
-        <div class="sharing-callout-inner">
-            <div class="sharing-callout-text">
-                <h2>Share any document.<br>One click.</h2>
-                <p>
-                    Send a rendered markdown file to anyone on your network — or <span class="highlight">make it public</span> with an HTTPS link through <code>share.peekm.dev</code>.
-                </p>
-                <p>No sign-up. No upload. Expires in 1 hour. Works with Markdown, HTML, SVG, and plain text.</p>
-            </div>
-            <div class="sharing-flow">
-                <div class="sharing-step">
-                    <span class="sharing-step-num">1</span>
-                    Click the share icon on any file
-                </div>
-                <div class="sharing-step">
-                    <span class="sharing-step-num">2</span>
-                    LAN link copied — share with your team
-                </div>
-                <div class="sharing-step">
-                    <span class="sharing-step-num">3</span>
-                    Click "Make public" &rarr; get <code>share.peekm.dev/&lt;token&gt;</code>
-                </div>
-            </div>
+  <section class="page spine part" id="read" aria-labelledby="read-h">
+    <h2 id="read-h">Read</h2>
+    <div class="part-body">
+      <div class="part-text">
+        <p>Every session from every project, in one timeline. Open one and read it as a conversation: your prompts, Claude's answers, each tool call and its thinking.</p>
+        <p>A session that is running now shows which tool Claude is using. The bar under each session shows its shape: green for new files, amber for edits, blue for commands.</p>
+      </div>
+      <figure class="frag" role="img" aria-label="peekm timeline with three sessions from different projects, one of them active">
+        <div class="frag-head"><span class="frag-title">Timeline</span><span class="frag-sub">~/projects</span></div>
+        <div class="tl-day">Today</div>
+        <div class="tl-s active">
+          <div class="tl-h"><span class="tl-sid">a1b2c3d4</span><span class="tl-proj">acme-api</span><span class="tl-live">Active</span><span class="tl-dur">4m</span><span class="tl-sum">Add cursor pagination to widgets</span></div>
+          <div class="tl-rib" data-r="o3 b4 e9 e6 b5 e10 e7 b3 b6 e8 e5 b4 e9 b7 e6 b3"></div>
         </div>
+        <div class="tl-s">
+          <div class="tl-h"><span class="tl-sid">7f3e91ac</span><span class="tl-proj">billing-service</span><span class="tl-dur">18m</span><span class="tl-sum">Fix proration rounding on plan downgrade</span></div>
+          <div class="tl-rib" data-r="o4 o3 b6 b8 e7 e9 b5 b9 e6 e4 b7 b10 e8 e5 b6 b8 e7 b9 b4 e6 b7 b5"></div>
+        </div>
+        <div class="tl-s">
+          <div class="tl-h"><span class="tl-sid">c04d2b77</span><span class="tl-proj">web-dashboard</span><span class="tl-dur">11m</span><span class="tl-sum">Replace date-fns with Temporal in the charts</span></div>
+          <div class="tl-rib" data-r="o3 b5 w9 w7 e6 e8 w10 e5 b6 e7 e9 b4 w6 e5 b8 e6 b5 b7"></div>
+        </div>
+        <div class="tl-day">Yesterday</div>
+        <div class="tl-s">
+          <div class="tl-h"><span class="tl-sid">e2a64f10</span><span class="tl-proj">acme-api</span><span class="tl-dur">26m</span><span class="tl-sum">Rate-limit the public endpoints</span></div>
+        </div>
+      </figure>
     </div>
-</section>
+  </section>
 
-<section class="features" id="features">
-    <div class="container">
-        <div class="features-header">
-            <h2>What it does</h2>
-            <p>One binary. No config. AI tracking starts automatically. Sharing works for everyone.</p>
+  <section class="page spine part" id="review" aria-labelledby="review-h">
+    <h2 id="review-h">Review</h2>
+    <div class="part-body">
+      <div class="part-text">
+        <p>Each edit appears as a line diff, next to the message that explains it. Try one in the demo above.</p>
+        <p>peekm also shows what Claude Code has saved to memory for each project. Those notes shape every future session in that project, and you can read all of them in one place.</p>
+      </div>
+      <figure class="frag" role="img" aria-label="peekm memory browser showing saved notes for two projects">
+        <div class="frag-head"><span class="frag-title">Memory</span><span class="frag-sub">~/.claude/projects</span></div>
+        <div class="mem">
+          <div class="mem-top"><span class="mem-name">acme-api</span><span class="mem-meta">48 lines · 2 days ago</span></div>
+          <div class="mem-snip">Integration tests run against Postgres in Docker; unit tests mock the repository layer. List endpoints page by keyset on id.</div>
+          <div class="mem-tags"><span>Testing</span><span>API conventions</span><span>Deploys</span></div>
+          <div class="mem-files"><span class="pinned">MEMORY.md</span><span>api_conventions.md</span><span>feedback_tests.md</span><span class="stale">deploys.md</span></div>
         </div>
-        <div class="features-grid">
-            <div class="feature-card">
-                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.82V4.75Z"/></svg></div>
-                <h3>Timeline</h3>
-                <p>Every AI session across all projects — file edits, tool calls, duration. Live status shows which tool the AI is using right now.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Z"/></svg></div>
-                <h3>Transcripts</h3>
-                <p>Read the full AI conversation for any session. Tool calls, diffs, thinking — all rendered inline.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(171, 125, 248, 0.1); color: var(--fg-done);"><svg viewBox="0 0 16 16"><path d="M5.433 2.304A4.492 4.492 0 0 0 3.5 6c0 1.598.564 3.05 1.5 4.189v.811c0 .74.607 1.349 1.351 1.449a.5.5 0 0 0 .298.051h2.702a.5.5 0 0 0 .298-.051c.744-.1 1.351-.71 1.351-1.449v-.811A6.975 6.975 0 0 0 12.5 6a4.492 4.492 0 0 0-1.933-3.696A4.478 4.478 0 0 0 8 1.5a4.478 4.478 0 0 0-2.567.804ZM6 14.25v.25a2 2 0 1 0 4 0v-.25H6Z"/></svg></div>
-                <h3>Memory browser</h3>
-                <p>Cross-project dashboard of Claude Code's learned context. See what the AI remembers about each project.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(63, 185, 80, 0.1); color: var(--fg-success);"><svg viewBox="0 0 16 16"><path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947Z"/></svg></div>
-                <h3>Real-time notifications</h3>
-                <p>Toast the instant AI modifies a file. Click to navigate. Live reload via Server-Sent Events.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon"><svg viewBox="0 0 16 16"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 1 1 1.06-1.06l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></div>
-                <h3>Markdown viewer</h3>
-                <p>VS Code-style sidebar, fuzzy search, in-browser editing, syntax highlighting, light/dark themes.</p>
-            </div>
+        <div class="mem">
+          <div class="mem-top"><span class="mem-name">billing-service</span><span class="mem-meta">31 lines · today</span></div>
+          <div class="mem-snip">Money is integer cents end to end. Never round before the final invoice line. Stripe webhooks are idempotent by event id.</div>
+          <div class="mem-tags"><span>Money</span><span>Webhooks</span></div>
+          <div class="mem-files"><span class="pinned">MEMORY.md</span><span>feedback_rounding.md</span></div>
         </div>
+      </figure>
     </div>
-</section>
+  </section>
 
-<section class="comparison" id="comparison">
-    <div class="container">
-        <h2>How it compares</h2>
-        <div class="comparison-table-wrapper">
-            <table>
-                <thead>
-                    <tr>
-                        <th></th>
-                        <th>git diff</th>
-                        <th>Git AI</th>
-                        <th>Gryph</th>
-                        <th>claude-code-transcripts</th>
-                        <th>peekm</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Real-time notifications</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>Toast + live reload</td>
-                    </tr>
-                    <tr>
-                        <td>Visual UI</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>VS Code ext.</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>Static HTML</td>
-                        <td>Web UI + tree view</td>
-                    </tr>
-                    <tr>
-                        <td>Session correlation</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>Git notes</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>File-based</td>
-                        <td>Per-file session panel</td>
-                    </tr>
-                    <tr>
-                        <td>Persistent history</td>
-                        <td>Git log</td>
-                        <td>Git notes</td>
-                        <td>Audit log</td>
-                        <td>JSON files</td>
-                        <td>JSONL timeline</td>
-                    </tr>
-                    <tr class="row-highlight">
-                        <td>Sharing</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td class="cell-empty">&mdash;</td>
-                        <td>LAN + public tunnel</td>
-                    </tr>
-                    <tr>
-                        <td>Zero config</td>
-                        <td>Yes</td>
-                        <td>Extension install</td>
-                        <td>CLI setup</td>
-                        <td>Post-hoc script</td>
-                        <td>Yes (auto-detects)</td>
-                    </tr>
-                    <tr>
-                        <td>Free / OSS</td>
-                        <td>Yes</td>
-                        <td>Freemium</td>
-                        <td>Free</td>
-                        <td>Free</td>
-                        <td>Free / Apache 2.0</td>
-                    </tr>
-                </tbody>
-            </table>
+  <section class="page spine part" id="share" aria-labelledby="share-h">
+    <h2 id="share-h">Share</h2>
+    <div class="part-body">
+      <div class="part-text">
+        <p>Share any file Claude wrote as a rendered page. One click gives you a link on your local network. A second click makes it public at share.peekm.dev for one hour.</p>
+        <p>The file stays on your machine. The relay only forwards requests while the link is live. Works with Markdown, HTML, SVG and plain text.</p>
+      </div>
+      <figure class="frag" role="img" aria-label="peekm share panel with a local network link and a public link that expires in 59 minutes">
+        <div class="doc-bar">
+          <span class="doc-name">design-notes.md</span>
+          <span class="doc-share" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M15 3a3 3 0 0 1-5.175 2.066l-3.92 2.179a2.994 2.994 0 0 1 0 1.51l3.92 2.179a3 3 0 1 1-.73 1.31l-3.92-2.178a3 3 0 1 1 0-4.133l3.92-2.178A3 3 0 1 1 15 3Z"/></svg></span>
         </div>
+        <div class="share-panel">
+          <div class="share-label">Local network</div>
+          <div class="share-url"><span>http://192.168.1.24:6419/s/7f3a9c2e</span><b>Copy</b></div>
+          <div class="share-label">Public link</div>
+          <div class="share-url"><span>https://share.peekm.dev/k3x9q2wd</span><b>Copy</b></div>
+          <div class="share-exp">Expires in 59 min</div>
+          <div class="share-stop">Stop sharing</div>
+        </div>
+      </figure>
     </div>
-</section>
+  </section>
 
-<section class="install-section" id="install">
-    <div class="container">
-        <h2>Install</h2>
-        <div class="install-methods">
-            <div class="install-method">
-                <h3>npm (recommended)</h3>
-                <pre>npm i -g @peekm/peekm</pre>
-            </div>
-            <div class="install-method">
-                <h3>Homebrew</h3>
-                <pre>brew install razvandimescu/tap/peekm</pre>
-            </div>
-            <div class="install-method">
-                <h3>curl</h3>
-                <pre>curl -L https://github.com/razvandimescu/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz</pre>
-            </div>
-            <div class="install-method">
-                <h3>Go</h3>
-                <pre>go install github.com/razvandimescu/peekm@latest</pre>
-            </div>
-        </div>
+  <section class="page spine part" id="compare" aria-labelledby="compare-h">
+    <h2 id="compare-h">Compare</h2>
+    <div class="part-body single">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><td></td><th scope="col" class="us">peekm</th><th scope="col">git diff</th><th scope="col">Git AI</th><th scope="col">Gryph</th><th scope="col">claude-code-transcripts</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Real-time notifications</th><td class="us">Toast + live reload</td><td class="nil">—</td><td class="nil">—</td><td class="nil">—</td><td class="nil">—</td></tr>
+            <tr><th scope="row">Visual UI</th><td class="us">Web UI + tree view</td><td class="nil">—</td><td>VS Code ext.</td><td class="nil">—</td><td>Static HTML</td></tr>
+            <tr><th scope="row">Session correlation</th><td class="us">Per-file session panel</td><td class="nil">—</td><td>Git notes</td><td class="nil">—</td><td>File-based</td></tr>
+            <tr><th scope="row">Persistent history</th><td class="us">JSONL timeline</td><td>Git log</td><td>Git notes</td><td>Audit log</td><td>JSON files</td></tr>
+            <tr><th scope="row">Sharing</th><td class="us">LAN + public link</td><td class="nil">—</td><td class="nil">—</td><td class="nil">—</td><td class="nil">—</td></tr>
+            <tr><th scope="row">Zero config</th><td class="us">Yes (auto-detects)</td><td>Yes</td><td>Extension install</td><td>CLI setup</td><td>Post-hoc script</td></tr>
+            <tr><th scope="row">Free / OSS</th><td class="us">Free, Apache 2.0</td><td>Yes</td><td>Freemium</td><td>Free</td><td>Free</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
-</section>
+  </section>
 
-<section class="cta">
-    <div class="container">
-        <h2>One command. Full visibility.</h2>
-        <p>All data stays local by default. Public sharing is opt-in.<br>No accounts. No sign-up.</p>
-        <div class="cta-buttons">
-            <a href="https://github.com/razvandimescu/peekm" class="btn btn-primary">
-                <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-                View on GitHub
-            </a>
-            <a href="https://github.com/razvandimescu/peekm/releases" class="btn btn-secondary">
-                All releases
-            </a>
-        </div>
+  <section class="page spine part" id="install" aria-labelledby="install-h">
+    <h2 id="install-h">Install</h2>
+    <div class="part-body single">
+      <dl class="installs">
+        <div><dt>npx</dt><dd><code>npx @peekm/peekm .</code></dd><button type="button" class="copy" data-copy="npx @peekm/peekm .">Copy</button></div>
+        <div><dt>Homebrew</dt><dd><code>brew install razvandimescu/tap/peekm</code></dd><button type="button" class="copy" data-copy="brew install razvandimescu/tap/peekm">Copy</button></div>
+        <div><dt>npm</dt><dd><code>npm i -g @peekm/peekm</code></dd><button type="button" class="copy" data-copy="npm i -g @peekm/peekm">Copy</button></div>
+        <div><dt>Go</dt><dd><code>go install github.com/razvandimescu/peekm@latest</code></dd><button type="button" class="copy" data-copy="go install github.com/razvandimescu/peekm@latest">Copy</button></div>
+        <div><dt>curl</dt><dd><code>curl -L https://github.com/<wbr>razvandimescu/<wbr>peekm/<wbr>releases/<wbr>latest/<wbr>download/<wbr>peekm_$(uname -s)_$(uname -m).tar.gz | tar xz</code></dd><button type="button" class="copy" data-copy="curl -L https://github.com/razvandimescu/peekm/releases/latest/download/peekm_$(uname -s)_$(uname -m).tar.gz | tar xz">Copy</button></div>
+      </dl>
+      <p class="after">Then run <code>peekm ~/projects</code>, or point it at any folder. It opens in your browser and sets up Claude Code tracking on the first run.</p>
     </div>
-</section>
+  </section>
+</main>
 
-<footer>
-    <div class="container">
-        <div class="footer-links">
-            <a href="https://github.com/razvandimescu/peekm">GitHub</a>
-            <a href="https://github.com/razvandimescu/peekm/issues">Issues</a>
-            <a href="https://github.com/razvandimescu/peekm/releases">Releases</a>
-            <a href="https://www.npmjs.com/package/@peekm/peekm">npm</a>
-        </div>
-        <p>Apache 2.0 License &middot; Built by <a href="https://github.com/razvandimescu">razvandimescu</a></p>
-    </div>
+<footer class="page spine colophon">
+  <div class="mark-cell"><span class="brand"><span class="mark" aria-hidden="true"></span>peekm</span></div>
+  <div>
+    <p>Open source under the Apache 2.0 license. Built by <a href="https://github.com/razvandimescu">razvandimescu</a>.</p>
+    <nav aria-label="Project">
+      <a href="https://github.com/razvandimescu/peekm">GitHub</a>
+      <a href="https://github.com/razvandimescu/peekm/issues">Issues</a>
+      <a href="https://github.com/razvandimescu/peekm/releases">Releases</a>
+      <a href="https://www.npmjs.com/package/@peekm/peekm">npm</a>
+    </nav>
+  </div>
 </footer>
 
 <script>
-function copyInstall() {
-    navigator.clipboard.writeText('npx @peekm/peekm .').then(() => {
-        const btn = document.querySelector('.install-cmd button');
-        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
-        setTimeout(() => {
-            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25zM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
-        }, 2000);
-    });
-}
+document.querySelectorAll('.tl-rib[data-r]').forEach(rib => {
+  for (const cell of rib.dataset.r.split(' ')) {
+    const i = document.createElement('i');
+    i.className = cell[0];
+    i.style.height = cell.slice(1) * 10 + '%';
+    rib.append(i);
+  }
+});
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-copy]');
+  if (!btn || !navigator.clipboard) return;
+  navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+  });
+});
 </script>
-
 </body>
 </html>
