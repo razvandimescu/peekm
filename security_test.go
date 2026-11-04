@@ -546,6 +546,29 @@ func TestEventsForDir_IncludesPlanFiles(t *testing.T) {
 	}
 }
 
+func TestEventsForDir_IncludesMemoryFilesOfDirSessions(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+
+	projectDir := filepath.Join(homeDir, "projects", "peekm")
+	memoryFile := filepath.Join(homeDir, ".claude", "projects", "-Users-x-projects-peekm", "memory", "note.md")
+
+	el := &eventLog{
+		events: []SessionEvent{
+			{FilePath: memoryFile, ToolName: "Write", SessionID: "in", CWD: projectDir, Timestamp: time.Now()},
+			{FilePath: memoryFile, ToolName: "Write", SessionID: "out", CWD: filepath.Join(homeDir, "elsewhere"), Timestamp: time.Now()},
+		},
+	}
+
+	events := el.eventsForDir(projectDir)
+
+	if len(events) != 1 || events[0].SessionID != "in" {
+		t.Errorf("expected only the memory event of the session under projectDir, got %+v", events)
+	}
+}
+
 // TestCollectMarkdownFiles_SymlinkCycle tests that circular symlinks don't cause infinite loops
 func TestCollectMarkdownFiles_SymlinkCycle(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
