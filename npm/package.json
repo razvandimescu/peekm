@@ -15,7 +15,7 @@
   "homepage": "https://peekm.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/razvandimescu/peekm.git"
+    "url": "git+https://github.com/razvandimescu/peekm.git"
   },
   "bugs": {
     "url": "https://github.com/razvandimescu/peekm/issues"

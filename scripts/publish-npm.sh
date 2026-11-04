@@ -20,6 +20,11 @@ find npm -name "package.json" -type f -exec sed -i.bak "s/\"version\": \".*\"/\"
 sed -i.bak "s/\"@peekm\/\([^\"]*\)\": \"[^\"]*\"/\"@peekm\/\1\": \"$VERSION\"/g" npm/package.json
 find npm -name "*.bak" -delete
 
+# npm shows the package README: publish the repo's, with relative links pinned to this tag.
+sed -e "s#](assets/#](https://raw.githubusercontent.com/razvandimescu/peekm/v$VERSION/assets/#g" \
+    -e "s#](LICENSE)#](https://github.com/razvandimescu/peekm/blob/v$VERSION/LICENSE)#g" \
+    README.md > npm/README.md
+
 # Copy binaries from dist/ to npm platform directories
 echo "Copying binaries..."
 for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
