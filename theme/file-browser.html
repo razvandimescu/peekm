@@ -1410,10 +1410,6 @@
                 min-width: 32px;
                 min-height: 28px;
             }
-            /* Reclaim width on small screens — icons carry the meaning here. */
-            .nav-btn-label {
-                display: none;
-            }
 
             .top-bar button {
                 min-width: 36px;
@@ -2209,6 +2205,12 @@
             font-size: 13px;
             font-weight: 500;
             line-height: 1;
+        }
+        /* The labelled switcher needs ~1060px; narrower, icons (with titles) carry the meaning. */
+        @media (max-width: 1080px) {
+            .nav-btn-label {
+                display: none;
+            }
         }
         .nav-btn:hover {
             background: var(--bgColor-default);
