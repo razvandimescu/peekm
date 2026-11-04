@@ -441,16 +441,18 @@ func isPlanFile(path string) bool {
 	return isSubpath(path, claudePlansDir())
 }
 
-// eventsForDir returns events under dir (plus plan files), newest first.
+// eventsForDir returns events under dir, plus plan files and the memory files
+// of sessions running under dir, newest first.
 func (el *eventLog) eventsForDir(dir string) []SessionEvent {
 	plansDir := claudePlansDir()
+	within := func(path string) bool { return path == dir || isSubpath(path, dir) }
 
 	el.mu.RLock()
 	defer el.mu.RUnlock()
 	var out []SessionEvent
 	for i := len(el.events) - 1; i >= 0; i-- {
 		evt := el.events[i]
-		if evt.FilePath == dir || isSubpath(evt.FilePath, dir) || isSubpath(evt.FilePath, plansDir) {
+		if within(evt.FilePath) || isSubpath(evt.FilePath, plansDir) || (within(evt.CWD) && isMemoryFile(evt.FilePath)) {
 			out = append(out, evt)
 		}
 	}
