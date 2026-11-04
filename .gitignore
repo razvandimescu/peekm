@@ -50,6 +50,6 @@ docs
 # Generated from README.md by scripts/publish-npm.sh
 /npm/README.md
 
-# Built by make site-demo
-/site/demo.html
+# Copied by make site
 /site/fonts/
+/site/hero.png

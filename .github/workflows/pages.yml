@@ -1,10 +1,9 @@
 name: Deploy to GitHub Pages
 
-# No paths filter: the demo is rendered from theme/ and the Go transcript code,
-# so most changes to main change the site.
 on:
   push:
     branches: [main]
+    paths: [site/**, assets/hero.png, theme/fonts/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:
@@ -24,10 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: make site-demo
+      - run: make site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -107,7 +107,7 @@ figure { margin: 0; min-width: 0; }
   mask-image: linear-gradient(#000 70%, transparent);
 }
 .raw-log p { margin: 0 0 12px; white-space: pre-wrap; word-break: break-all; }
-.live iframe { display: block; width: calc(100% + 32px); height: 660px; margin: 0 -16px; border: 0; background: var(--paper); }
+.live img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); }
 figcaption { margin-top: 12px; font-size: 14px; line-height: 1.5; color: var(--graphite); max-width: 34em; }
 
 /* Parts: one verb per section, hung in the margin */
@@ -217,7 +217,6 @@ tbody .us { font-weight: 500; }
   .hero h1 { margin-top: 32px; }
   .hero-row { align-items: stretch; }
   .lede { font-size: 17px; }
-  .live iframe { height: 600px; }
   .part { margin-top: 96px; }
   .part h2 { font-size: 34px; }
   .installs div { grid-template-columns: minmax(0, 1fr) auto; }
@@ -262,8 +261,8 @@ tbody .us { font-weight: 500; }
         <figcaption>What Claude Code saves: one JSON object per event.</figcaption>
       </figure>
       <figure class="live">
-        <iframe src="demo.html" title="Live peekm demo: a Claude Code session with line diffs"></iframe>
-        <figcaption>The same session in peekm. This is the real interface: open the diff or expand the response. <a href="demo.html">Open it on its own page</a>.</figcaption>
+        <a href="hero.png"><img src="hero.png" width="1200" height="1180" alt="The same session in peekm: the prompt, Claude's reply, and its first edit open as a line diff"></a>
+        <figcaption>The same session in peekm, with the first edit open as a line diff.</figcaption>
       </figure>
     </div>
   </section>
@@ -302,7 +301,7 @@ tbody .us { font-weight: 500; }
     <h2 id="review-h">Review</h2>
     <div class="part-body">
       <div class="part-text">
-        <p>Each edit appears as a line diff, next to the message that explains it. Try one in the demo above.</p>
+        <p>Each edit appears as a line diff, next to the message that explains it.</p>
         <p>peekm also shows what Claude Code has saved to memory for each project. Those notes shape every future session in that project, and you can read all of them in one place.</p>
       </div>
       <figure class="frag" role="img" aria-label="peekm memory browser showing saved notes for two projects">
