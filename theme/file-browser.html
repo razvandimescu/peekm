@@ -258,6 +258,7 @@
             flex: 1;
             justify-content: center;
             max-width: 320px;
+            min-width: 0;
             margin: 0 16px;
         }
 
@@ -362,6 +363,7 @@
 
         .file-search-input {
             flex: 1;
+            min-width: 0;
             padding: 8px 32px 8px 36px;
             border: 1px solid var(--borderColor-default);
             border-radius: 6px;
@@ -2212,6 +2214,46 @@
                 display: none;
             }
         }
+        /* Narrow screens: the switcher becomes a bottom tab bar, so the top bar
+           fits and every view keeps a 44px target. */
+        @media (max-width: 640px) {
+            :root {
+                --tab-bar-height: calc(54px + env(safe-area-inset-bottom));
+            }
+            /* backdrop-filter would make the top bar the containing block of the fixed tab bar */
+            .top-bar {
+                -webkit-backdrop-filter: none;
+                backdrop-filter: none;
+                background: var(--bgColor-default);
+            }
+            .top-bar-views {
+                position: fixed;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                height: var(--tab-bar-height);
+                box-sizing: border-box;
+                padding: 4px 8px env(safe-area-inset-bottom);
+                border: 0;
+                border-top: 1px solid var(--borderColor-muted);
+                border-radius: 0;
+                background: var(--bgColor-default);
+            }
+            .top-bar-views .nav-btn {
+                flex: 1;
+                flex-direction: column;
+                gap: 3px;
+                min-height: 44px;
+            }
+            .top-bar-views .nav-btn-label {
+                display: inline;
+                font-size: 11px;
+            }
+            .layout-container,
+            .file-sidebar {
+                bottom: var(--tab-bar-height);
+            }
+        }
         .nav-btn:hover {
             background: var(--bgColor-default);
             color: var(--fgColor-default);
@@ -2265,7 +2307,7 @@
             .share-panel {
                 position: fixed;
                 top: auto;
-                bottom: 16px;
+                bottom: calc(16px + var(--tab-bar-height));
                 left: 16px;
                 right: 16px;
                 min-width: auto;
