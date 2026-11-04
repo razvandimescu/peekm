@@ -46,3 +46,6 @@ npm/platforms/*/bin/peekm.exe
 .peekm/
 .peekignore
 docs
+
+# Generated from README.md by scripts/publish-npm.sh
+/npm/README.md
