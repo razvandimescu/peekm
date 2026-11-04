@@ -49,6 +49,9 @@ jobs:
   publish-npm:
     needs: goreleaser
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,7 +59,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '24' # npm >= 11.5.1 for trusted publishing
           registry-url: 'https://registry.npmjs.org'
 
       - name: Download release artifacts
@@ -81,6 +84,7 @@ jobs:
 
       - name: Publish to npm
         env:
+          # Fallback until the first OIDC publish succeeds; then delete the secret and this line.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"

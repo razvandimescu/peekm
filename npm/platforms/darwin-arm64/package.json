@@ -4,7 +4,7 @@
   "description": "peekm binary for macOS ARM64",
   "repository": {
     "type": "git",
-    "url": "https://github.com/razvandimescu/peekm.git"
+    "url": "git+https://github.com/razvandimescu/peekm.git"
   },
   "license": "Apache-2.0",
   "os": ["darwin"],
