@@ -553,31 +553,11 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	}
 	m.current = watcher
 
-	// Add root directory
-	if err := watcher.Add(rootDir); err != nil {
-		discardWatcher(watcher, cancel, "add error")
-		m.current = nil
-		m.cancel = nil
-		m.mu.Unlock()
-		return err
-	}
-
 	// Unlock before slow directory walk
 	m.mu.Unlock()
 
 	// Collect directories to watch (without lock to avoid blocking on large trees)
-	dirsToWatch, err := m.collectDirectories(rootDir)
-	if err != nil {
-		m.mu.Lock()
-		// Clean up if we still own this watcher
-		if m.current == watcher {
-			discardWatcher(watcher, cancel, "directory walk error")
-			m.current = nil
-			m.cancel = nil
-		}
-		m.mu.Unlock()
-		return fmt.Errorf("directory walk failed: %w", err)
-	}
+	dirsToWatch := m.collectDirectories(rootDir, watchEntryLimit())
 
 	// Re-acquire lock to finish setup
 	m.mu.Lock()
@@ -590,7 +570,7 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 		return fmt.Errorf("watcher setup cancelled (replaced during walk)")
 	}
 
-	// Add directories (holding lock)
+	// Add directories (holding lock); a failure skips only that directory
 	for _, dir := range dirsToWatch {
 		if err := watcher.Add(dir); err != nil {
 			log.Printf("Warning: Cannot watch directory %s: %v", dir, err)
@@ -601,15 +581,19 @@ func (m *watcherManager) watchDirectory(rootDir string) error {
 	return nil
 }
 
-// collectDirectories walks the directory tree and returns paths to watch
-func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
+// collectDirectories returns rootDir and the directories below it to watch.
+// It skips entries it cannot read, so one of them cannot stop the walk, and
+// stops before the watched directories hold more than limit entries.
+func (m *watcherManager) collectDirectories(rootDir string, limit int) []string {
 	var dirsToWatch []string
+	entries := map[string]int{}
 	homeDir, _ := os.UserHomeDir()
 
-	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return nil
 		}
+		entries[filepath.Dir(path)]++
 
 		// Security: Skip symlinks outside $HOME
 		info, resolveErr := validateSymlinkSecurity(path, info, homeDir)
@@ -617,8 +601,8 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 			return nil
 		}
 
-		if info.IsDir() && path != rootDir {
-			if isExcludedDir(path, info) {
+		if info.IsDir() {
+			if path != rootDir && isExcludedDir(path, info) {
 				return filepath.SkipDir
 			}
 			dirsToWatch = append(dirsToWatch, path)
@@ -627,11 +611,15 @@ func (m *watcherManager) collectDirectories(rootDir string) ([]string, error) {
 		return nil
 	})
 
-	if err != nil {
-		return nil, err
+	total := 0
+	for i, dir := range dirsToWatch {
+		total += entries[dir]
+		if total > limit {
+			log.Printf("Warning: Watching %d of %d directories in %s (file descriptor limit). Add large directories to .peekmignore.", i, len(dirsToWatch), rootDir)
+			return dirsToWatch[:i]
+		}
 	}
-
-	return dirsToWatch, nil
+	return dirsToWatch
 }
 
 func (m *watcherManager) close() {
