@@ -1070,7 +1070,7 @@ a.timeline-session-id:hover {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
-.transcript-mini-diff span {
+.transcript-mini-diff > span {
     display: block;
     padding: 0 10px;
     white-space: pre;
@@ -1081,6 +1081,70 @@ a.timeline-session-id:hover {
 .diff-meta { color: var(--fgColor-muted); font-style: italic; }
 [data-theme="dark"] .diff-remove { color: var(--fgColor-danger, #f85149); background: color-mix(in srgb, var(--fgColor-danger, #f85149) 14%, transparent); }
 [data-theme="dark"] .diff-add { color: var(--fgColor-success, #3fb950); background: color-mix(in srgb, var(--fgColor-success, #3fb950) 14%, transparent); }
+
+/* Changes tab: net diff per file */
+.transcript-tabs {
+    display: flex;
+    gap: 12px;
+    padding-right: 16px;
+    border-right: 1px solid var(--borderColor-muted);
+}
+.transcript-tabs a[aria-current="page"] { color: var(--fgColor-default); font-weight: 600; }
+@media (max-width: 640px) {
+    .transcript-nav { flex-wrap: wrap; row-gap: 8px; }
+    .transcript-tabs { flex-basis: 100%; padding-right: 0; border-right: 0; }
+}
+.changes-summary { margin: 0 0 12px; font-size: 13px; color: var(--fgColor-muted); }
+.changes-added { color: var(--fgColor-success, #1a7f37); }
+.changes-removed { color: var(--fgColor-danger, #d1242f); }
+[data-theme="dark"] .changes-added { color: var(--fgColor-success, #3fb950); }
+[data-theme="dark"] .changes-removed { color: var(--fgColor-danger, #f85149); }
+.changes-file {
+    margin-bottom: 12px;
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+}
+.changes-file > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+}
+.changes-file > summary:hover { background: var(--bgColor-muted); }
+.changes-file[open] > summary { border-bottom: 1px solid var(--borderColor-default); }
+.changes-path { min-width: 0; overflow-wrap: anywhere; }
+.changes-stat { margin-left: auto; white-space: nowrap; }
+.changes-badge {
+    padding: 0 6px;
+    font-size: 11px;
+    color: var(--fgColor-muted);
+    border: 1px solid var(--borderColor-default);
+    border-radius: 10px;
+    white-space: nowrap;
+}
+/* Beats .markdown-body pre and the wide code-block rule on .container pre.
+   grid: every row as wide as the longest line, so backgrounds span the scroll width. */
+.content-area .changes-file > pre.changes-diff {
+    display: grid;
+    max-width: none;
+    margin: 0;
+    padding: 6px 0;
+    font-size: 12.5px;
+    border-radius: 0 0 6px 6px;
+}
+.diff-ln {
+    display: inline-block;
+    min-width: 4ch;
+    margin-right: 10px;
+    text-align: right;
+    color: var(--fgColor-muted);
+    opacity: 0.7;
+    user-select: none;
+}
+.changes-note { margin: 8px 12px; font-size: 12px; color: var(--fgColor-muted); }
 
 /* Raw JSON fallback (nested details) */
 .transcript-tool-raw {

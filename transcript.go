@@ -27,7 +27,9 @@ type transcriptTemplateData struct {
 	SessionID    string
 	Turns        []transcriptTurn
 	NotFound     bool
-	CanReply     bool // reply composer resumes via claude; Claude sessions only
+	CanReply     bool         // reply composer resumes via claude; Claude sessions only
+	ChangesTab   bool         // Conversation/Changes tabs; Claude sessions only
+	Changes      *changesView // set on the Changes tab instead of Turns
 	SessionStats *sessionStats
 	Usage        *transcript.Usage // anchors the idle readout
 }
@@ -700,72 +702,6 @@ func splitDiffLines(s string) []string {
 	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
-type diffOp struct {
-	kind byte // ' ' context, '-' removed, '+' added
-	text string
-}
-
-// diffOps computes a line-level diff via LCS, keeping unchanged lines as
-// context. For pathologically large inputs it degrades to remove-then-add
-// rather than allocating an O(n*m) table.
-func diffOps(a, b []string) []diffOp {
-	if len(a) == 0 || len(b) == 0 || len(a)*len(b) > 250_000 {
-		return flatDiff(a, b)
-	}
-	return lcsDiff(a, b)
-}
-
-// flatDiff renders every line of a as removed then every line of b as added.
-func flatDiff(a, b []string) []diffOp {
-	ops := make([]diffOp, 0, len(a)+len(b))
-	for _, l := range a {
-		ops = append(ops, diffOp{'-', l})
-	}
-	for _, l := range b {
-		ops = append(ops, diffOp{'+', l})
-	}
-	return ops
-}
-
-// lcsDiff builds an LCS table and backtracks it into context/-/+ ops.
-func lcsDiff(a, b []string) []diffOp {
-	n, m := len(a), len(b)
-	dp := make([][]int, n+1)
-	for i := range dp {
-		dp[i] = make([]int, m+1)
-	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if a[i] == b[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
-			}
-		}
-	}
-
-	var ops []diffOp
-	i, j := 0, 0
-	for i < n && j < m {
-		switch {
-		case a[i] == b[j]:
-			ops = append(ops, diffOp{' ', a[i]})
-			i++
-			j++
-		case dp[i+1][j] >= dp[i][j+1]:
-			ops = append(ops, diffOp{'-', a[i]})
-			i++
-		default:
-			ops = append(ops, diffOp{'+', b[j]})
-			j++
-		}
-	}
-	ops = append(ops, flatDiff(a[i:], b[j:])...)
-	return ops
-}
-
 func formatGrepInput(m map[string]interface{}) template.HTML {
 	pat := toolInputStr(m, "pattern")
 	if pat == "" {
@@ -875,7 +811,36 @@ func truncateString(s string, maxLen int) string {
 	return s[:i] + "..."
 }
 
-// serveTranscript handles GET /transcript?session=<id>
+// fillTranscriptView loads the conversation or, with view=changes, the net
+// diff of a Claude Code session (pi records no pre-edit content).
+func fillTranscriptView(data *transcriptTemplateData, path, source, view string) error {
+	var sess *transcript.Session
+	var err error
+	if view == "changes" && source != transcript.HarnessPi {
+		if sess, err = transcript.ParseFile(path); err == nil {
+			data.Changes, err = buildChangesView(path, data.SessionID)
+		}
+	} else {
+		sess, data.Turns, err = parseTranscript(path)
+	}
+	if err != nil {
+		return err
+	}
+	data.Usage = sess.Usage
+	data.Subtitle = transcriptSubtitle(data.SessionID, sess.Turns)
+	return nil
+}
+
+func transcriptSubtitle(sessionID string, turns []transcript.Turn) string {
+	for _, t := range turns {
+		if t.Role == "assistant" && t.Model != "" {
+			return fmt.Sprintf("Session %s · %s · %d turns", truncateSessionID(sessionID), t.Model, len(turns))
+		}
+	}
+	return fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
+}
+
+// serveTranscript handles GET /transcript?session=<id>[&view=changes]
 func serveTranscript(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session")
 	if sessionID == "" {
@@ -894,26 +859,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 		SessionID:        sessionID,
 	}
 
-	if path == "" {
-		data.NotFound = true
-	} else if sess, turns, err := parseTranscript(path); err != nil {
-		data.NotFound = true
-	} else {
-		data.Turns = turns
-		data.Usage = sess.Usage
-		model := ""
-		for _, t := range turns {
-			if t.Role == "assistant" && t.Model != "" {
-				model = t.Model
-				break
-			}
-		}
-		if model != "" {
-			data.Subtitle = fmt.Sprintf("Session %s · %s · %d turns", truncateSessionID(sessionID), model, len(turns))
-		} else {
-			data.Subtitle = fmt.Sprintf("Session %s · %d turns", truncateSessionID(sessionID), len(turns))
-		}
-	}
+	data.NotFound = path == "" || fillTranscriptView(&data, path, source, r.URL.Query().Get("view")) != nil
 
 	// Compute edit stats from event log (skip for not-found transcripts)
 	if !data.NotFound && globalEventLog != nil {
@@ -929,6 +875,7 @@ func serveTranscript(w http.ResponseWriter, r *http.Request) {
 	// The /reply endpoint resumes sessions via `claude` — pi sessions have no
 	// resume path, so they get no composer.
 	data.CanReply = !data.NotFound && source != transcript.HarnessPi
+	data.ChangesTab = data.CanReply
 
 	renderTemplatePair(w, r, transcriptTmpl, transcriptPartialTmpl, data)
 }

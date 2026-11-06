@@ -27,6 +27,7 @@ AI tracking needs Claude Code or pi. The Claude Code hook also needs `jq`.
 **Read and review:**
 
 - **Transcripts**: A transcript shows the full conversation of a session, with tool calls, line diffs, and thinking blocks. It refreshes while the session runs.
+- **Changes**: The Changes tab of a transcript shows one diff for each file that the session edited. Each diff runs from the file before the first edit to the file after the last edit. peekm rebuilds the diffs from the session log and the checkpoint backups of Claude Code. Files that only shell commands changed are not shown. Changes work only for Claude Code sessions.
 - **Timeline**: The timeline shows the sessions of all projects in the directory that peekm browses, grouped by day. Each session shows its duration, files, and tools. An active session also shows its last tool call. A filter shows all sessions or only the sessions with edits.
 - **Memory browser**: The memory browser shows what Claude Code remembers about each project on your machine. It reads `~/.claude/projects/*/memory/` and the `.claude/CLAUDE.md` of each project.
 - **Replies**: You can reply to a transcript to ask a follow-up question. peekm runs the reply in a fork of the session with read-only tools (Read, Grep, Glob). The fork cannot edit files. It does not change the session in your terminal. Replies work only for Claude Code sessions.

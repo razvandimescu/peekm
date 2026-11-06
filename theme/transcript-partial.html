@@ -15,6 +15,10 @@
             </div>
             {{end}}
             <div class="transcript-nav">
+                {{if .ChangesTab}}<span class="transcript-tabs">
+                    <a href="/transcript?session={{.SessionID}}"{{if not .Changes}} aria-current="page"{{end}}>Conversation</a>
+                    <a href="/transcript?session={{.SessionID}}&amp;view=changes"{{if .Changes}} aria-current="page"{{end}}>Changes</a>
+                </span>{{end}}
                 <a href="/">Files</a>
                 <a href="/timeline">Timeline</a>
                 {{with .Usage}}<span class="transcript-idle" data-at="{{formatISO .At}}"
@@ -33,6 +37,26 @@
             <p style="font-size: 0.85em; color: var(--fgColor-muted);">The session may have been started in a different directory, or the transcript file may have been cleaned up.</p>
             <p><a href="/timeline">Back to timeline</a> · <a href="/">Back to files</a></p>
         </div>
+        {{else if .Changes}}
+        {{with .Changes}}
+        {{if .Files}}
+        <p class="changes-summary">{{len .Files}} file{{if ne (len .Files) 1}}s{{end}} changed &middot; <span class="changes-added">+{{.Added}}</span> <span class="changes-removed">&minus;{{.Removed}}</span></p>
+        {{range .Files}}
+        <details class="changes-file"{{if .Open}} open{{end}}>
+            <summary title="{{.FullPath}}">
+                <span class="changes-path">{{.Path}}</span>
+                {{if .Created}}<span class="changes-badge">New</span>{{end}}
+                {{if .Partial}}<span class="changes-stat changes-badge">Not rebuilt</span>{{else}}<span class="changes-stat"><span class="changes-added">+{{.Added}}</span> <span class="changes-removed">&minus;{{.Removed}}</span></span>{{end}}
+            </summary>
+            {{if .Partial}}<p class="changes-note">Claude Code kept no copy of this file from before the session, or the file changed outside Claude&rsquo;s edits. The conversation shows each edit.</p>{{else}}{{.DiffHTML}}{{end}}
+        </details>
+        {{end}}
+        <p class="changes-note">Each diff runs from the file before the session&rsquo;s first edit to after its last. Files changed only by shell commands are not listed.</p>
+        {{else}}
+        <div class="transcript-empty"><p>This session made no net file changes.</p></div>
+        {{end}}
+        {{end}}
+        <div id="transcript-bottom"></div>
         {{else if .Turns}}
         <div class="transcript-conversation">
             {{range $turn := .Turns}}
