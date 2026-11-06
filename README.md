@@ -152,6 +152,7 @@ To see the exclusions for a directory, run `peekm -show-ignored [dir]`.
 - AI tracking needs Claude Code or pi. The Claude Code hook script also needs `bash`, `curl`, and `jq`.
 - Replies need the `claude` CLI on your `PATH`.
 - peekm runs on one machine. It does not sync data between machines or users.
+- On macOS, peekm keeps a file descriptor open for each file that it watches. It uses at most 3/4 of the file descriptor limit. If a directory tree has more files, peekm logs a warning and does not detect new files in some directories. To prevent this, add large directories to `.peekmignore`.
 
 ## FAQ
 
