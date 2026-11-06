@@ -13,27 +13,19 @@ import (
 	"time"
 )
 
-var siteDemoOut = flag.String("site-demo-out", "", "write the peekm.dev demo page to this path (make site-demo)")
+var siteDemoOut = flag.String("site-demo-out", "", "write the demo page to this path (make hero)")
 
 const (
 	demoSessionID = "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
-	demoBranchID  = "e5f6a7b8-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
 	demoHome      = "/Users/you"
 )
 
-var mermaidScript = regexp.MustCompile(`<script src="[^"]*mermaid[^"]*"></script>\n?`)
-
-// TestSiteDemo renders the peekm.dev demo through serveTranscript, so the site
-// shows the app's own markup, CSS and JS instead of a hand-kept copy.
+// TestSiteDemo renders the demo session through serveTranscript. make hero
+// screenshots that page for the README and peekm.dev.
 func TestSiteDemo(t *testing.T) {
 	page := renderSiteDemo(t)
-	for _, want := range []string{`id="demo-branch"`, `class="transcript-conversation"`, `id="reply-input"`} {
-		if !strings.Contains(page, want) {
-			t.Errorf("demo page lacks %s", want)
-		}
-	}
-	if strings.Contains(page, "/assets/fonts/") || strings.Contains(page, os.Getenv("HOME")) {
-		t.Error("demo page still points at local server paths")
+	if strings.Contains(page, os.Getenv("HOME")) {
+		t.Error("demo page shows the test HOME")
 	}
 	if *siteDemoOut != "" {
 		mustWrite(t, *siteDemoOut, page)
@@ -41,7 +33,7 @@ func TestSiteDemo(t *testing.T) {
 }
 
 // TestSiteRawLogIsDemoSession keeps the landing page's raw JSONL panel in step
-// with the session the demo renders.
+// with the session in the screenshot beside it.
 func TestSiteRawLogIsDemoSession(t *testing.T) {
 	index, err := os.ReadFile("site/index.html")
 	if err != nil {
@@ -65,31 +57,12 @@ func renderSiteDemo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	writeDemoTranscripts(t, home)
-	useDemoWorkspace(t, home)
-
-	page := string(getDemoTranscript(t, demoSessionID, false))
-	branch := string(getDemoTranscript(t, demoBranchID, true))
-
-	page = strings.Replace(page, "<head>", "<head>\n<script>\n"+string(readDemoFixture(t, "demo.js"))+"</script>", 1)
-	page = strings.Replace(page, "</body>", `<template id="demo-branch" data-session="`+demoBranchID+`">`+branch+"</template>\n</body>", 1)
-	page = mermaidScript.ReplaceAllString(page, "")
-	page = strings.ReplaceAll(page, "/assets/fonts/", "fonts/")
-	return strings.ReplaceAll(page, home, demoHome)
-}
-
-// writeDemoTranscripts stores the session and its reply fork where
-// resolveTranscriptPath looks. The fork repeats the history under its own ID,
-// as `claude --fork-session` does.
-func writeDemoTranscripts(t *testing.T, home string) {
-	session := readDemoFixture(t, "session.jsonl")
-	fork := bytes.ReplaceAll(session, []byte(demoSessionID), []byte(demoBranchID))
-	fork = append(fork, readDemoFixture(t, "reply.jsonl")...)
-
 	store := filepath.Join(home, ".claude", "projects", "-Users-you-acme-api")
 	mustMkdir(t, store)
-	mustWrite(t, filepath.Join(store, demoSessionID+".jsonl"), string(session))
-	mustWrite(t, filepath.Join(store, demoBranchID+".jsonl"), string(fork))
+	mustWrite(t, filepath.Join(store, demoSessionID+".jsonl"), string(readDemoFixture(t, "session.jsonl")))
+	useDemoWorkspace(t, home)
+
+	return strings.ReplaceAll(string(getDemoTranscript(t)), home, demoHome)
 }
 
 // useDemoWorkspace points the sidebar, edit stats and clock at a fixed demo
@@ -115,15 +88,11 @@ func useDemoWorkspace(t *testing.T, home string) {
 	t.Cleanup(func() { globalEventLog, time.Local = prevLog, prevLocal })
 }
 
-func getDemoTranscript(t *testing.T, session string, partial bool) []byte {
-	req := httptest.NewRequest("GET", "/transcript?session="+session, nil)
-	if partial {
-		req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	}
+func getDemoTranscript(t *testing.T) []byte {
 	rec := httptest.NewRecorder()
-	serveTranscript(rec, req)
+	serveTranscript(rec, httptest.NewRequest("GET", "/transcript?session="+demoSessionID, nil))
 	if rec.Code != 200 || !bytes.Contains(rec.Body.Bytes(), []byte("transcript-conversation")) {
-		t.Fatalf("transcript %s: status %d, no conversation rendered", session, rec.Code)
+		t.Fatalf("demo transcript: status %d, no conversation rendered", rec.Code)
 	}
 	return rec.Body.Bytes()
 }

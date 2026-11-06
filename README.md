@@ -8,9 +8,7 @@
 
 A Claude Code session leaves a git diff and a JSONL log. peekm shows the session as a transcript with line diffs. It also shows what Claude Code remembers about each project. You can ask a follow-up question in a read-only fork of a session. **[peekm.dev](https://peekm.dev)**
 
-[![peekm transcript view with line diffs and a reply box](assets/hero.png)](https://peekm.dev/#demo)
-
-> **[▶ Try the live demo](https://peekm.dev/#demo)**. You can open a diff, expand a response, and reply to a session in the page.
+![peekm transcript view with line diffs and a reply box](assets/hero.png)
 
 **peekm has no accounts and no telemetry. Your files leave your machine only when you share them or reply to a session.**
 
