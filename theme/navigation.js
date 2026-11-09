@@ -124,6 +124,7 @@ function connectSSE() {
             } else if (data.type === 'session_activity') {
                 scheduleTranscriptRefresh(data.session);
                 scheduleTimelineRefresh();
+                if (data.state) notifySessionState(data);
             } else if (data.type === 'connection_status') {
                 console.log('[SSE] Handling connection_status:', data.count);
                 updateConnectionStatus(data.count);
@@ -475,6 +476,7 @@ function reinitializeScripts() {
         // Restore timeline filter on SPA navigation
         if (viewType === 'timeline') {
             restoreTimelineFilter();
+            updateNotifyButton();
         }
 
         // Initialize transcript lightbox on SPA navigation
@@ -628,6 +630,67 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ===== Session state notifications (lifecycle hooks: waiting / done) =====
+
+const SESSION_STATE_TITLES = { waiting: 'Claude needs you', done: 'Claude finished' };
+const NOTIFY_PREF_KEY = 'peekm_notify';
+
+// Desktop notifications need a secure context (localhost or HTTPS) and a granted permission.
+function canSystemNotify() {
+    return window.isSecureContext && 'Notification' in window;
+}
+
+function systemNotificationsOn() {
+    return canSystemNotify() && Notification.permission === 'granted'
+        && localStorage.getItem(NOTIFY_PREF_KEY) !== 'off';
+}
+
+// A desktop notification while the user is elsewhere; an in-page toast otherwise.
+// The per-session tag makes every open tab replace one notification, not stack copies.
+function notifySessionState(data) {
+    const title = SESSION_STATE_TITLES[data.state];
+    if (!title) return;
+    const label = data.project ? `${title} · ${data.project}` : title;
+    const href = `/transcript?session=${encodeURIComponent(data.session)}`;
+    if (systemNotificationsOn() && !document.hasFocus()) {
+        const n = new Notification(label, { body: data.detail || '', tag: 'peekm-' + data.session });
+        n.onclick = function() {
+            window.focus();
+            navigate(href);
+            n.close();
+        };
+        return;
+    }
+    showToast(label, null, null, href);
+}
+
+async function toggleSessionNotifications() {
+    if (!canSystemNotify()) return;
+    if (Notification.permission === 'default') {
+        await Notification.requestPermission();
+        localStorage.removeItem(NOTIFY_PREF_KEY);
+    } else if (Notification.permission === 'granted') {
+        if (systemNotificationsOn()) localStorage.setItem(NOTIFY_PREF_KEY, 'off');
+        else localStorage.removeItem(NOTIFY_PREF_KEY);
+    }
+    updateNotifyButton();
+}
+
+function updateNotifyButton() {
+    const btn = document.getElementById('notify-toggle');
+    if (!btn) return;
+    btn.hidden = !canSystemNotify();
+    if (btn.hidden) return;
+    const on = systemNotificationsOn();
+    btn.disabled = Notification.permission === 'denied';
+    btn.classList.toggle('active', on);
+    btn.textContent = on ? 'Notifications on' : 'Notify me';
+    btn.title = btn.disabled
+        ? 'Notifications are blocked in this browser\'s site settings'
+        : on ? 'Desktop notification when a session needs you or finishes. Click to turn off.'
+             : 'Get a desktop notification when a session needs you or finishes';
+}
+
 // ===== Toast Notification Functions =====
 
 let toastTimeout;
@@ -653,11 +716,12 @@ function fileModifiedToast(data) {
     showToast(msg, data.path, data.session);
 }
 
-function showToast(message, filePath, session) {
+function showToast(message, filePath, session, href) {
     // Create file info object
     const fileInfo = {
         name: filePath ? filePath.split('/').pop() : null,
         path: filePath,
+        href: href || null,
         message: message,
         session: session || null,
         timestamp: Date.now()
@@ -700,7 +764,7 @@ function formatBatchMessage(files) {
             primary: primary,
             secondary: null,
             icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/></svg>',
-            href: file.path ? `/view/${encodeURIComponent(file.path)}` : '#',
+            href: file.href || (file.path ? `/view/${encodeURIComponent(file.path)}` : '#'),
             clickAction: null
         };
     }

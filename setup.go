@@ -64,7 +64,7 @@ func setupClaudeCode(args []string) {
 	}
 
 	if added > 0 {
-		fmt.Printf("    Added %d PostToolUse hook(s)\n", added)
+		fmt.Printf("    Added %d hook(s)\n", added)
 	} else {
 		fmt.Printf("    Hooks already configured (no changes)\n")
 	}
@@ -75,19 +75,17 @@ func setupClaudeCode(args []string) {
 	fmt.Println()
 }
 
-// installClaudeHooks creates the hook script and merges PostToolUse hooks into settings.json.
+// installClaudeHooks creates the hook script and merges peekmHooks into settings.json.
 // Returns the number of hooks added and any error encountered.
 func installClaudeHooks(claudeDir string, hookPort int) (int, error) {
 	hookScriptPath := filepath.Join(claudeDir, "peekm-hook.sh")
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 
 	hookScript := fmt.Sprintf(`#!/bin/bash
-# peekm hook: Persist edit events to JSONL, heartbeat all tool calls
+# peekm hook: Persist edit events to JSONL, heartbeat all tool calls, report session state
 json=$(cat)
 session_id=$(echo "$json" | jq -r '.session_id // empty')
-tool_name=$(echo "$json" | jq -r '.tool_name // empty')
-
-[ -z "$session_id" ] || [ -z "$tool_name" ] && exit 0
+[ -z "$session_id" ] && exit 0
 
 notify() {
     for port in %d 6419 8080 3000; do
@@ -96,6 +94,18 @@ notify() {
             "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && return
     done
 }
+
+case $(echo "$json" | jq -r '.hook_event_name // empty') in
+Notification|Stop|UserPromptSubmit|SessionEnd)
+    # Session state. Print nothing: UserPromptSubmit stdout becomes Claude's context.
+    notify "$(echo "$json" | jq -c '{sid:.session_id,event:.hook_event_name,cwd:.cwd,
+        detail:((.message // .last_assistant_message // "")[0:300]),
+        bg:((.background_tasks // [])|length)}|with_entries(select(.value!="" and .value!=0 and .value!=null))')"
+    exit 0;;
+esac
+
+tool_name=$(echo "$json" | jq -r '.tool_name // empty')
+[ -z "$tool_name" ] && exit 0
 
 file_path=$(echo "$json" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 ts=$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")
@@ -144,42 +154,40 @@ fi
 		"timeout": 0.15,
 	}
 
-	settings, postToolUse, err := loadPostToolUseHooks(settingsPath)
+	settings, hooks, err := loadHooks(settingsPath)
 	if err != nil {
 		return 0, err
 	}
 
 	added := 0
-	for _, matcher := range peekmHookMatchers {
-		if hasPeekmHook(postToolUse, matcher, hookScriptPath) {
+	for _, h := range peekmHooks {
+		entries, _ := hooks[h.event].([]interface{})
+		if hasPeekmHook(entries, h.matcher, hookScriptPath) {
 			continue
 		}
-
-		entry := map[string]interface{}{
-			"matcher": matcher,
-			"hooks":   []interface{}{hookEntry},
+		entry := map[string]interface{}{"hooks": []interface{}{hookEntry}}
+		if h.matcher != "" {
+			entry["matcher"] = h.matcher
 		}
-		postToolUse = append(postToolUse, entry)
+		hooks[h.event] = append(entries, entry)
 		added++
 	}
 
 	if added == 0 {
 		return 0, nil
 	}
+	return added, writeSettings(settingsPath, settings)
+}
 
-	hooks := settings["hooks"].(map[string]interface{})
-	hooks["PostToolUse"] = postToolUse
-
+func writeSettings(settingsPath string, settings map[string]interface{}) error {
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return 0, fmt.Errorf("serializing settings: %w", err)
+		return fmt.Errorf("serializing settings: %w", err)
 	}
-
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0644); err != nil {
-		return 0, fmt.Errorf("writing %s: %w", settingsPath, err)
+		return fmt.Errorf("writing %s: %w", settingsPath, err)
 	}
-
-	return added, nil
+	return nil
 }
 
 // autoSetupClaudeHooks keeps the hook script up-to-date and adds any missing matchers.
@@ -206,18 +214,22 @@ func autoSetupClaudeHooks() {
 	}
 }
 
-// peekmHookMatchers defines the PostToolUse tool names that peekm hooks into.
-// Edit tools (Write, Edit, NotebookEdit) get full JSONL persistence.
-// Other tools send heartbeats only (active badge + last tool display).
-var peekmHookMatchers = []string{
-	"Write", "Edit", "NotebookEdit",
-	"Read", "Bash", "Grep", "Glob", "Agent",
+// peekmHooks lists the Claude Code hooks peekm installs. PostToolUse on edit
+// tools persists events to JSONL; on other tools it sends heartbeats (active
+// badge + last tool). The rest report session state: Notification = waiting
+// for you, Stop = turn done, UserPromptSubmit = working again, SessionEnd = closed.
+var peekmHooks = []struct{ event, matcher string }{
+	{"PostToolUse", "Write"}, {"PostToolUse", "Edit"}, {"PostToolUse", "NotebookEdit"},
+	{"PostToolUse", "Read"}, {"PostToolUse", "Bash"}, {"PostToolUse", "Grep"},
+	{"PostToolUse", "Glob"}, {"PostToolUse", "Agent"},
+	{"Notification", "permission_prompt|elicitation_dialog|elicitation_url_dialog"},
+	{"Stop", ""}, {"UserPromptSubmit", ""}, {"SessionEnd", ""},
 }
 
-// loadPostToolUseHooks reads settings.json and extracts the PostToolUse entries.
-// Returns (settings, postToolUse, error). Missing file returns empty structures, nil error.
-func loadPostToolUseHooks(settingsPath string) (map[string]interface{}, []interface{}, error) {
-	settings := make(map[string]interface{})
+// loadHooks reads settings.json and returns it with its "hooks" map (created
+// if absent). A missing file returns empty structures and a nil error.
+func loadHooks(settingsPath string) (settings, hooks map[string]interface{}, err error) {
+	settings = make(map[string]interface{})
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
@@ -225,21 +237,19 @@ func loadPostToolUseHooks(settingsPath string) (map[string]interface{}, []interf
 		}
 	}
 
-	hooks, _ := settings["hooks"].(map[string]interface{})
+	hooks, _ = settings["hooks"].(map[string]interface{})
 	if hooks == nil {
 		hooks = make(map[string]interface{})
 		settings["hooks"] = hooks
 	}
-
-	postToolUse, _ := hooks["PostToolUse"].([]interface{})
-	return settings, postToolUse, nil
+	return settings, hooks, nil
 }
 
-// hasPeekmHook checks if a PostToolUse entry for this matcher already has a peekm hook.
+// hasPeekmHook checks if a hook entry for this matcher already has a peekm hook.
 func hasPeekmHook(entries []interface{}, matcher, scriptPath string) bool {
 	for _, entry := range entries {
 		e, ok := entry.(map[string]interface{})
-		if !ok || e["matcher"] != matcher {
+		if m, _ := e["matcher"].(string); !ok || m != matcher {
 			continue
 		}
 		hooks, ok := e["hooks"].([]interface{})
@@ -250,7 +260,7 @@ func hasPeekmHook(entries []interface{}, matcher, scriptPath string) bool {
 	return false
 }
 
-// filterPeekmHooks returns PostToolUse entries that don't reference the peekm hook script.
+// filterPeekmHooks returns hook entries that don't reference the peekm hook script.
 func filterPeekmHooks(entries []interface{}, hookScriptPath string) (filtered []interface{}, removed int) {
 	for _, entry := range entries {
 		e, ok := entry.(map[string]interface{})
@@ -301,29 +311,34 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	// Remove hook script
 	removeAndReport(hookScriptPath)
 
-	// Remove hooks from settings.json
-	settings, postToolUse, err := loadPostToolUseHooks(settingsPath)
+	settings, hooks, err := loadHooks(settingsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    Error parsing settings: %v\n", err)
 		os.Exit(1)
 	}
-	if postToolUse == nil {
-		fmt.Println("    No PostToolUse hooks found")
-		fmt.Print("\n  Done.\n\n")
-		return
+
+	removed := 0
+	for event, v := range hooks {
+		entries, _ := v.([]interface{})
+		filtered, n := filterPeekmHooks(entries, hookScriptPath)
+		if n == 0 {
+			continue
+		}
+		removed += n
+		if len(filtered) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = filtered
+		}
 	}
 
-	// Filter out entries whose hooks reference the peekm script
-	filtered, removed := filterPeekmHooks(postToolUse, hookScriptPath)
-
-	if removed > 0 {
-		hooks := settings["hooks"].(map[string]interface{})
-		hooks["PostToolUse"] = filtered
-		out, _ := json.MarshalIndent(settings, "", "  ")
-		os.WriteFile(settingsPath, append(out, '\n'), 0644)
-		fmt.Printf("    Removed %d hook(s) from settings.json\n", removed)
-	} else {
+	if removed == 0 {
 		fmt.Println("    No peekm hooks found in settings")
+	} else if err := writeSettings(settingsPath, settings); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error: %v\n", err)
+		os.Exit(1)
+	} else {
+		fmt.Printf("    Removed %d hook(s) from settings.json\n", removed)
 	}
 
 	fmt.Print("\n  Done.\n\n")

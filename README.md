@@ -27,10 +27,10 @@ AI tracking needs Claude Code or pi. The Claude Code hook also needs `jq`.
 **Read and review:**
 
 - **Transcripts**: A transcript shows the full conversation of a session, with tool calls, line diffs, and thinking blocks. It refreshes while the session runs.
-- **Timeline**: The timeline shows the sessions of all projects in the directory that peekm browses, grouped by day. Each session shows its duration, files, and tools. An active session also shows its last tool call. A filter shows all sessions or only the sessions with edits.
+- **Timeline**: The timeline shows the sessions of all projects in the directory that peekm browses, grouped by day. Each session shows its duration, files, and tools. An active session also shows its last tool call. A Claude Code session that waits for your permission shows **Needs you**. A session that finished its turn shows **Done**. A filter shows all sessions or only the sessions with edits.
 - **Memory browser**: The memory browser shows what Claude Code remembers about each project on your machine. It reads `~/.claude/projects/*/memory/` and the `.claude/CLAUDE.md` of each project.
 - **Replies**: You can reply to a transcript to ask a follow-up question. peekm runs the reply in a fork of the session with read-only tools (Read, Grep, Glob). The fork cannot edit files. It does not change the session in your terminal. Replies work only for Claude Code sessions.
-- **Notifications**: A toast shows when an agent changes a file in the directory that peekm browses. An open file reloads when it changes.
+- **Notifications**: A toast shows when an agent changes a file in the directory that peekm browses. An open file reloads when it changes. A toast also shows when a Claude Code session needs you or finishes. To get a desktop notification instead when you are in another window, click **Notify me** on the timeline. Desktop notifications work only on `localhost` or HTTPS.
 
 **Share:**
 
@@ -49,20 +49,21 @@ AI tracking needs Claude Code or pi. The Claude Code hook also needs `jq`.
 
 ## How It Works
 
-peekm uses a Claude Code `PostToolUse` hook to match each file edit to the session that made it. When `~/.claude` exists, peekm installs the hook each time it starts:
+peekm uses Claude Code hooks to match each file edit to the session that made it, and to show the state of each session. When `~/.claude` exists, peekm installs the hooks each time it starts:
 
 - It writes the hook script to `~/.claude/peekm-hook.sh`.
-- It adds the hook to `hooks.PostToolUse` in `~/.claude/settings.json`. Your other hooks stay unchanged.
+- It adds the script to the `PostToolUse`, `Notification`, `Stop`, `UserPromptSubmit`, and `SessionEnd` hooks in `~/.claude/settings.json`. Your other hooks stay unchanged.
 
-After each tool call, the hook sends an event to peekm on `localhost`. It tries the port that peekm runs on, then ports 6419, 8080, and 3000. The event contains these fields:
+After each hook call, the script sends an event to peekm on `localhost`. It tries the port that peekm runs on, then ports 6419, 8080, and 3000. The event contains these fields:
 
 - **Write, Edit, NotebookEdit**: the session ID, file path, tool name, permission mode, tool use ID, and working directory. The hook also appends this event to `~/.peekm/events.jsonl`. peekm reads this file when it starts, so it also shows the edits that sessions made while peekm was off.
 - **Plan files** in `~/.claude/plans/`: the event also contains the plan text.
 - **Other tools**: the session ID, the tool name, and the first 300 bytes of the tool's description, command, file path, pattern, or prompt. The hook does not store these events.
+- **Session state** (`Notification`, `Stop`, `UserPromptSubmit`, `SessionEnd`): the session ID, the hook name, and the working directory. A permission or dialog notification also contains its text. A `Stop` event also contains the first 300 characters of Claude's last response and the number of background tasks. The hook does not store these events.
 
-When `~/.pi/agent` exists, peekm also writes a pi extension to `~/.pi/agent/extensions/peekm.ts` each time it starts. The extension sends the same types of events as the Claude Code hook.
+When `~/.pi/agent` exists, peekm also writes a pi extension to `~/.pi/agent/extensions/peekm.ts` each time it starts. The extension sends the same file and tool events as the Claude Code hook. It does not send session state.
 
-To remove the hook, run `peekm setup claude-code --remove`. For pi, run `peekm setup pi --remove`. peekm installs them again when it starts. To keep them removed, start peekm with `-no-ai-tracking`.
+To remove the hooks, run `peekm setup claude-code --remove`. For pi, run `peekm setup pi --remove`. peekm installs them again when it starts. To keep them removed, start peekm with `-no-ai-tracking`.
 
 ### Network Use
 

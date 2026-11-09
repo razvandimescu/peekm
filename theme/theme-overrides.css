@@ -461,6 +461,25 @@ a.timeline-session-id:hover {
     background: #3fb950;
     color: #0d1117;
 }
+.timeline-state-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fgColor-muted);
+    background: var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12));
+    padding: 1px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.timeline-state-waiting {
+    color: #fff;
+    background: var(--peekm-amber);
+}
+[data-theme="dark"] .timeline-state-waiting {
+    color: #0d1117;
+}
+.timeline-session-waiting {
+    border-color: var(--peekm-amber);
+}
 @keyframes active-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
