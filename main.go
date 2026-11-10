@@ -109,6 +109,7 @@ var (
 	themeManagerJS         string
 	editorJS               string
 	navigationJS           string
+	diagramViewerJS        string
 	fileBrowserTmpl        *template.Template
 	fileBrowserPartialTmpl *template.Template
 	timelineTmpl           *template.Template
@@ -153,6 +154,7 @@ type baseTemplateData struct {
 	ThemeManagerJS    template.JS
 	EditorJS          template.JS
 	NavigationJS      template.JS
+	DiagramViewerJS   template.JS
 	AITrackingEnabled bool
 	FileCount         int  // whitelist size, shown in the shared sidebar header across all shell views
 	Partial           bool // SPA partial: the shell (and its sidebar) is already on the page
@@ -489,6 +491,7 @@ func newBaseTemplateData(r *http.Request) baseTemplateData {
 		ThemeManagerJS:    template.JS(themeManagerJS),
 		EditorJS:          template.JS(editorJS),
 		NavigationJS:      template.JS(navigationJS),
+		DiagramViewerJS:   template.JS(diagramViewerJS),
 		AITrackingEnabled: !*disableHook,
 		FileCount:         markdownFileCount(),
 	}
@@ -1087,6 +1090,7 @@ func init() {
 	themeManagerJS = mustReadThemeFile("theme/theme-manager.js")
 	editorJS = mustReadThemeFile("theme/editor.js")
 	navigationJS = mustReadThemeFile("theme/navigation.js")
+	diagramViewerJS = mustReadThemeFile("theme/diagram-viewer.js")
 
 	funcMap := templateFuncMap()
 	sessionInfoPanelHTML := mustReadThemeFile("theme/session-info-panel.html")

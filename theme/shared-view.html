@@ -331,6 +331,7 @@
             .dl-menu-item { display: flex; align-items: center; min-height: 44px; }
         }
     </style>
+    <script>{{.DiagramViewerJS}}</script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
         (function() {
@@ -347,6 +348,7 @@
                         window.peekmMermaidSources.push(el.textContent.trim());
                     }
                 });
+                enhanceDiagrams();
                 mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
@@ -680,6 +682,7 @@
 
                 var src = document.getElementById('shared-content');
                 var clone = src.cloneNode(true);
+                clone.querySelectorAll('.diagram-expand').forEach(function(b) { b.remove(); });
 
                 // Switch mermaid to light theme for any re-renders during export.
                 // Live SVGs already on the page are unaffected (initialize only changes future renders).
