@@ -46,7 +46,7 @@ AI tracking needs Claude Code or pi. The Claude Code hook also needs `jq`.
 
 **Also included:**
 
-- **File viewer**: The viewer shows Markdown, HTML, SVG, and TXT files in a sidebar tree. It has fuzzy search (Cmd/Ctrl+P), Mermaid diagrams, syntax highlighting, and light, dark, and auto themes. You can edit Markdown files in the browser. A click on a Mermaid diagram opens it full screen, where you can pan and zoom. A click on a task-list checkbox updates the task in the file.
+- **File viewer**: The viewer shows Markdown, HTML, SVG, and TXT files in a sidebar tree. It has fuzzy search (Cmd/Ctrl+P), Mermaid diagrams, syntax highlighting, and light, dark, and auto themes. You can edit Markdown files in the browser. A click on a Mermaid diagram opens it full screen at its actual size. A click on a task-list checkbox updates the task in the file.
 - **Recent AI Edits**: This smart folder lists the files that an agent changed in the last 24 hours.
 
 ## How It Works

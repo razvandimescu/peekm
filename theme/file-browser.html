@@ -2398,7 +2398,6 @@
             mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
 
             window.renderMermaid = function() {
-                enhanceDiagrams();
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
             };

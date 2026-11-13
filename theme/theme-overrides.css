@@ -1359,52 +1359,9 @@ a.timeline-session-id:hover {
     color: var(--fgColor-muted);
 }
 
-/* Mermaid diagrams: expand button and full-screen viewer (diagram-viewer.js) */
-.diagram {
-    position: relative;
-}
-
-.diagram .mermaid > svg {
+/* Mermaid diagrams: full-screen viewer (diagram-viewer.js) */
+.mermaid > svg {
     cursor: zoom-in;
-}
-
-.diagram-expand {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
-    background: var(--bgColor-default);
-    color: var(--fgColor-muted);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-}
-
-.diagram-expand::before {
-    content: '';
-    position: absolute;
-    inset: 7px;
-    background: currentColor;
-    -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4'/></svg>") center / contain no-repeat;
-    mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4'/></svg>") center / contain no-repeat;
-}
-
-.diagram:hover .diagram-expand,
-.diagram-expand:focus-visible {
-    opacity: 1;
-}
-
-.diagram-expand:hover {
-    color: var(--fgColor-default);
-}
-
-/* No button until mermaid has drawn the diagram (it stays source text if mermaid fails to load) */
-.diagram:not(:has(.mermaid > svg)) .diagram-expand {
-    display: none;
 }
 
 /* The shared view scrolls the document; its scrollbar would show beside the viewer */
@@ -1421,79 +1378,47 @@ a.timeline-session-id:hover {
     margin: 0;
     padding: 0;
     border: 0;
-    overflow: hidden;
+    overflow: auto;
     overscroll-behavior: contain;
-    touch-action: none;
     background: var(--bgColor-muted);
-    color: var(--fgColor-default);
+    outline: none;
 }
 
-.diagram-viewer-stage {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    cursor: grab;
-    user-select: none;
-    -webkit-user-select: none;
-}
-
-.diagram-viewer-stage:active {
-    cursor: grabbing;
-}
-
-.diagram-viewer-canvas {
-    width: max-content;
-    transform-origin: 0 0;
-}
-
-.diagram-viewer-canvas > svg {
-    display: block;
-}
-
-.diagram-viewer-tools {
-    position: absolute;
-    top: max(12px, env(safe-area-inset-top));
-    right: max(12px, env(safe-area-inset-right));
+/* Centered while it fits; the auto margins drop to 0 once it overflows, so no edge is cut off */
+.diagram-viewer[open] {
     display: flex;
-    gap: 2px;
-    padding: 4px;
+}
+
+.diagram-viewer > svg {
+    flex: none;
+    margin: auto;
+}
+
+.diagram-viewer-close {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    width: 32px;
+    height: 32px;
+    padding: 0;
     border: 1px solid var(--borderColor-default);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--bgColor-default);
+    color: var(--fgColor-default);
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
-.diagram-viewer-tools button {
-    min-width: 32px;
-    height: 32px;
-    padding: 0 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: var(--fgColor-default);
-    font: inherit;
-    font-size: 15px;
-    line-height: 1;
-    cursor: pointer;
-}
-
-.diagram-viewer-tools button:hover {
+.diagram-viewer-close:hover {
     background: var(--bgColor-neutral-muted);
 }
 
 @media (hover: none) and (pointer: coarse) {
-    .diagram-expand {
-        opacity: 1;
+    .diagram-viewer-close {
         width: 44px;
-        height: 44px;
-    }
-
-    .diagram-expand::before {
-        inset: 13px;
-    }
-
-    .diagram-viewer-tools button {
-        min-width: 44px;
         height: 44px;
     }
 }
