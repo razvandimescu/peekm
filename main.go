@@ -3571,7 +3571,7 @@ func versionCachePath() string {
 
 func fetchLatestVersion(cachePath string) string {
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("https://registry.npmjs.org/@peekm/peekm/latest")
+	resp, err := client.Get("https://peekm.dev/latest.json")
 	if err != nil {
 		return ""
 	}

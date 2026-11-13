@@ -68,7 +68,7 @@ To remove the hook, run `peekm setup claude-code --remove`. For pi, run `peekm s
 
 The hook and the pi extension send events only to `localhost`. peekm connects to other hosts in these cases:
 
-- Once a day, when peekm runs in a terminal, it checks `registry.npmjs.org` for a new version. `peekm update` also checks it. The request contains no file or session data.
+- Once a day, when peekm runs in a terminal, it reads `peekm.dev/latest.json` (a static file on GitHub Pages) to find a new version. `peekm update` also reads it. The request contains no file or session data.
 - The browser loads the Mermaid library from `cdn.jsdelivr.net`.
 - When you make a share public, the file goes through the `share.peekm.dev` relay. For an HTML file, the relay also sends the assets that the page loads.
 - A reply sends your question and the files that the fork reads to the Anthropic API, as any Claude Code session does.
