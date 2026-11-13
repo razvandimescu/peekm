@@ -54,25 +54,26 @@ type sessionStats struct {
 }
 
 type timelineSession struct {
-	SessionID      string // truncated 8 chars
-	FullSessionID  string
-	Summary        string // first user prompt (truncated)
-	Project        string // project name from CWD (e.g. "peekm")
-	Duration       string // e.g. "12m", "< 1s"
-	FileCount      int
-	EditCount      int
-	Tools          []string // unique tool names
-	HasTranscript  bool
-	IsActive       bool   // newest event or heartbeat < 5min ago
-	LastTool       string // most recent tool call (from heartbeat)
-	LastToolAgo    string // relative time of last tool call (for tooltip)
-	LastToolDetail string // tool input summary (e.g. command, file path, pattern)
-	SessionType    string // "edit" or "conversation"
-	Source         string // harness badge: "" (Claude Code, unbadged) or "pi"
-	Events         []timelineEntry
-	Ribbon         []ribbonCell // spatial activity strip (chronological)
-	newestTime     time.Time
-	oldestTime     time.Time
+	SessionID     string // truncated 8 chars
+	FullSessionID string
+	Summary       string // first user prompt (truncated)
+	Project       string // project name from CWD (e.g. "peekm")
+	Duration      string // e.g. "12m", "< 1s"
+	FileCount     int
+	EditCount     int
+	Tools         []string // unique tool names
+	HasTranscript bool
+	IsActive      bool   // newest event or heartbeat < 5min ago
+	State         string // sessionWaiting or sessionDone (lifecycle hooks); overrides IsActive
+	LastTool      string // most recent tool call (from heartbeat)
+	LastAgo       string // relative time of the last hook event (for tooltip)
+	LastDetail    string // tool input summary, permission message, or Claude's last reply
+	SessionType   string // "edit" or "conversation"
+	Source        string // harness badge: "" (Claude Code, unbadged) or "pi"
+	Events        []timelineEntry
+	Ribbon        []ribbonCell // spatial activity strip (chronological)
+	newestTime    time.Time
+	oldestTime    time.Time
 }
 
 // ribbonCell is one column of a session's activity ribbon: a tool-colored bar
@@ -524,21 +525,22 @@ func markActiveSessions(groups []timelineDayGroup) {
 	now := time.Now()
 	for i := range groups {
 		for j := range groups[i].Sessions {
-			s := &groups[i].Sessions[j]
-			if now.Sub(s.newestTime) < 5*time.Minute {
-				s.IsActive = true
-			}
-			if s.FullSessionID != "" {
-				if hb, ok := globalHeartbeats.get(s.FullSessionID); ok {
-					if now.Sub(hb.Timestamp) < 5*time.Minute {
-						s.IsActive = true
-						s.LastTool = hb.ToolName
-						s.LastToolAgo = formatTimeAgo(hb.Timestamp)
-						s.LastToolDetail = hb.Detail
-					}
-				}
-			}
+			markSessionState(&groups[i].Sessions[j], now)
 		}
+	}
+}
+
+func markSessionState(s *timelineSession, now time.Time) {
+	hb, ok := globalHeartbeats.get(s.FullSessionID)
+	ok = ok && s.FullSessionID != ""
+	if ok && hb.State != "" {
+		s.State, s.LastAgo, s.LastDetail = hb.State, formatTimeAgo(hb.Timestamp), hb.Detail
+		return
+	}
+	s.IsActive = now.Sub(s.newestTime) < 5*time.Minute
+	if ok && now.Sub(hb.Timestamp) < 5*time.Minute {
+		s.IsActive = true
+		s.LastTool, s.LastAgo, s.LastDetail = hb.ToolName, formatTimeAgo(hb.Timestamp), hb.Detail
 	}
 }
 

@@ -219,15 +219,23 @@ func (ss *sessionStore) get(filePath string) (*SessionMetadata, bool) {
 	return metadata, exists
 }
 
-// heartbeatStore tracks the last tool call per session (in-memory, not persisted)
+// heartbeatStore tracks the last hook event per session (in-memory, not persisted)
 type heartbeatStore struct {
 	mu    sync.RWMutex
 	beats map[string]heartbeat // session ID → last heartbeat
 }
 
+// Session states reported by Claude Code lifecycle hooks. A heartbeat with an
+// empty State means the session is working.
+const (
+	sessionWaiting = "waiting" // blocked on a permission prompt or dialog
+	sessionDone    = "done"    // turn finished, the next prompt is yours
+)
+
 type heartbeat struct {
 	ToolName  string
 	Detail    string
+	State     string
 	Timestamp time.Time
 }
 
@@ -235,19 +243,26 @@ func newHeartbeatStore() *heartbeatStore {
 	return &heartbeatStore{beats: make(map[string]heartbeat)}
 }
 
-func (hs *heartbeatStore) update(sessionID, toolName, detail string) {
+func (hs *heartbeatStore) update(sessionID string, hb heartbeat) {
 	now := time.Now()
+	hb.Timestamp = now
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
-	hs.beats[sessionID] = heartbeat{ToolName: toolName, Detail: detail, Timestamp: now}
+	hs.beats[sessionID] = hb
 	// Lazy eviction: reap stale entries when map grows
 	if len(hs.beats) > 50 {
-		for id, hb := range hs.beats {
-			if now.Sub(hb.Timestamp) > 10*time.Minute {
+		for id, old := range hs.beats {
+			if now.Sub(old.Timestamp) > 10*time.Minute {
 				delete(hs.beats, id)
 			}
 		}
 	}
+}
+
+func (hs *heartbeatStore) remove(sessionID string) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	delete(hs.beats, sessionID)
 }
 
 func (hs *heartbeatStore) get(sessionID string) (heartbeat, bool) {
@@ -1592,14 +1607,49 @@ func removeFromWhitelist(filePath string) bool {
 	return false
 }
 
-// notifySessionActivity pushes a lightweight SSE event on every received hook
-// so an open transcript view can refresh while its session is active.
-func notifySessionActivity(sessionID, tool string) {
-	broadcastJSON(map[string]string{
-		"type":    "session_activity",
-		"session": sessionID,
-		"tool":    tool,
-	})
+// sessionActivity is the SSE event pushed on every received hook. State,
+// Detail and Project are set only by lifecycle hooks (see handleSessionLifecycle).
+type sessionActivity struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Tool    string `json:"tool,omitempty"`
+	State   string `json:"state,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Project string `json:"project,omitempty"`
+}
+
+func notifySessionActivity(msg sessionActivity) {
+	msg.Type = "session_activity"
+	broadcastJSON(msg)
+}
+
+// handleSessionLifecycle records a Notification, Stop, UserPromptSubmit or
+// SessionEnd hook as the session's state and pushes it to open pages. A Stop
+// with background tasks in flight keeps the session working: it wakes itself
+// when they finish.
+func handleSessionLifecycle(sessionID, event, detail, cwd string, backgroundTasks int) {
+	msg := sessionActivity{Session: sessionID, Detail: detail}
+	if cwd != "" {
+		msg.Project = filepath.Base(cwd)
+	}
+	switch event {
+	case "SessionEnd":
+		globalHeartbeats.remove(sessionID)
+		notifySessionActivity(msg)
+		return
+	case "Notification":
+		msg.State = sessionWaiting
+	case "Stop":
+		if backgroundTasks == 0 {
+			msg.State = sessionDone
+		}
+	case "UserPromptSubmit":
+	default:
+		return
+	}
+	globalHeartbeats.update(sessionID, heartbeat{State: msg.State, Detail: msg.Detail})
+	notifySessionActivity(msg)
+	log.Printf("Session %s: %s", truncateSessionID(sessionID), event)
 }
 
 func watchFileWithContext(ctx context.Context, watcher *fsnotify.Watcher, filePath string) {
@@ -2110,6 +2160,9 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		TS     string `json:"ts"`
 		Detail string `json:"detail"`
 		Src    string `json:"src"`
+		// Lifecycle hooks (Notification, Stop, UserPromptSubmit, SessionEnd)
+		Event string `json:"event"`
+		BG    int    `json:"bg"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2130,9 +2183,15 @@ func handleClaudeHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Event != "" {
+		handleSessionLifecycle(req.SessionID, req.Event, req.Detail, req.CWD, req.BG)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Heartbeat: tool call without file_path (non-edit tools like Read, Bash, Grep)
-	globalHeartbeats.update(req.SessionID, req.ToolName, req.Detail)
-	notifySessionActivity(req.SessionID, req.ToolName)
+	globalHeartbeats.update(req.SessionID, heartbeat{ToolName: req.ToolName, Detail: req.Detail})
+	notifySessionActivity(sessionActivity{Session: req.SessionID, Tool: req.ToolName})
 	if req.FilePath == "" {
 		detail := req.Detail
 		if len(detail) > 80 {

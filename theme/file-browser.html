@@ -1657,6 +1657,14 @@
             font-size: 13px; text-decoration: none; white-space: nowrap;
         }
         .timeline-recap-link:hover { text-decoration: underline; }
+        .timeline-controls-end { display: flex; align-items: center; gap: 16px; }
+        .timeline-notify-btn {
+            border: none; background: none; padding: 0; cursor: pointer;
+            color: var(--fgColor-muted); font-family: var(--font-display); font-weight: 600; font-size: 13px;
+        }
+        .timeline-notify-btn:hover:not(:disabled) { color: var(--fgColor-default); }
+        .timeline-notify-btn.active { color: var(--peekm-accent); }
+        .timeline-notify-btn:disabled { cursor: default; opacity: 0.6; }
 
         /* ===== Standup — a dense, read-aloud digest ===== */
         .standup { max-width: 760px; }
