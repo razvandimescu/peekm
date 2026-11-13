@@ -68,7 +68,7 @@ To remove the hook, run `peekm setup claude-code --remove`. For pi, run `peekm s
 
 The hook and the pi extension send events only to `localhost`. peekm connects to other hosts in these cases:
 
-- Once a day, when peekm runs in a terminal, it checks `registry.npmjs.org` for a new version. The request contains no file or session data.
+- Once a day, when peekm runs in a terminal, it checks `registry.npmjs.org` for a new version. `peekm update` also checks it. The request contains no file or session data.
 - The browser loads the Mermaid library from `cdn.jsdelivr.net`.
 - When you make a share public, the file goes through the `share.peekm.dev` relay. For an HTML file, the relay also sends the assets that the page loads.
 - A reply sends your question and the files that the fork reads to the Anthropic API, as any Claude Code session does.
@@ -78,22 +78,24 @@ The hook and the pi extension send events only to `localhost`. peekm connects to
 npm:
 
 ```bash
-npm i -g @peekm/peekm  # upgrade: npm update -g @peekm/peekm
+npm i -g @peekm/peekm
 ```
 
 Homebrew:
 
 ```bash
-brew install razvandimescu/tap/peekm  # upgrade: brew upgrade peekm
+brew install razvandimescu/tap/peekm
 ```
 
 Go:
 
 ```bash
-go install github.com/razvandimescu/peekm@latest  # run again to upgrade
+go install github.com/razvandimescu/peekm@latest
 ```
 
 To run peekm without an installation, use `npx @peekm/peekm .`. Binaries for macOS, Linux, and Windows are on the [releases page](https://github.com/razvandimescu/peekm/releases).
+
+To upgrade, run `peekm update`. It finds the tool that installed peekm (Homebrew, npm, or `go install`) and runs its upgrade command. Then it restarts the background service, if you installed it. For a binary from the releases page, download the new release.
 
 ## Usage
 

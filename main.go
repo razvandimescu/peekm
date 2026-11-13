@@ -1465,11 +1465,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup autostart [--remove]\n")
+		fmt.Fprintf(os.Stderr, "       peekm update\n")
 		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
 		fmt.Fprintf(os.Stderr, "  setup     Configure integrations and system service\n")
+		fmt.Fprintf(os.Stderr, "  update    Upgrade peekm with the tool that installed it\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
+	}
+
+	if version == "dev" {
+		if v := goModuleVersion(); v != "" {
+			version = v
+		}
 	}
 
 	// Handle subcommands before flag.Parse()
@@ -1477,6 +1485,9 @@ func main() {
 		switch os.Args[1] {
 		case "setup":
 			runSetup(os.Args[2:])
+			return
+		case "update":
+			runUpdate()
 			return
 		}
 	}
@@ -3554,7 +3565,11 @@ func readCachedVersion(cachePath string) string {
 	return cached.Latest
 }
 
-func fetchLatestVersion(cacheDir, cachePath string) string {
+func versionCachePath() string {
+	return homeSubdir(".peekm", "version-check.json")
+}
+
+func fetchLatestVersion(cachePath string) string {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get("https://registry.npmjs.org/@peekm/peekm/latest")
 	if err != nil {
@@ -3570,7 +3585,7 @@ func fetchLatestVersion(cacheDir, cachePath string) string {
 	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil || pkg.Version == "" {
 		return ""
 	}
-	if err := os.MkdirAll(cacheDir, 0755); err == nil {
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err == nil {
 		if data, err := json.Marshal(versionCache{Latest: pkg.Version, CheckedAt: time.Now().Unix()}); err == nil {
 			os.WriteFile(cachePath, data, 0644) //nolint:errcheck
 		}
@@ -3582,19 +3597,16 @@ func checkLatestVersion() {
 	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return
 	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
+	cachePath := versionCachePath()
+	if cachePath == "" {
 		return
 	}
-	cacheDir := filepath.Join(homeDir, ".peekm")
-	cachePath := filepath.Join(cacheDir, "version-check.json")
-
 	latest := readCachedVersion(cachePath)
 	if latest == "" {
-		latest = fetchLatestVersion(cacheDir, cachePath)
+		latest = fetchLatestVersion(cachePath)
 	}
 	if latest != "" && latest != version {
-		fmt.Printf("\nUpdate available: %s → %s — run: npm i -g @peekm/peekm\n", version, latest)
+		fmt.Printf("\nUpdate available: %s → %s — run: peekm update\n", version, latest)
 	}
 }
 

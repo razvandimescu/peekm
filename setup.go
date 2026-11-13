@@ -337,22 +337,52 @@ func setupAutostart(args []string) {
 	if *remove {
 		removeAutostart()
 	} else {
-		installAutostart()
+		installAutostart(mustServiceBinaryPath())
 	}
 }
 
-func installAutostart() {
-	binPath, err := os.Executable()
+// mustServiceBinaryPath returns the path that an autostart service runs, or exits.
+func mustServiceBinaryPath() string {
+	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine peekm binary path: %v\n", err)
 		os.Exit(1)
 	}
-	binPath, err = filepath.EvalSymlinks(binPath)
+	binPath, err := serviceBinaryPath(exe)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot resolve binary path: %v\n", err)
 		os.Exit(1)
 	}
+	return binPath
+}
 
+// brewKeg marks a binary inside a Homebrew keg: <prefix>/Cellar/peekm/<version>/.
+const brewKeg = "/Cellar/peekm/"
+
+// serviceBinaryPath resolves exe to a path that outlives an upgrade. A
+// Homebrew keg path maps to <prefix>/opt/peekm, because `brew upgrade`
+// deletes the old keg.
+func serviceBinaryPath(exe string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", err
+	}
+	prefix, kegRel, ok := strings.Cut(resolved, brewKeg)
+	if !ok {
+		return resolved, nil
+	}
+	_, binRel, ok := strings.Cut(kegRel, "/")
+	if !ok {
+		return resolved, nil
+	}
+	opt := filepath.Join(prefix, "opt", "peekm", binRel)
+	if !fileExists(opt) {
+		return resolved, nil
+	}
+	return opt, nil
+}
+
+func installAutostart(binPath string) {
 	homeDir := mustHomeDir()
 
 	switch detectServiceManager() {
@@ -384,6 +414,25 @@ func removeAutostart() {
 	}
 }
 
+// restartAutostart reinstalls an installed autostart service so that it runs
+// binPath, and reports whether it did. The Windows Startup folder starts
+// peekm only at login, so it has no service to restart.
+func restartAutostart(binPath, homeDir string) bool {
+	switch detectServiceManager() {
+	case "launchd":
+		if fileExists(launchdPlistPath(homeDir)) {
+			installLaunchd(binPath, homeDir)
+			return true
+		}
+	case "systemd":
+		if fileExists(systemdUnitPath(homeDir)) {
+			installSystemd(binPath, homeDir)
+			return true
+		}
+	}
+	return false
+}
+
 // mustHomeDir returns $HOME or exits: setup commands cannot proceed without it.
 func mustHomeDir() string {
 	homeDir, err := os.UserHomeDir()
@@ -410,9 +459,13 @@ func detectServiceManager() string {
 
 const launchdLabel = "dev.peekm.agent"
 
+func launchdPlistPath(homeDir string) string {
+	return filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
+}
+
 func installLaunchd(binPath, homeDir string) {
-	plistDir := filepath.Join(homeDir, "Library", "LaunchAgents")
-	plistPath := filepath.Join(plistDir, launchdLabel+".plist")
+	plistPath := launchdPlistPath(homeDir)
+	plistDir := filepath.Dir(plistPath)
 	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
 
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -466,7 +519,7 @@ func installLaunchd(binPath, homeDir string) {
 }
 
 func removeLaunchd(homeDir string) {
-	plistPath := filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
+	plistPath := launchdPlistPath(homeDir)
 
 	fmt.Println("\n  Removing peekm autostart (launchd)")
 	fmt.Println("  ===================================")
@@ -484,9 +537,13 @@ func removeLaunchd(homeDir string) {
 
 const systemdUnit = "peekm"
 
+func systemdUnitPath(homeDir string) string {
+	return filepath.Join(homeDir, ".config", "systemd", "user", systemdUnit+".service")
+}
+
 func installSystemd(binPath, homeDir string) {
-	unitDir := filepath.Join(homeDir, ".config", "systemd", "user")
-	unitPath := filepath.Join(unitDir, systemdUnit+".service")
+	unitPath := systemdUnitPath(homeDir)
+	unitDir := filepath.Dir(unitPath)
 
 	unit := fmt.Sprintf(`[Unit]
 Description=peekm markdown viewer with AI session tracking
@@ -517,8 +574,13 @@ WantedBy=default.target
 		fmt.Fprintf(os.Stderr, "    Error reloading systemd: %v\n", err)
 		os.Exit(1)
 	}
-	if err := runCommand("systemctl", "--user", "enable", "--now", systemdUnit); err != nil {
+	if err := runCommand("systemctl", "--user", "enable", systemdUnit); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error enabling service: %v\n", err)
+		os.Exit(1)
+	}
+	// restart, not start: a running service must pick up a new binPath.
+	if err := runCommand("systemctl", "--user", "restart", systemdUnit); err != nil {
+		fmt.Fprintf(os.Stderr, "    Error starting service: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("    Service enabled and started")
@@ -527,7 +589,7 @@ WantedBy=default.target
 }
 
 func removeSystemd(homeDir string) {
-	unitPath := filepath.Join(homeDir, ".config", "systemd", "user", systemdUnit+".service")
+	unitPath := systemdUnitPath(homeDir)
 
 	fmt.Println("\n  Removing peekm autostart (systemd)")
 	fmt.Println("  ===================================")
