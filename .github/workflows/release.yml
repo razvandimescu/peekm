@@ -46,6 +46,18 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
 
+  # Redeploys peekm.dev so latest.json names the new release. workflow_dispatch is exempt
+  # from the GITHUB_TOKEN rule above, and the github-pages environment accepts only main.
+  pages:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-npm:
     needs: goreleaser
     runs-on: ubuntu-latest

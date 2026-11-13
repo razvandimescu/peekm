@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make site
+      # peekm's update check reads this file.
+      - run: |
+          gh release view --json tagName --jq '.tagName | ltrimstr("v") | {version: .}' > site/latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
