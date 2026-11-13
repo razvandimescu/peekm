@@ -337,49 +337,43 @@ func setupAutostart(args []string) {
 	if *remove {
 		removeAutostart()
 	} else {
-		installAutostart(mustServiceBinaryPath())
+		installAutostart(serviceBinaryPath(mustExecutable()))
 	}
 }
 
-// mustServiceBinaryPath returns the path that an autostart service runs, or exits.
-func mustServiceBinaryPath() string {
+// mustExecutable returns the resolved path of the running peekm binary, or exits.
+func mustExecutable() string {
 	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine peekm binary path: %v\n", err)
 		os.Exit(1)
 	}
-	binPath, err := serviceBinaryPath(exe)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot resolve binary path: %v\n", err)
-		os.Exit(1)
-	}
-	return binPath
+	return exe
 }
 
 // brewKeg marks a binary inside a Homebrew keg: <prefix>/Cellar/peekm/<version>/.
 const brewKeg = "/Cellar/peekm/"
 
-// serviceBinaryPath resolves exe to a path that outlives an upgrade. A
-// Homebrew keg path maps to <prefix>/opt/peekm, because `brew upgrade`
-// deletes the old keg.
-func serviceBinaryPath(exe string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(exe)
-	if err != nil {
-		return "", err
-	}
-	prefix, kegRel, ok := strings.Cut(resolved, brewKeg)
+// serviceBinaryPath maps the resolved binary path exe to a path that outlives
+// an upgrade. A Homebrew keg path maps to <prefix>/opt/peekm, because
+// `brew upgrade` deletes the old keg.
+func serviceBinaryPath(exe string) string {
+	prefix, kegRel, ok := strings.Cut(exe, brewKeg)
 	if !ok {
-		return resolved, nil
+		return exe
 	}
 	_, binRel, ok := strings.Cut(kegRel, "/")
 	if !ok {
-		return resolved, nil
+		return exe
 	}
 	opt := filepath.Join(prefix, "opt", "peekm", binRel)
 	if !fileExists(opt) {
-		return resolved, nil
+		return exe
 	}
-	return opt, nil
+	return opt
 }
 
 func installAutostart(binPath string) {

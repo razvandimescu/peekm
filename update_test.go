@@ -38,10 +38,11 @@ func TestServiceBinaryPathSurvivesBrewUpgrade(t *testing.T) {
 	prefix := t.TempDir()
 	brewLink(t, prefix, "0.1.34")
 
-	svc, err := serviceBinaryPath(filepath.Join(prefix, "bin", "peekm"))
+	exe, err := filepath.EvalSymlinks(filepath.Join(prefix, "bin", "peekm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	svc := serviceBinaryPath(exe)
 
 	// `brew upgrade` links the new keg, then `brew cleanup peekm` deletes the old one.
 	brewLink(t, prefix, "0.1.35")

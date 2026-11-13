@@ -38,14 +38,7 @@ func upgradeCommands(exe string, goInstalled bool) [][]string {
 }
 
 func runUpdate() {
-	exe, err := os.Executable()
-	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine peekm binary path: %v\n", err)
-		os.Exit(1)
-	}
+	exe := mustExecutable()
 	cmds := upgradeCommands(exe, goModuleVersion() != "")
 	if cmds == nil {
 		fmt.Fprintf(os.Stderr, "peekm cannot update %s: Homebrew, npm, or go install did not install it.\n", exe)
@@ -56,12 +49,6 @@ func runUpdate() {
 		fmt.Printf("peekm %s is the latest version.\n", version)
 		return
 	}
-	// Resolve before upgrading: brew deletes the keg that exe points into.
-	svc, err := serviceBinaryPath(exe)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot resolve binary path: %v\n", err)
-		os.Exit(1)
-	}
 	for _, c := range cmds {
 		fmt.Printf("$ %s\n", strings.Join(c, " "))
 		if err := runCommand(c[0], c[1:]...); err != nil {
@@ -69,7 +56,7 @@ func runUpdate() {
 			os.Exit(1)
 		}
 	}
-	if !restartAutostart(svc, mustHomeDir()) {
+	if !restartAutostart(serviceBinaryPath(exe), mustHomeDir()) {
 		fmt.Println("Restart peekm to use the new version.")
 	}
 }
