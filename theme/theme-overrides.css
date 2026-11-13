@@ -1377,3 +1377,67 @@ a.timeline-session-id:hover {
     padding: 80px 20px;
     color: var(--fgColor-muted);
 }
+
+/* Mermaid diagrams: full-screen viewer (diagram-viewer.js) */
+.mermaid > svg {
+    cursor: zoom-in;
+}
+
+/* The shared view scrolls the document; its scrollbar would show beside the viewer */
+:root:has(.diagram-viewer[open]) {
+    overflow: hidden;
+}
+
+.diagram-viewer {
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--bgColor-muted);
+    outline: none;
+}
+
+/* Centered while it fits; the auto margins drop to 0 once it overflows, so no edge is cut off */
+.diagram-viewer[open] {
+    display: flex;
+}
+
+.diagram-viewer > svg {
+    flex: none;
+    margin: auto;
+}
+
+.diagram-viewer-close {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    background: var(--bgColor-default);
+    color: var(--fgColor-default);
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.diagram-viewer-close:hover {
+    background: var(--bgColor-neutral-muted);
+}
+
+@media (hover: none) and (pointer: coarse) {
+    .diagram-viewer-close {
+        width: 44px;
+        height: 44px;
+    }
+}
