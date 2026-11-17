@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -146,5 +148,72 @@ func TestCollectDirectoriesStopsAtLimit(t *testing.T) {
 	got := wm.collectDirectories(dir, 3)
 	if want := []string{dir, filepath.Join(dir, "a")}; !slices.Equal(got, want) {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// A live reload re-creates a preview's iframe, so its content must be revalidated, never taken from cache.
+func TestPreviewContentIsRevalidated(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("cannot get home directory: %v", err)
+	}
+	dir, err := os.MkdirTemp(homeDir, "peekm_preview_test")
+	if err != nil {
+		t.Fatalf("cannot create test dir in home: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	page := filepath.Join(dir, "page.html")
+	if err := os.WriteFile(page, []byte("<p>one</p>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ := filepath.EvalSymlinks(page)
+
+	fileMutex.Lock()
+	oldBrowseDir, oldFiles := browseDir, markdownFiles
+	browseDir, markdownFiles = dir, []string{resolved}
+	fileMutex.Unlock()
+	defer func() {
+		fileMutex.Lock()
+		browseDir, markdownFiles = oldBrowseDir, oldFiles
+		fileMutex.Unlock()
+	}()
+
+	rec := httptest.NewRecorder()
+	servePreviewContent(rec, httptest.NewRequest(http.MethodGet, "http://localhost/preview-content/page.html", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-cache")
+	}
+}
+
+// The default file at / renders like /view/: an HTML page as a preview, not as markdown.
+func TestDefaultHTMLFileRendersAsPreview(t *testing.T) {
+	dir := t.TempDir()
+	page := filepath.Join(dir, "page.html")
+	mustWrite(t, page, "<!doctype html><h1>Plan</h1>")
+
+	fileMutex.Lock()
+	oldBrowseDir, oldFiles := browseDir, markdownFiles
+	browseDir, markdownFiles = dir, []string{page}
+	fileMutex.Unlock()
+	t.Cleanup(func() {
+		fileWatcher.close()
+		fileMutex.Lock()
+		browseDir, markdownFiles, currentFile = oldBrowseDir, oldFiles, ""
+		fileMutex.Unlock()
+	})
+
+	rec := httptest.NewRecorder()
+	serveBrowser(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	body := rec.Body.String()
+	for _, want := range []string{`<main id="content" data-view="preview"`, `<iframe src="/preview-content/page.html"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %q", want)
+		}
+	}
+	if strings.Contains(body, "<h1>Plan</h1>") {
+		t.Error("page markup rendered inline as markdown")
 	}
 }
