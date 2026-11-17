@@ -2058,30 +2058,22 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 	defaultFile := selectDefaultFile(currentMarkdownFiles)
 
 	var content template.HTML
-	var showBackButton bool
+	var showBackButton, isPreview bool
 	var title, subtitle string
 
 	if defaultFile != "" {
-		// Render markdown content for the selected file
-		markdownContent, err := os.ReadFile(defaultFile)
-		if err == nil {
-			if rendered, err := renderMarkdownBytes(markdownContent); err == nil {
-				content = rendered
-				watchOpenFile(defaultFile)
-				showBackButton = true
-				title = filepath.Base(defaultFile)
-
-				// Get relative path for subtitle
-				relPath := defaultFile
-				if rel, err := filepath.Rel(currentBrowseDir, defaultFile); err == nil {
-					relPath = rel
-				}
-				subtitle = fmt.Sprintf("%s - %d file(s)", relPath, len(currentMarkdownFiles))
-			} else {
-				log.Printf("Error rendering markdown: %v", err)
-			}
+		relPath := defaultFile
+		if rel, err := filepath.Rel(currentBrowseDir, defaultFile); err == nil {
+			relPath = rel
+		}
+		if rendered, preview, err := renderOpenFile(defaultFile, relPath); err == nil {
+			content, isPreview = rendered, preview
+			watchOpenFile(defaultFile)
+			showBackButton = true
+			title = filepath.Base(defaultFile)
+			subtitle = fmt.Sprintf("%s - %d file(s)", relPath, len(currentMarkdownFiles))
 		} else {
-			log.Printf("Error reading default file: %v", err)
+			log.Printf("Error rendering default file: %v", err)
 		}
 	}
 
@@ -2105,6 +2097,7 @@ func serveBrowser(w http.ResponseWriter, r *http.Request) {
 		ShowBackButton:   showBackButton,
 		BrowsePath:       currentBrowseDir,
 		FilePath:         filePath,
+		IsPreview:        isPreview,
 	}
 
 	renderTemplate(w, r, data)
@@ -2580,19 +2573,10 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(absFilePath))
-	isPreview := shareableRawExts[ext]
-
-	var contentHTML template.HTML
-	if isPreview {
-		contentHTML = renderPreviewContent(absFilePath, filePath, ext)
-	} else {
-		var err error
-		contentHTML, err = renderMarkdownContent(absFilePath)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	contentHTML, isPreview, err := renderOpenFile(absFilePath, filePath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	var sessionData *SessionMetadata
@@ -2616,6 +2600,17 @@ func serveFile(w http.ResponseWriter, r *http.Request) {
 
 	watchOpenFile(absFilePath)
 	renderTemplate(w, r, data)
+}
+
+// renderOpenFile renders a file for the content area: HTML/SVG/TXT as a
+// preview, everything else as markdown. relPath is relative to the browse dir.
+func renderOpenFile(absPath, relPath string) (content template.HTML, isPreview bool, err error) {
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if shareableRawExts[ext] {
+		return renderPreviewContent(absPath, relPath, ext), true, nil
+	}
+	content, err = renderMarkdownContent(absPath)
+	return content, false, err
 }
 
 func renderMarkdownContent(absFilePath string) (template.HTML, error) {
@@ -2685,6 +2680,8 @@ func servePreviewContent(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A live reload re-creates the iframe; without revalidation Chrome reuses a cached copy of an older file.
+	w.Header().Set("Cache-Control", "no-cache")
 
 	absPath := resolveFilePath(relPath)
 

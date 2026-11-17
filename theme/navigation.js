@@ -104,9 +104,9 @@ function connectSSE() {
             } else if (data.type === 'file_modified') {
                 console.log('[SSE] Handling file_modified for:', data.path);
 
-                // Viewing this file (at /view/ or as the default file at /): refresh in place
+                // Viewing this file or its preview (at /view/ or as the default file at /): refresh in place
                 const content = document.getElementById('content');
-                if (content && content.dataset.view === 'file' && getCurrentFilePath() === '/' + data.path) {
+                if (content && ['file', 'preview'].includes(content.dataset.view) && getCurrentFilePath() === '/' + data.path) {
                     console.log('[SSE] Auto-refreshing current page');
                     reloadContent();
 
