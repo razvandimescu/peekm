@@ -65,6 +65,39 @@ func TestInstallAndRemoveClaudeHooks(t *testing.T) {
 	}
 }
 
+// With no peekm listening, every tool hook must still exit 0.
+func TestHookScriptSucceedsWithoutPeekm(t *testing.T) {
+	for _, bin := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not installed", bin)
+		}
+	}
+	dir := t.TempDir()
+	if _, err := installClaudeHooks(dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	// curl exits 7 when it cannot connect
+	fakeBin := t.TempDir()
+	mustWrite(t, filepath.Join(fakeBin, "curl"), "#!/bin/sh\nexit 7\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "curl"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, input := range map[string]string{
+		"edit":      `{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"/p/a.md"}}`,
+		"heartbeat": `{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command("bash", filepath.Join(dir, "peekm-hook.sh"))
+			cmd.Stdin = strings.NewReader(input)
+			cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "PATH="+fakeBin+":"+os.Getenv("PATH"))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("script: err=%v output=%q", err, out)
+			}
+		})
+	}
+}
+
 // The generated script must forward lifecycle hooks as compact state events and
 // print nothing: UserPromptSubmit stdout would become Claude's context.
 func TestHookScriptForwardsLifecycleEvents(t *testing.T) {

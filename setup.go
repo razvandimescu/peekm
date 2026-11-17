@@ -93,6 +93,8 @@ notify() {
             -d "$1" --max-time 0.05 \
             "http://localhost:$port/hook/file-modified" >/dev/null 2>&1 && return
     done
+    # No peekm running is normal; a non-zero exit shows "hook failed" in Claude Code
+    return 0
 }
 
 case $(echo "$json" | jq -r '.hook_event_name // empty') in
