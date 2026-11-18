@@ -1175,6 +1175,11 @@
             }
         }
 
+        /* An HTML page does its own layout, so it gets the full width */
+        [data-view="preview"] .container:has(> iframe) {
+            max-width: none;
+        }
+
         /* Code blocks can expand beyond container for better readability */
         .content-area .container pre {
             max-width: calc(100vw - 380px);
