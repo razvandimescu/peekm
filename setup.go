@@ -19,7 +19,6 @@ func runSetup(args []string) {
 		fmt.Println("\nTargets:")
 		fmt.Println("  claude-code  Configure Claude Code hooks [--remove] [--port PORT]")
 		fmt.Println("  pi           Configure pi extension [--remove] [--port PORT]")
-		fmt.Println("  autostart    Install as background service [--remove]")
 		os.Exit(1)
 	}
 
@@ -28,11 +27,9 @@ func runSetup(args []string) {
 		setupClaudeCode(args[1:])
 	case "pi":
 		setupPi(args[1:])
-	case "autostart":
-		setupAutostart(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown setup target: %s\n", args[0])
-		fmt.Println("Available: claude-code, pi, autostart")
+		fmt.Println("Available: claude-code, pi")
 		os.Exit(1)
 	}
 }
@@ -346,16 +343,60 @@ func removeClaudeCodeSetup(settingsPath, hookScriptPath string) {
 	fmt.Print("\n  Done.\n\n")
 }
 
-func setupAutostart(args []string) {
-	setupFlags := flag.NewFlagSet("setup autostart", flag.ExitOnError)
-	remove := setupFlags.Bool("remove", false, "Remove autostart service")
-	setupFlags.Parse(args)
-
-	if *remove {
-		removeAutostart()
-	} else {
-		installAutostart(serviceBinaryPath(mustExecutable()))
+func runInstall(args []string) {
+	flag.CommandLine.Parse(args)
+	parseAccessFlags()
+	target, _ := targetArg()
+	homeDir := mustHomeDir()
+	serviceArgs := append(serviceFlags(flag.CommandLine), target)
+	if err := saveServiceArgs(homeDir, serviceArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
+	installAutostart(append([]string{serviceBinaryPath(mustExecutable())}, serviceArgs...), homeDir)
+}
+
+func runUninstall() {
+	homeDir := mustHomeDir()
+	removeAutostart(homeDir)
+	os.Remove(serviceArgsPath(homeDir))
+}
+
+// serviceFlags returns the flags set on fs as service arguments. The service
+// never opens a browser.
+func serviceFlags(fs *flag.FlagSet) []string {
+	args := []string{"-browser=false"}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name != "browser" {
+			args = append(args, "-"+f.Name+"="+f.Value.String())
+		}
+	})
+	return args
+}
+
+func serviceArgsPath(homeDir string) string {
+	return filepath.Join(homeDir, ".peekm", "service-args.json")
+}
+
+func saveServiceArgs(homeDir string, args []string) error {
+	path := serviceArgsPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, _ := json.Marshal(args)
+	return os.WriteFile(path, data, 0644)
+}
+
+// serviceCommand returns the command line of the installed service for
+// binPath. A service installed before peekm stored its arguments ran with
+// -browser=false only.
+func serviceCommand(binPath, homeDir string) []string {
+	var args []string
+	data, err := os.ReadFile(serviceArgsPath(homeDir))
+	if err != nil || json.Unmarshal(data, &args) != nil {
+		args = []string{"-browser=false"}
+	}
+	return append([]string{binPath}, args...)
 }
 
 // mustExecutable returns the resolved path of the running peekm binary, or exits.
@@ -393,25 +434,21 @@ func serviceBinaryPath(exe string) string {
 	return opt
 }
 
-func installAutostart(binPath string) {
-	homeDir := mustHomeDir()
-
+func installAutostart(cmd []string, homeDir string) {
 	switch detectServiceManager() {
 	case "launchd":
-		installLaunchd(binPath, homeDir)
+		installLaunchd(cmd, homeDir)
 	case "systemd":
-		installSystemd(binPath, homeDir)
+		installSystemd(cmd, homeDir)
 	case "startup-folder":
-		installStartupFolder(binPath, homeDir)
+		installStartupFolder(cmd, homeDir)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unsupported platform (need launchd on macOS, systemd on Linux, or Windows)\n")
 		os.Exit(1)
 	}
 }
 
-func removeAutostart() {
-	homeDir := mustHomeDir()
-
+func removeAutostart(homeDir string) {
 	switch detectServiceManager() {
 	case "launchd":
 		removeLaunchd(homeDir)
@@ -432,12 +469,12 @@ func restartAutostart(binPath, homeDir string) bool {
 	switch detectServiceManager() {
 	case "launchd":
 		if fileExists(launchdPlistPath(homeDir)) {
-			installLaunchd(binPath, homeDir)
+			installLaunchd(serviceCommand(binPath, homeDir), homeDir)
 			return true
 		}
 	case "systemd":
 		if fileExists(systemdUnitPath(homeDir)) {
-			installSystemd(binPath, homeDir)
+			installSystemd(serviceCommand(binPath, homeDir), homeDir)
 			return true
 		}
 	}
@@ -474,21 +511,22 @@ func launchdPlistPath(homeDir string) string {
 	return filepath.Join(homeDir, "Library", "LaunchAgents", launchdLabel+".plist")
 }
 
-func installLaunchd(binPath, homeDir string) {
-	plistPath := launchdPlistPath(homeDir)
-	plistDir := filepath.Dir(plistPath)
-	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
+var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+func launchdPlist(cmd []string, logPath, homeDir string) string {
+	var args strings.Builder
+	for _, a := range cmd {
+		fmt.Fprintf(&args, "\n        <string>%s</string>", xmlEscaper.Replace(a))
+	}
+	logPath, homeDir = xmlEscaper.Replace(logPath), xmlEscaper.Replace(homeDir)
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>%s</string>
     <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-        <string>-browser=false</string>
+    <array>%s
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -502,7 +540,14 @@ func installLaunchd(binPath, homeDir string) {
     <string>%s</string>
 </dict>
 </plist>
-`, launchdLabel, binPath, logPath, logPath, homeDir)
+`, launchdLabel, args.String(), logPath, logPath, homeDir)
+}
+
+func installLaunchd(cmd []string, homeDir string) {
+	plistPath := launchdPlistPath(homeDir)
+	plistDir := filepath.Dir(plistPath)
+	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
+	plist := launchdPlist(cmd, logPath, homeDir)
 
 	fmt.Println("\n  peekm autostart (launchd)")
 	fmt.Println("  ========================")
@@ -526,7 +571,7 @@ func installLaunchd(binPath, homeDir string) {
 	}
 	fmt.Println("    Service loaded and started")
 	fmt.Printf("    Logs: %s\n", logPath)
-	printAutostartSuccess()
+	printAutostartSuccess(cmd)
 }
 
 func removeLaunchd(homeDir string) {
@@ -552,23 +597,32 @@ func systemdUnitPath(homeDir string) string {
 	return filepath.Join(homeDir, ".config", "systemd", "user", systemdUnit+".service")
 }
 
-func installSystemd(binPath, homeDir string) {
-	unitPath := systemdUnitPath(homeDir)
-	unitDir := filepath.Dir(unitPath)
+var systemdEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
 
-	unit := fmt.Sprintf(`[Unit]
+func systemdUnitFile(cmd []string, homeDir string) string {
+	quoted := make([]string, len(cmd))
+	for i, a := range cmd {
+		quoted[i] = `"` + systemdEscaper.Replace(a) + `"`
+	}
+	return fmt.Sprintf(`[Unit]
 Description=peekm markdown viewer with AI session tracking
 After=network.target
 
 [Service]
-ExecStart=%s -browser=false
+ExecStart=%s
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=%s
 
 [Install]
 WantedBy=default.target
-`, binPath, homeDir)
+`, strings.Join(quoted, " "), homeDir)
+}
+
+func installSystemd(cmd []string, homeDir string) {
+	unitPath := systemdUnitPath(homeDir)
+	unitDir := filepath.Dir(unitPath)
+	unit := systemdUnitFile(cmd, homeDir)
 
 	fmt.Println("\n  peekm autostart (systemd)")
 	fmt.Println("  =========================")
@@ -589,14 +643,14 @@ WantedBy=default.target
 		fmt.Fprintf(os.Stderr, "    Error enabling service: %v\n", err)
 		os.Exit(1)
 	}
-	// restart, not start: a running service must pick up a new binPath.
+	// restart, not start: a running service must pick up a new command line.
 	if err := runCommand("systemctl", "--user", "restart", systemdUnit); err != nil {
 		fmt.Fprintf(os.Stderr, "    Error starting service: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("    Service enabled and started")
 	fmt.Println("    Logs: journalctl --user -u peekm -f")
-	printAutostartSuccess()
+	printAutostartSuccess(cmd)
 }
 
 func removeSystemd(homeDir string) {
@@ -621,14 +675,22 @@ func startupFolderPath(homeDir string) string {
 	return filepath.Join(homeDir, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "peekm.vbs")
 }
 
-func installStartupFolder(binPath, homeDir string) {
+// startupVBS returns a script that runs cmd hidden (no console window).
+// WshShell.Run starts no shell, so cmd.exe has to apply the log redirection.
+func startupVBS(cmd []string, logPath string) string {
+	quoted := make([]string, len(cmd))
+	for i, a := range cmd {
+		quoted[i] = `"` + a + `"`
+	}
+	line := fmt.Sprintf(`cmd /s /c "%s > "%s" 2>&1"`, strings.Join(quoted, " "), logPath)
+	return fmt.Sprintf("Set WshShell = CreateObject(\"WScript.Shell\")\nWshShell.Run \"%s\", 0, False\n",
+		strings.ReplaceAll(line, `"`, `""`))
+}
+
+func installStartupFolder(cmd []string, homeDir string) {
 	vbsPath := startupFolderPath(homeDir)
 	logPath := filepath.Join(homeDir, ".peekm", "peekm.log")
-
-	// VBScript wrapper runs peekm hidden (no console window)
-	vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """%s"" -browser=false > ""%s"" 2>&1", 0, False
-`, binPath, logPath)
+	vbs := startupVBS(cmd, logPath)
 
 	fmt.Println("\n  peekm autostart (Windows Startup folder)")
 	fmt.Println("  =========================================")
@@ -641,7 +703,7 @@ WshShell.Run """%s"" -browser=false > ""%s"" 2>&1", 0, False
 	}
 	fmt.Printf("    Created %s\n", vbsPath)
 	fmt.Printf("    Logs: %s\n", logPath)
-	printAutostartSuccess()
+	printAutostartSuccess(cmd)
 }
 
 func removeStartupFolder(homeDir string) {
@@ -655,9 +717,9 @@ func removeStartupFolder(homeDir string) {
 	fmt.Print("\n  Done.\n\n")
 }
 
-func printAutostartSuccess() {
-	fmt.Print("\n  peekm will now start automatically on login.\n")
-	fmt.Print("  Remove with: peekm setup autostart --remove\n\n")
+func printAutostartSuccess(cmd []string) {
+	fmt.Printf("\n  peekm will now start at login: %s\n", strings.Join(cmd, " "))
+	fmt.Print("  Remove with: peekm uninstall\n\n")
 }
 
 func runCommand(name string, args ...string) error {
