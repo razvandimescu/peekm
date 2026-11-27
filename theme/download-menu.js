@@ -162,16 +162,26 @@
         return libs.htmlDocx.asBlob(html);
     }
 
-    function triggerDownload(blob, name) {
-        var url = URL.createObjectURL(blob);
+    window.saveDownload = function(href, name) {
         var a = document.createElement('a');
-        a.href = url;
+        a.href = href;
         a.download = name;
         document.body.appendChild(a);
         a.click();
         a.remove();
+    };
+
+    window.saveBlob = function(blob, name) {
+        var url = URL.createObjectURL(blob);
+        saveDownload(url, name);
         setTimeout(function() { URL.revokeObjectURL(url); }, 0);
-    }
+    };
+
+    window.stashMermaidSources = function() {
+        document.querySelectorAll('.mermaid:not([data-processed="true"])').forEach(function(el) {
+            el.dataset.mermaidSource = el.textContent.trim();
+        });
+    };
 
     window.initDownloadMenu = function(split) {
         var caret = split.querySelector('.dl-caret');
@@ -188,7 +198,7 @@
             if (docxHint) { docxHint.textContent = ' — generating…'; docxHint.hidden = false; }
             try {
                 var blob = await buildDocxBlob(content, fileName, vendorBase);
-                triggerDownload(blob, fileName.replace(/\.md$/i, '') + '.docx');
+                saveBlob(blob, fileName.replace(/\.md$/i, '') + '.docx');
                 closeMenu();
             } catch (err) {
                 console.error('[docx] export failed', err);

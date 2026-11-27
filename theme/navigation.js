@@ -1112,11 +1112,7 @@ function downloadHTML() {
         }
         return response.blob().then(blob => ({ blob, filename }));
     })
-    .then(({ blob, filename }) => {
-        const url = window.URL.createObjectURL(blob);
-        saveDownload(url, filename);
-        window.URL.revokeObjectURL(url);
-    })
+    .then(({ blob, filename }) => saveBlob(blob, filename))
     .catch(error => {
         console.error('Download error:', error);
         showErrorToast('Failed to download HTML file');
@@ -1126,15 +1122,6 @@ function downloadHTML() {
 function downloadSource() {
     const filePath = getCurrentFilePath();
     saveDownload('/raw' + filePath.split('/').map(encodeURIComponent).join('/'), filePath.split('/').pop());
-}
-
-function saveDownload(href, filename) {
-    const a = document.createElement('a');
-    a.href = href;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
 }
 
 // ===== LAN Share =====

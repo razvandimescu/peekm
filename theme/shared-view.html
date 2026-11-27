@@ -288,6 +288,7 @@
         }
     </style>
     <script>{{.DiagramViewerJS}}</script>
+    <script>{{.DownloadMenuJS}}</script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
         (function() {
@@ -298,11 +299,7 @@
             document.addEventListener('DOMContentLoaded', function() {
                 // Cache mermaid sources before run() consumes them — DOCX export re-renders
                 // them in light theme to preserve contrast on a white page background.
-                document.querySelectorAll('.mermaid').forEach(function(el) {
-                    if (el.textContent && !el.querySelector('svg')) {
-                        el.dataset.mermaidSource = el.textContent.trim();
-                    }
-                });
+                stashMermaidSources();
                 mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
@@ -517,7 +514,6 @@
             {{end}}
         })();
     </script>
-    <script>{{.DownloadMenuJS}}</script>
     <script>initDownloadMenu(document.getElementById('dl-split'));</script>
     {{end}}
 </body>

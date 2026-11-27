@@ -1526,7 +1526,8 @@
             transition: color 0.15s, border-color 0.15s, background 0.15s;
         }
 
-        .edit-button:hover {
+        .edit-button:hover,
+        .dl-caret[aria-expanded="true"] {
             color: var(--peekm-accent);
             border-color: var(--peekm-accent);
         }
@@ -1544,8 +1545,6 @@
         .dl-split .edit-button:hover,
         .dl-split .dl-caret[aria-expanded="true"] {
             position: relative;
-            color: var(--peekm-accent);
-            border-color: var(--peekm-accent);
         }
 
         .delete-button:hover {
@@ -2429,9 +2428,7 @@
             mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
 
             window.renderMermaid = function() {
-                document.querySelectorAll('.mermaid:not([data-processed="true"])').forEach(function(el) {
-                    el.dataset.mermaidSource = el.textContent.trim();
-                });
+                stashMermaidSources();
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
             };
