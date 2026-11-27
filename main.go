@@ -110,6 +110,7 @@ var (
 	editorJS               string
 	navigationJS           string
 	diagramViewerJS        string
+	downloadMenuJS         string
 	fileBrowserTmpl        *template.Template
 	fileBrowserPartialTmpl *template.Template
 	timelineTmpl           *template.Template
@@ -155,6 +156,7 @@ type baseTemplateData struct {
 	EditorJS          template.JS
 	NavigationJS      template.JS
 	DiagramViewerJS   template.JS
+	DownloadMenuJS    template.JS
 	AITrackingEnabled bool
 	FileCount         int  // whitelist size, shown in the shared sidebar header across all shell views
 	Partial           bool // SPA partial: the shell (and its sidebar) is already on the page
@@ -507,6 +509,7 @@ func newBaseTemplateData(r *http.Request) baseTemplateData {
 		EditorJS:          template.JS(editorJS),
 		NavigationJS:      template.JS(navigationJS),
 		DiagramViewerJS:   template.JS(diagramViewerJS),
+		DownloadMenuJS:    template.JS(downloadMenuJS),
 		AITrackingEnabled: !*disableHook,
 		FileCount:         markdownFileCount(),
 	}
@@ -854,6 +857,7 @@ func registerRoutes() {
 	http.HandleFunc("/today", localOnly(withRecovery(serveToday)))
 	http.HandleFunc("/today/add", localOnly(withRecovery(postOnly(handleTodayAdd))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
+	http.HandleFunc("/assets/vendor/", localOnly(withRecovery(serveLocalVendoredAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
@@ -1094,6 +1098,7 @@ func init() {
 	editorJS = mustReadThemeFile("theme/editor.js")
 	navigationJS = mustReadThemeFile("theme/navigation.js")
 	diagramViewerJS = mustReadThemeFile("theme/diagram-viewer.js")
+	downloadMenuJS = mustReadThemeFile("theme/download-menu.js")
 
 	funcMap := templateFuncMap()
 	sessionInfoPanelHTML := mustReadThemeFile("theme/session-info-panel.html")
