@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestFirstMarkdownH1(t *testing.T) {
 	tests := []struct {
@@ -62,6 +66,23 @@ func TestReadingMinutes(t *testing.T) {
 		}
 		if got := readingMinutes(src); got != tt.want {
 			t.Errorf("readingMinutes(%s, %d words) = %d, want %d", tt.name, tt.words, got, tt.want)
+		}
+	}
+}
+
+func TestServeLocalVendoredAssetAllowlist(t *testing.T) {
+	cases := map[string]int{
+		"/assets/vendor/html-docx.min.js":        http.StatusOK,
+		"/assets/vendor/html-to-image.min.js":    http.StatusOK,
+		"/assets/vendor/README.md":               http.StatusNotFound,
+		"/assets/vendor/../shared-view.html":     http.StatusNotFound,
+		"/assets/vendor/vendor/html-docx.min.js": http.StatusNotFound,
+	}
+	for path, want := range cases {
+		rec := httptest.NewRecorder()
+		serveLocalVendoredAsset(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != want {
+			t.Errorf("%s: status %d, want %d", path, rec.Code, want)
 		}
 	}
 }

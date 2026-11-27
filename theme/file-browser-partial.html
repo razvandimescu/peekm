@@ -32,7 +32,19 @@
                     <span class="session-info-ai-badge">AI</span>
                 </button>
                 {{end}}
-                <button class="edit-button" onclick="downloadHTML()" aria-label="Download as HTML" title="Download as HTML"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></svg> Download</button>
+                {{if .IsPreview}}
+                <button class="edit-button" onclick="downloadSource()" title="Download {{.Title}}"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></svg> Download</button>
+                {{else}}
+                <div class="dl-split" id="dl-split" data-content="file-body" data-file-name="{{.Title}}" data-vendor="/assets/vendor/">
+                    <button type="button" class="edit-button dl-primary" onclick="downloadSource()" aria-label="Download Markdown source"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z"/></svg> <span class="dl-primary-label">Download .md</span></button>
+                    <button type="button" class="edit-button dl-caret" aria-haspopup="menu" aria-expanded="false" aria-controls="dl-menu" aria-label="More download formats"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.78 6.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 7.28a.749.749 0 1 1 1.06-1.06L8 9.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg></button>
+                    <div class="dl-menu" id="dl-menu" role="menu" hidden>
+                        <button type="button" class="dl-menu-item" role="menuitem" onclick="downloadSource()">Markdown (.md)</button>
+                        <button type="button" class="dl-menu-item" role="menuitem" onclick="downloadHTML()">HTML (.html)</button>
+                        <button type="button" class="dl-menu-item" role="menuitem" data-format="docx" aria-disabled="true">Word (.docx)<span class="dl-menu-hint"> — preparing…</span></button>
+                    </div>
+                </div>
+                {{end}}
                 <div class="share-container">
                     <button class="edit-button" onclick="toggleShare()" id="share-btn" aria-label="Share file" title="Share file" aria-haspopup="true" aria-expanded="false"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5Z"/></svg> Share</button>
                     <div class="share-panel" id="share-panel" role="dialog" aria-label="Share options" style="display: none;">
@@ -81,7 +93,7 @@
         {{end}}
 
         {{if .Content}}
-            {{.Content}}
+            <div id="file-body">{{.Content}}</div>
         {{else}}
             <div class="empty-content">
                 <p>No files found in this directory.</p>
