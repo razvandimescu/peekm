@@ -562,8 +562,9 @@ func serveSharedAsset(w http.ResponseWriter, r *http.Request, entry *shareEntry,
 }
 
 // vendoredAssets allowlists the embedded JS libraries servable under
-// /s/{token}/_vendor/. The allowlist also blocks path traversal: only these
-// exact names resolve, so "../shared-view.html" and friends never read.
+// /s/{token}/_vendor/ and /assets/vendor/. The allowlist also blocks path
+// traversal: only these exact names resolve, so "../shared-view.html" and
+// friends never read.
 var vendoredAssets = map[string]bool{
 	"html-docx.min.js":     true,
 	"html-to-image.min.js": true,
@@ -584,4 +585,8 @@ func serveVendoredAsset(w http.ResponseWriter, r *http.Request, name string) {
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Write(data)
+}
+
+func serveLocalVendoredAsset(w http.ResponseWriter, r *http.Request) {
+	serveVendoredAsset(w, r, strings.TrimPrefix(r.URL.Path, "/assets/vendor/"))
 }

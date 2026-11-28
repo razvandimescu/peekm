@@ -469,6 +469,10 @@ function reinitializeScripts() {
         if (viewType === 'file' || viewType === 'today') {
             initTaskCheckboxes();
         }
+        const downloadSplit = document.getElementById('dl-split');
+        if (downloadSplit) {
+            initDownloadMenu(downloadSplit);
+        }
         if (viewType === 'today') {
             focusTodayInput();
         }
@@ -1108,20 +1112,16 @@ function downloadHTML() {
         }
         return response.blob().then(blob => ({ blob, filename }));
     })
-    .then(({ blob, filename }) => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-    })
+    .then(({ blob, filename }) => saveBlob(blob, filename))
     .catch(error => {
         console.error('Download error:', error);
         showErrorToast('Failed to download HTML file');
     });
+}
+
+function downloadSource() {
+    const filePath = getCurrentFilePath();
+    saveDownload('/raw' + filePath.split('/').map(encodeURIComponent).join('/'), filePath.split('/').pop());
 }
 
 // ===== LAN Share =====

@@ -110,6 +110,7 @@ var (
 	editorJS               string
 	navigationJS           string
 	diagramViewerJS        string
+	downloadMenuJS         string
 	fileBrowserTmpl        *template.Template
 	fileBrowserPartialTmpl *template.Template
 	timelineTmpl           *template.Template
@@ -155,6 +156,7 @@ type baseTemplateData struct {
 	EditorJS          template.JS
 	NavigationJS      template.JS
 	DiagramViewerJS   template.JS
+	DownloadMenuJS    template.JS
 	AITrackingEnabled bool
 	FileCount         int  // whitelist size, shown in the shared sidebar header across all shell views
 	Partial           bool // SPA partial: the shell (and its sidebar) is already on the page
@@ -507,6 +509,7 @@ func newBaseTemplateData(r *http.Request) baseTemplateData {
 		EditorJS:          template.JS(editorJS),
 		NavigationJS:      template.JS(navigationJS),
 		DiagramViewerJS:   template.JS(diagramViewerJS),
+		DownloadMenuJS:    template.JS(downloadMenuJS),
 		AITrackingEnabled: !*disableHook,
 		FileCount:         markdownFileCount(),
 	}
@@ -854,6 +857,7 @@ func registerRoutes() {
 	http.HandleFunc("/today", localOnly(withRecovery(serveToday)))
 	http.HandleFunc("/today/add", localOnly(withRecovery(postOnly(handleTodayAdd))))
 	http.HandleFunc("/assets/fonts/", localOnly(withRecovery(serveFontAsset)))
+	http.HandleFunc("/assets/vendor/", localOnly(withRecovery(serveLocalVendoredAsset)))
 
 	// Share management (local only; CSRF applied per-method inside handleShare)
 	http.HandleFunc("/share", localOnly(withRecovery(handleShare)))
@@ -1094,6 +1098,7 @@ func init() {
 	editorJS = mustReadThemeFile("theme/editor.js")
 	navigationJS = mustReadThemeFile("theme/navigation.js")
 	diagramViewerJS = mustReadThemeFile("theme/diagram-viewer.js")
+	downloadMenuJS = mustReadThemeFile("theme/download-menu.js")
 
 	funcMap := templateFuncMap()
 	sessionInfoPanelHTML := mustReadThemeFile("theme/session-info-panel.html")
@@ -1174,23 +1179,26 @@ func runShowIgnored() {
 	}
 }
 
-// resolveTarget determines browseDir from CLI args and returns a target file (if any).
-func resolveTarget() string {
-	targetPath := "."
+// targetArg resolves the [file|directory] argument (default ".") or exits.
+func targetArg() (string, os.FileInfo) {
+	target := "."
 	if flag.NArg() > 0 {
-		targetPath = flag.Arg(0)
+		target = flag.Arg(0)
 	}
-
-	absPath, err := validateAndResolvePath(targetPath)
+	absPath, err := validateAndResolvePath(target)
 	if err != nil {
 		log.Fatalf("Error resolving path: %v", err)
 	}
-
 	info, err := os.Stat(absPath)
 	if err != nil {
 		log.Fatalf("Error accessing path: %v", err)
 	}
+	return absPath, info
+}
 
+// resolveTarget determines browseDir from CLI args and returns a target file (if any).
+func resolveTarget() string {
+	absPath, info := targetArg()
 	if info.IsDir() {
 		browseDir = absPath
 		return ""
@@ -1339,10 +1347,13 @@ func addToWhitelist(path string) bool {
 }
 
 // handoffToRunning probes the occupied port for a peekm instance and delegates
-// to it: a file argument is opened there via /open, a directory argument just
-// opens the running instance. handed reports a successful handoff; responded
-// reports whether anything answered HTTP on the port at all, so the caller can
-// distinguish an older peekm (or another app) from a dead socket.
+// to it: a file argument is opened there via /open, a directory argument
+// becomes its browse root via /navigate and no argument just opens it. With
+// -browser=false it changes nothing: the background service restarts every
+// few seconds while another peekm holds the port and must not move that
+// instance's browse root each time. handed reports a successful handoff;
+// responded reports whether anything answered HTTP on the port at all, so the
+// caller can distinguish an older peekm (or another app) from a dead socket.
 func handoffToRunning() (handed, responded bool) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -1356,42 +1367,43 @@ func handoffToRunning() (handed, responded bool) {
 		return false, true
 	}
 
-	target := "."
-	if flag.NArg() > 0 {
-		target = flag.Arg(0)
-	}
-	// A peekm answered, so startup cannot proceed either way — report a bad
-	// target here with resolveTarget's wording instead of a misleading
-	// port-in-use fatal.
-	absPath, err := validateAndResolvePath(target)
-	if err != nil {
-		log.Fatalf("Error resolving path: %v", err)
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		log.Fatalf("Error accessing path: %v", err)
-	}
-
 	display := fmt.Sprintf("http://localhost:%d", *port)
-	openTarget := display
-	if !info.IsDir() {
-		resp, err := client.PostForm(base+"/open", url.Values{"path": {absPath}})
-		if err != nil {
-			return false, true
-		}
-		viewPath, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			log.Fatalf("peekm already running at %s but cannot open %s: %s", display, target, strings.TrimSpace(string(viewPath)))
-		}
-		openTarget += string(viewPath)
+	if !*openBrowser {
+		fmt.Printf("peekm already running at %s\n", display)
+		return true, true
 	}
-
+	viewPath := ""
+	if flag.NArg() > 0 {
+		absPath, info := targetArg()
+		if viewPath, err = openInRunning(client, base, absPath, info.IsDir()); err != nil {
+			log.Fatalf("peekm already running at %s but cannot open %s: %v", display, flag.Arg(0), err)
+		}
+	}
 	fmt.Printf("peekm already running at %s — opening there (use -port for a second instance)\n", display)
-	if *openBrowser {
-		openURL(openTarget)
-	}
+	openURL(display + viewPath)
 	return true, true
+}
+
+// openInRunning shows absPath in the peekm at base and returns the URL path to
+// open there.
+func openInRunning(client *http.Client, base, absPath string, isDir bool) (string, error) {
+	var resp *http.Response
+	var err error
+	if isDir {
+		body, _ := json.Marshal(map[string]string{"path": absPath})
+		resp, err = client.Post(base+"/navigate", "application/json", bytes.NewReader(body))
+	} else {
+		resp, err = client.PostForm(base+"/open", url.Values{"path": {absPath}})
+	}
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New(strings.TrimSpace(string(body)))
+	}
+	return string(body), nil
 }
 
 // parseAccessFlags loads -trusted-cidr and -allow-host into their lookup sets.
@@ -1479,16 +1491,39 @@ func serveAndWait(ln net.Listener, startURL string) {
 	}
 }
 
+// runSubcommand runs the subcommand named by args[0] and reports whether one ran.
+func runSubcommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "setup":
+		runSetup(args[1:])
+	case "install":
+		runInstall(args[1:])
+	case "uninstall":
+		runUninstall()
+	case "update":
+		runUpdate()
+	default:
+		return false
+	}
+	return true
+}
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: peekm [options] [file|directory]\n")
 		fmt.Fprintf(os.Stderr, "       peekm setup claude-code [--remove]\n")
-		fmt.Fprintf(os.Stderr, "       peekm setup autostart [--remove]\n")
+		fmt.Fprintf(os.Stderr, "       peekm install [options] [file|directory]\n")
+		fmt.Fprintf(os.Stderr, "       peekm uninstall\n")
 		fmt.Fprintf(os.Stderr, "       peekm update\n")
 		fmt.Fprintf(os.Stderr, "\nMarkdown viewer with AI session tracking.\n")
 		fmt.Fprintf(os.Stderr, "\nSubcommands:\n")
-		fmt.Fprintf(os.Stderr, "  setup     Configure integrations and system service\n")
-		fmt.Fprintf(os.Stderr, "  update    Upgrade peekm with the tool that installed it\n")
+		fmt.Fprintf(os.Stderr, "  setup      Configure integrations\n")
+		fmt.Fprintf(os.Stderr, "  install    Start peekm at login with these options\n")
+		fmt.Fprintf(os.Stderr, "  uninstall  Remove the login service\n")
+		fmt.Fprintf(os.Stderr, "  update     Upgrade peekm with the tool that installed it\n")
 		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
 	}
@@ -1500,15 +1535,8 @@ func main() {
 	}
 
 	// Handle subcommands before flag.Parse()
-	if len(os.Args) >= 2 {
-		switch os.Args[1] {
-		case "setup":
-			runSetup(os.Args[2:])
-			return
-		case "update":
-			runUpdate()
-			return
-		}
+	if runSubcommand(os.Args[1:]) {
+		return
 	}
 
 	flag.Parse()

@@ -1526,9 +1526,25 @@
             transition: color 0.15s, border-color 0.15s, background 0.15s;
         }
 
-        .edit-button:hover {
+        .edit-button:hover,
+        .dl-caret[aria-expanded="true"] {
             color: var(--peekm-accent);
             border-color: var(--peekm-accent);
+        }
+
+        .dl-split .dl-primary {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .dl-split .dl-caret {
+            margin-left: -1px;
+            padding: 0 8px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .dl-split .edit-button:hover,
+        .dl-split .dl-caret[aria-expanded="true"] {
+            position: relative;
         }
 
         .delete-button:hover {
@@ -2403,6 +2419,7 @@
         }
     </style>
     <script>{{.DiagramViewerJS}}</script>
+    <script>{{.DownloadMenuJS}}</script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
         (function() {
@@ -2411,6 +2428,7 @@
             mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
 
             window.renderMermaid = function() {
+                stashMermaidSources();
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
             };

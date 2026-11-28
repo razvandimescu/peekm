@@ -195,8 +195,6 @@
         .expiry-badge.expired .expiry-dot { background: #ff8a82; box-shadow: none; }
 
         /* ===== Split download button (primary .md + caret menu) ===== */
-        .dl-split { position: relative; display: none; align-items: stretch; }
-        .dl-split.ready { display: inline-flex; }
         .dl-primary, .dl-caret {
             display: inline-flex;
             align-items: center;
@@ -224,45 +222,6 @@
         }
         .dl-primary:hover, .dl-caret:hover, .dl-caret[aria-expanded="true"] { background: #5b91ff; }
         .dl-primary:active { transform: translateY(1px); }
-        .dl-primary svg, .dl-caret svg { flex-shrink: 0; }
-
-        .dl-menu {
-            position: absolute;
-            top: calc(100% + 6px);
-            right: 0;
-            min-width: 180px;
-            padding: 5px;
-            background: var(--bgColor-default, #fff);
-            border: 1px solid var(--borderColor-default, #d0d7de);
-            border-radius: 10px;
-            box-shadow: 0 16px 40px rgba(11,26,49,0.3);
-            z-index: 20;
-        }
-        .dl-menu[hidden] { display: none; }
-        .dl-menu-item {
-            display: block;
-            width: 100%;
-            box-sizing: border-box;
-            padding: 8px 11px;
-            border: none;
-            border-radius: 7px;
-            background: transparent;
-            color: var(--fgColor-default, #1f2328);
-            font-family: var(--font-body);
-            font-size: 13px;
-            text-align: left;
-            text-decoration: none;
-            white-space: nowrap;
-            cursor: pointer;
-        }
-        .dl-menu-item:hover:not([aria-disabled="true"]),
-        .dl-menu-item:focus-visible {
-            background: var(--bgColor-muted, #f6f8fa);
-            color: var(--peekm-accent, #2f6fed);
-            outline: none;
-        }
-        .dl-menu-item[aria-disabled="true"] { color: var(--fgColor-muted, #656d76); cursor: default; }
-        .dl-menu-hint { color: var(--fgColor-muted, #656d76); font-size: 11px; }
 
         /* ===== Document card (GitHub-faithful, overlapping the hero) ===== */
         .s-doc-shell {
@@ -322,16 +281,14 @@
             .s-hero-wrap, .s-foot { padding-left: 18px; padding-right: 18px; }
             .s-nav { margin-bottom: 26px; }
             .s-badge { max-width: 70vw; }
-            .dl-primary-label { display: none; }
         }
 
-        /* Touch: each split segment is an independent ≥44px tap target. */
         @media (hover: none) and (pointer: coarse) {
-            .dl-primary, .dl-caret, .s-copy { min-height: 44px; min-width: 44px; justify-content: center; }
-            .dl-menu-item { display: flex; align-items: center; min-height: 44px; }
+            .s-copy { min-height: 44px; min-width: 44px; justify-content: center; }
         }
     </style>
     <script>{{.DiagramViewerJS}}</script>
+    <script>{{.DownloadMenuJS}}</script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script>
         (function() {
@@ -342,12 +299,7 @@
             document.addEventListener('DOMContentLoaded', function() {
                 // Cache mermaid sources before run() consumes them — DOCX export re-renders
                 // them in light theme to preserve contrast on a white page background.
-                window.peekmMermaidSources = [];
-                document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el) {
-                    if (el.textContent && !el.querySelector('svg')) {
-                        window.peekmMermaidSources.push(el.textContent.trim());
-                    }
-                });
+                stashMermaidSources();
                 mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                 try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
                 catch (e) { console.warn('[mermaid] render failed', e); }
@@ -380,7 +332,7 @@
             </div>
 
             {{if not .IsExpired}}<div class="s-actions">
-                <div class="dl-split" id="dl-split">
+                <div class="dl-split" id="dl-split" data-content="shared-content" data-file-name="{{.FileName}}" data-vendor="/s/{{.Token}}/_vendor/">
                     <a class="dl-primary" id="dl-md-primary" href="/s/{{.Token}}/raw" download="{{.FileName}}" aria-label="Download Markdown source">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/><path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/></svg>
                         <span class="dl-primary-label">Download .md</span>
@@ -390,7 +342,7 @@
                     </button>
                     <div class="dl-menu" id="dl-menu" role="menu" aria-labelledby="dl-caret" hidden>
                         <a class="dl-menu-item" role="menuitem" href="/s/{{.Token}}/raw" download="{{.FileName}}">Markdown (.md)</a>
-                        <button type="button" class="dl-menu-item" role="menuitem" id="docx-menu-item" aria-disabled="true">Word (.docx)<span class="dl-menu-hint" id="docx-hint"> — preparing…</span></button>
+                        <button type="button" class="dl-menu-item" role="menuitem" data-format="docx" aria-disabled="true">Word (.docx)<span class="dl-menu-hint"> — preparing…</span></button>
                     </div>
                 </div>
                 <button type="button" class="s-copy" id="s-copy" aria-label="Copy share link">
@@ -439,12 +391,10 @@
             btn.addEventListener('click', function() {
                 setTheme(isDarkMode() ? 'light' : 'dark');
                 paint();
-                if (typeof mermaid !== 'undefined' && window.peekmMermaidSources) {
-                    document.querySelectorAll('pre.mermaid, .mermaid').forEach(function(el, i) {
-                        var src = window.peekmMermaidSources[i];
-                        if (!src) return;
+                if (typeof mermaid !== 'undefined') {
+                    document.querySelectorAll('.mermaid[data-mermaid-source]').forEach(function(el) {
                         el.removeAttribute('data-processed');
-                        el.textContent = src;
+                        el.textContent = el.dataset.mermaidSource;
                     });
                     mermaid.initialize({ startOnLoad: false, theme: isDarkMode() ? 'dark' : 'default', securityLevel: 'loose' });
                     try { mermaid.run({ querySelector: 'pre.mermaid:not([data-processed="true"]), .mermaid:not([data-processed="true"])' }); }
@@ -564,268 +514,7 @@
             {{end}}
         })();
     </script>
-    <script>
-        (function() {
-            var split = document.getElementById('dl-split');
-            if (!split) return;
-
-            var caret = document.getElementById('dl-caret');
-            var menu = document.getElementById('dl-menu');
-            var docxItem = document.getElementById('docx-menu-item');
-            var docxHint = document.getElementById('docx-hint');
-            var fileName = '{{.FileName}}';
-
-            // Resolve once mermaid has rendered every diagram, or after a short timeout.
-            function waitForMermaid() {
-                var els = document.querySelectorAll('pre.mermaid, .mermaid');
-                if (els.length === 0) return Promise.resolve();
-                return new Promise(function(resolve) {
-                    var start = Date.now();
-                    (function tick() {
-                        var done = Array.prototype.every.call(els, function(el) {
-                            return el.getAttribute('data-processed') === 'true' || el.querySelector('svg');
-                        });
-                        if (done || Date.now() - start > 5000) resolve();
-                        else setTimeout(tick, 100);
-                    })();
-                });
-            }
-
-            // Lazy-load html-to-image (handles foreignObject) + html-docx-js. Both are
-            // vendored into the binary and served same-origin under /s/{token}/_vendor/,
-            // so the export needs no third-party CDN and no SRI to drift.
-            // html-to-image is needed because mermaid uses <foreignObject> for HTML labels,
-            // which a plain <img src="svg-blob"> + canvas pipeline can't rasterise.
-            var libsPromise = null;
-            function loadLibs() {
-                if (libsPromise) return libsPromise;
-                var vendor = '/s/{{.Token}}/_vendor/';
-                libsPromise = Promise.all([
-                    loadScript(vendor + 'html-to-image.min.js'),
-                    loadScript(vendor + 'html-docx.min.js')
-                ]).then(function() {
-                    return { htmlToImage: window.htmlToImage, htmlDocx: window.htmlDocx };
-                }).catch(function(err) {
-                    libsPromise = null;
-                    throw err;
-                });
-                return libsPromise;
-            }
-
-            function loadScript(src) {
-                return new Promise(function(resolve, reject) {
-                    var s = document.createElement('script');
-                    s.src = src;
-                    s.onload = resolve;
-                    s.onerror = function() { reject(new Error('Failed to load ' + src)); };
-                    document.head.appendChild(s);
-                });
-            }
-
-            // Cap display width so Word doesn't render at the PNG's native pixel size.
-            // 600px ≈ 6.25in at 96dpi, fits Word's default content area (8.5in - 2in margins).
-            var TARGET_DISPLAY_WIDTH_PX = 600;
-
-            // Rasterise an SVG (including <foreignObject> content) to a PNG data URL plus
-            // pixel display dimensions for Word's HTML import to honour.
-            function rasterise(svgEl, htmlToImage) {
-                var rect = svgEl.getBoundingClientRect();
-                var srcW = Math.max(rect.width || 600, 1);
-                var srcH = Math.max(rect.height || 400, 1);
-                var displayW = Math.min(srcW, TARGET_DISPLAY_WIDTH_PX);
-                var displayH = displayW * (srcH / srcW);
-                return htmlToImage.toPng(svgEl, {
-                    width: srcW,
-                    height: srcH,
-                    pixelRatio: 2,
-                    backgroundColor: '#ffffff'
-                }).then(function(dataUrl) {
-                    return { dataUrl: dataUrl, width: Math.round(displayW), height: Math.round(displayH) };
-                });
-            }
-
-            // Re-render a mermaid source in light theme into an offscreen light-mode
-            // wrapper, then rasterise. Needed because dark-mode diagrams on a white DOCX
-            // page lose contrast (especially classDef-styled "dim" nodes whose foreignObject
-            // text was inheriting white from page CSS).
-            async function renderMermaidLight(sourceCode, htmlToImage) {
-                var id = 'peekm-docx-mm-' + Math.random().toString(36).slice(2, 8);
-                var result = await mermaid.render(id, sourceCode);
-
-                var wrapper = document.createElement('div');
-                wrapper.setAttribute('data-color-mode', 'light');
-                wrapper.setAttribute('data-light-theme', 'light');
-                wrapper.style.cssText = 'position:fixed;left:-10000px;top:0;background:#fff;color:#1f2328;';
-                wrapper.innerHTML = result.svg;
-                document.body.appendChild(wrapper);
-
-                try {
-                    var svgEl = wrapper.querySelector('svg');
-                    if (!svgEl) throw new Error('mermaid.render returned no SVG');
-                    await new Promise(function(r) { requestAnimationFrame(r); });
-                    return await rasterise(svgEl, htmlToImage);
-                } finally {
-                    wrapper.remove();
-                }
-            }
-
-            function escapeHtml(s) {
-                return String(s).replace(/[&<>"']/g, function(c) {
-                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-                });
-            }
-
-            async function buildDocxBlob() {
-                await waitForMermaid();
-                var libs = await loadLibs();
-
-                var src = document.getElementById('shared-content');
-                var clone = src.cloneNode(true);
-
-                // Switch mermaid to light theme for any re-renders during export.
-                // Live SVGs already on the page are unaffected (initialize only changes future renders).
-                var pageIsDark = isDarkMode();
-                if (typeof mermaid !== 'undefined') {
-                    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
-                }
-
-                try {
-                    var liveSvgs = Array.prototype.slice.call(src.querySelectorAll('svg'));
-                    var clonedSvgs = Array.prototype.slice.call(clone.querySelectorAll('svg'));
-                    var sources = window.peekmMermaidSources || [];
-                    var mermaidIdx = 0;
-
-                    for (var i = 0; i < clonedSvgs.length; i++) {
-                        try {
-                            var liveSvg = liveSvgs[i] || clonedSvgs[i];
-                            var isMermaid = !!liveSvg.closest('.mermaid, pre.mermaid');
-                            var png;
-                            if (isMermaid && mermaidIdx < sources.length) {
-                                png = await renderMermaidLight(sources[mermaidIdx], libs.htmlToImage);
-                                mermaidIdx++;
-                            } else {
-                                png = await rasterise(liveSvg, libs.htmlToImage);
-                            }
-                            var img = document.createElement('img');
-                            img.src = png.dataUrl;
-                            img.setAttribute('width', png.width);
-                            img.setAttribute('height', png.height);
-                            clonedSvgs[i].parentNode.replaceChild(img, clonedSvgs[i]);
-                        } catch (err) {
-                            console.warn('[docx] svg→png failed', err);
-                            var ph = document.createElement('p');
-                            ph.textContent = '[Diagram could not be exported]';
-                            ph.style.fontStyle = 'italic';
-                            ph.style.color = '#888';
-                            clonedSvgs[i].parentNode.replaceChild(ph, clonedSvgs[i]);
-                        }
-                    }
-                } finally {
-                    // Restore mermaid theme to match the live page state.
-                    if (typeof mermaid !== 'undefined') {
-                        mermaid.initialize({ startOnLoad: false, theme: pageIsDark ? 'dark' : 'default', securityLevel: 'loose' });
-                    }
-                }
-
-                // Inline the page's styles so headings/code/tables survive Word's HTML import.
-                var css = '';
-                document.querySelectorAll('style').forEach(function(s) { css += s.textContent + '\n'; });
-
-                // No body padding — Word's page margins (1" default = ~96px each side on letter)
-                // already provide breathing room. Adding HTML padding compounds unpredictably
-                // with Word's margins and squeezes the content area.
-                // Force light theme on the exported HTML — DOCX is read on white paper.
-                var html = '<!DOCTYPE html><html data-color-mode="light" data-light-theme="light"><head><meta charset="utf-8"><title>' +
-                    escapeHtml(fileName) + '</title><style>' + css +
-                    'body{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;color:#1f2328;}' +
-                    'img{max-width:100%;height:auto;}' +
-                    '</style></head><body class="markdown-body">' +
-                    clone.innerHTML + '</body></html>';
-
-                return libs.htmlDocx.asBlob(html);
-            }
-
-            function triggerDownload(blob) {
-                var url = URL.createObjectURL(blob);
-                var a = document.createElement('a');
-                a.href = url;
-                a.download = fileName.replace(/\.md$/i, '') + '.docx';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(function() { URL.revokeObjectURL(url); }, 0);
-            }
-
-            async function generateDocx() {
-                if (docxItem.getAttribute('aria-disabled') === 'true') return;
-                docxItem.setAttribute('aria-disabled', 'true');
-                if (docxHint) { docxHint.textContent = ' — generating…'; docxHint.hidden = false; }
-                try {
-                    var blob = await buildDocxBlob();
-                    triggerDownload(blob);
-                    closeMenu();
-                } catch (err) {
-                    console.error('[docx] export failed', err);
-                    alert('Could not generate DOCX. Please try again.');
-                } finally {
-                    docxItem.setAttribute('aria-disabled', 'false');
-                    if (docxHint) docxHint.hidden = true;
-                }
-            }
-
-            function menuItems() {
-                return Array.prototype.slice.call(menu.querySelectorAll('.dl-menu-item'));
-            }
-            function openMenu() {
-                menu.hidden = false;
-                caret.setAttribute('aria-expanded', 'true');
-                var items = menuItems();
-                if (items.length) items[0].focus();
-                document.addEventListener('click', onDocClick, true);
-                document.addEventListener('keydown', onKeydown, true);
-            }
-            function closeMenu() {
-                if (menu.hidden) return;
-                menu.hidden = true;
-                caret.setAttribute('aria-expanded', 'false');
-                document.removeEventListener('click', onDocClick, true);
-                document.removeEventListener('keydown', onKeydown, true);
-            }
-            function onDocClick(e) {
-                if (!split.contains(e.target)) closeMenu();
-            }
-            function onKeydown(e) {
-                var items = menuItems();
-                var idx = items.indexOf(document.activeElement);
-                if (e.key === 'Escape') {
-                    e.preventDefault(); closeMenu(); caret.focus();
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault(); items[(idx + 1) % items.length].focus();
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault(); items[(idx - 1 + items.length) % items.length].focus();
-                } else if (e.key === 'Tab') {
-                    closeMenu();
-                }
-            }
-
-            caret.addEventListener('click', function(e) {
-                e.stopPropagation();
-                menu.hidden ? openMenu() : closeMenu();
-            });
-            docxItem.addEventListener('click', generateDocx);
-            // Markdown item is a plain <a download> — let the browser handle it, then close.
-            menu.querySelector('a.dl-menu-item').addEventListener('click', closeMenu);
-
-            // Reveal the whole control immediately — ".md" needs no rendering. Gate only the
-            // DOCX item until mermaid (if any) has finished. On diagram-free docs this
-            // resolves on the same tick, so the disabled state is never seen.
-            split.classList.add('ready');
-            waitForMermaid().then(function() {
-                docxItem.setAttribute('aria-disabled', 'false');
-                if (docxHint) docxHint.hidden = true;
-            });
-        })();
-    </script>
+    <script>initDownloadMenu(document.getElementById('dl-split'));</script>
     {{end}}
 </body>
 </html>
