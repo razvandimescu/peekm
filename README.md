@@ -124,11 +124,13 @@ peekm accepts connections only from localhost. To accept other devices, add thei
 Install peekm first (see [Installation](#installation)). Then run:
 
 ```bash
-peekm setup autostart           # start peekm at login
-peekm setup autostart --remove  # remove the service
+peekm install ~/projects  # start peekm at login and browse ~/projects
+peekm uninstall           # remove the service
 ```
 
-The service uses launchd on macOS, systemd on Linux, and the Startup folder on Windows. It starts peekm without a browser window. On macOS and Linux, it browses your home directory.
+`peekm install` accepts the same options and path as `peekm`. Without a path, the service browses the current directory. The service uses launchd on macOS, systemd on Linux and the Startup folder on Windows. It starts peekm without a browser window. `peekm update` restarts the service with the same options.
+
+When peekm is already running, `peekm <directory>` changes its browse directory and `peekm <file>` opens the file in it.
 
 The hook records edits even when peekm is off. The service keeps peekm available for notifications and the live tool status.
 
