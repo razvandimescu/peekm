@@ -12,7 +12,7 @@ A Claude Code session leaves a git diff and a JSONL log. The diff does not show 
 
 ![peekm transcript view with line diffs](assets/hero.png)
 
-**peekm has no accounts and no telemetry. Your files leave your machine only when you share them or reply to a session.**
+**peekm has no accounts and no telemetry. Your files leave your machine only when you share them or reply to a session.** See [Network Use](#network-use).
 
 ## Getting Started
 
@@ -20,82 +20,41 @@ A Claude Code session leaves a git diff and a JSONL log. The diff does not show 
 npx @peekm/peekm .
 ```
 
-Run the command in a project directory. To see all your projects, run it in their parent directory, for example `~/projects`. The timeline lists the past sessions of these projects and a new session appears while it runs.
+peekm shows the directory that you run it in. To see all your projects, run it in their parent directory, for example `~/projects`. The timeline lists the past sessions of these projects and a new session appears while it runs.
 
-AI tracking needs Claude Code or pi. The Claude Code hook script also needs `bash`, `curl` and `jq`.
+AI tracking needs Claude Code or [pi](https://github.com/earendil-works/pi). The Claude Code hook script also needs `bash`, `curl` and `jq`.
+
+To install peekm, use one of these commands:
+
+```bash
+npm i -g @peekm/peekm
+brew install razvandimescu/tap/peekm
+go install github.com/razvandimescu/peekm@latest
+```
+
+Binaries for macOS, Linux and Windows are on the [releases page](https://github.com/razvandimescu/peekm/releases). To upgrade, run `peekm update`. It runs the upgrade command of the tool that installed peekm, then restarts the background service if you installed it. For a binary from the releases page, download the new release.
 
 ## Features
 
 **Read and review:**
 
 - **Transcripts** show the full conversation of a session, with tool calls, line diffs and thinking blocks. They refresh while the session runs.
-- The **timeline** shows the sessions of all projects in the directory that peekm browses, grouped by day. Each session shows its duration, files and tools. An active session also shows its last tool call. A filter can hide the sessions without edits.
-- The **recap** lists the sessions, edited files and git commits of one day (yesterday by default) in the directory that peekm browses. **Save** writes it to `standup-YYYY-MM-DD.md` in that directory.
+- The **timeline** shows the sessions of your projects, grouped by day. Each session shows its duration, files and tools. An active session also shows its last tool call. A filter can hide the sessions without edits.
+- The **recap** lists the sessions, edited files and git commits of one day (yesterday by default). **Save** writes it to `standup-YYYY-MM-DD.md` in the directory that peekm shows.
 - The **memory browser** shows what Claude Code remembers about each project on your machine, from `~/.claude/projects/*/memory/` and each project's `.claude/CLAUDE.md`.
-- You can **reply** to a Claude Code transcript with a follow-up question. peekm runs the reply in a fork of the session with read-only tools (Read, Grep, Glob). The fork cannot edit files or change the session in your terminal.
-- **Toasts** tell you when an agent changes a file in the directory that peekm browses. An open file reloads when it changes. When a Claude Code session waits for your permission or finishes its turn, a toast tells you and the timeline marks it **Needs you** or **Done**. To get a desktop notification instead while you are in another window, click **Notify me** on the timeline. Desktop notifications work only on `localhost` or HTTPS.
+- You can **reply** to a Claude Code transcript with a follow-up question. peekm runs the reply in a copy of the session with read-only tools (Read, Grep, Glob). The copy cannot edit files or change the session in your terminal.
+- **Notifications** tell you when an agent changes a file in your projects. An open file reloads when it changes. When a Claude Code session waits for your permission or finishes its turn, a notification tells you and the timeline marks it **Needs you** or **Done**. To get desktop notifications while you are in another window, click **Notify me** on the timeline.
 
 **Share:**
 
-- Open a file and click **Share** to get a link for your local network. Then click **Make public** to get an HTTPS link through `share.peekm.dev`. Each link expires after 1 hour and recipients need no account. LAN recipients see changes live.
+- Open a file and click **Share** to get a link for your local network. Then click **Make public** to get an HTTPS link through `share.peekm.dev`. Each link expires after 1 hour and recipients need no account. Recipients on your network see changes live.
 - You can share Markdown, HTML, SVG and TXT files. An HTML share includes the CSS, JS and image files that the page uses. Recipients of a Markdown share can download it as DOCX.
 
 **Also included:**
 
-- The **file viewer** shows Markdown, HTML, SVG and TXT files in a sidebar tree. It has fuzzy search (Cmd/Ctrl+P), Mermaid diagrams, syntax highlighting and light, dark and auto themes. You can edit Markdown files in the browser. A click on a task-list checkbox updates the task in the file. A click on a Mermaid diagram opens it full screen at its actual size.
+- The **file viewer** shows Markdown, HTML, SVG and TXT files in a sidebar tree, with fuzzy search (Cmd/Ctrl+P), syntax highlighting and Mermaid diagrams. You can edit Markdown files in the browser. A click on a task-list checkbox updates the file. A click on a Mermaid diagram opens it full screen.
 - The **Recent AI Edits** smart folder lists the files that an agent changed in the last 24 hours.
 - The **Today** page shows your plan for the day from `~/.peekm/days/YYYY-MM-DD.md` and refreshes when an agent edits it. You can carry over the open tasks from your last plan.
-
-## How It Works
-
-peekm uses Claude Code hooks to match each file edit to the session that made it, and to show the state of each session. When `~/.claude` exists, peekm installs the hooks each time it starts:
-
-- It writes the hook script to `~/.claude/peekm-hook.sh`.
-- It adds the script to the `PostToolUse`, `Notification`, `Stop`, `UserPromptSubmit`, and `SessionEnd` hooks in `~/.claude/settings.json`. Your other hooks stay unchanged.
-
-After each hook call, the script sends an event to peekm on `localhost`. It tries the port that peekm runs on, then ports 6419, 8080, and 3000. The event contains these fields:
-
-- **Write, Edit, NotebookEdit**: the session ID, file path, tool name, permission mode, tool use ID, and working directory. The hook also appends this event to `~/.peekm/events.jsonl`. peekm reads this file when it starts, so it also shows the edits that sessions made while peekm was off.
-- **Plan files** in `~/.claude/plans/`: the event also contains the plan text.
-- **Other tools**: the session ID, the tool name, and the first 300 bytes of the tool's description, command, file path, pattern, or prompt. The hook does not store these events.
-- **Session state** (`Notification`, `Stop`, `UserPromptSubmit`, `SessionEnd`): the session ID, the hook name, and the working directory. A permission or dialog notification also contains its text. A `Stop` event also contains the first 300 characters of Claude's last response and the number of background tasks. The hook does not store these events.
-
-When `~/.pi/agent` exists, peekm also writes a pi extension to `~/.pi/agent/extensions/peekm.ts` each time it starts. The extension sends the same file and tool events as the Claude Code hook. It does not send session state.
-
-To remove the hooks, run `peekm setup claude-code --remove`. For pi, run `peekm setup pi --remove`. peekm installs them again when it starts. To keep them removed, start peekm with `-no-ai-tracking`.
-
-### Network Use
-
-The hook and the pi extension send events only to `localhost`. peekm connects to other hosts in these cases:
-
-- Once a day, when peekm runs in a terminal, it reads `peekm.dev/latest.json` (a static file on GitHub Pages) to find a new version. `peekm update` also reads it. The request contains no file or session data.
-- The browser loads the Mermaid library from `cdn.jsdelivr.net`.
-- When you make a share public, the file goes through the `share.peekm.dev` relay. For an HTML file, the relay also sends the assets that the page loads.
-- A reply sends your question and the files that the fork reads to the Anthropic API, as any Claude Code session does.
-
-## Installation
-
-npm:
-
-```bash
-npm i -g @peekm/peekm
-```
-
-Homebrew:
-
-```bash
-brew install razvandimescu/tap/peekm
-```
-
-Go:
-
-```bash
-go install github.com/razvandimescu/peekm@latest
-```
-
-Binaries for macOS, Linux, and Windows are on the [releases page](https://github.com/razvandimescu/peekm/releases).
-
-To upgrade, run `peekm update`. It finds the tool that installed peekm (Homebrew, npm, or `go install`) and runs its upgrade command. Then it restarts the background service, if you installed it. For a binary from the releases page, download the new release.
 
 ## Usage
 
@@ -120,23 +79,50 @@ peekm accepts connections only from localhost. To accept other devices, add thei
 
 ## Background Service
 
-Install peekm first (see [Installation](#installation)). Then run:
+Install peekm first (see [Getting Started](#getting-started)). Then run:
 
 ```bash
 peekm setup autostart           # start peekm at login
 peekm setup autostart --remove  # remove the service
 ```
 
-The service uses launchd on macOS, systemd on Linux, and the Startup folder on Windows. It starts peekm without a browser window. On macOS and Linux, it browses your home directory.
+The service uses launchd on macOS, systemd on Linux and the Startup folder on Windows. It starts peekm without a browser window. On macOS and Linux, it browses your home directory.
 
 The hook records edits even when peekm is off. The service keeps peekm available for notifications and the live tool status.
+
+## How It Works
+
+peekm uses Claude Code hooks to match each file edit to the session that made it and to show the state of each session. When `~/.claude` exists, peekm installs the hooks each time it starts:
+
+- It writes the hook script to `~/.claude/peekm-hook.sh`.
+- It adds the script to the `PostToolUse`, `Notification`, `Stop`, `UserPromptSubmit` and `SessionEnd` hooks in `~/.claude/settings.json`. Your other hooks stay unchanged.
+
+After each hook call, the script sends an event to peekm on `localhost`. It tries the port that peekm runs on, then ports 6419, 8080 and 3000. The event contains these fields:
+
+- **Write, Edit, NotebookEdit**: the session ID, file path, tool name, permission mode, tool use ID and working directory. The hook also appends this event to `~/.peekm/events.jsonl`. peekm reads this file when it starts, so it also shows the edits that sessions made while peekm was off.
+- **Plan files** in `~/.claude/plans/`: the event also contains the plan text.
+- **Other tools**: the session ID, the tool name and the first 300 bytes of the tool's description, command, file path, pattern or prompt. The hook does not store these events.
+- **Session state** (`Notification`, `Stop`, `UserPromptSubmit`, `SessionEnd`): the session ID, the hook name and the working directory. A permission or dialog notification also contains its text. A `Stop` event also contains the first 300 characters of Claude's last response and the number of background tasks. The hook does not store these events.
+
+When `~/.pi/agent` exists, peekm also writes a pi extension to `~/.pi/agent/extensions/peekm.ts` each time it starts. The extension sends the same file and tool events as the Claude Code hook. It does not send session state.
+
+To remove the hooks, run `peekm setup claude-code --remove`. For pi, run `peekm setup pi --remove`. peekm installs them again when it starts. To keep them removed, start peekm with `-no-ai-tracking`.
+
+### Network Use
+
+The hook and the pi extension send events only to `localhost`. peekm connects to other hosts in these cases:
+
+- Once a day, when peekm runs in a terminal, it reads `peekm.dev/latest.json` (a static file on GitHub Pages) to find a new version. `peekm update` also reads it. The request contains no file or session data.
+- The browser loads the Mermaid library from `cdn.jsdelivr.net`.
+- When you make a share public, the file goes through the `share.peekm.dev` relay. For an HTML file, the relay also sends the assets that the page loads.
+- A reply sends your question and the files that the copy reads to the Anthropic API, as any Claude Code session does.
 
 <details>
 <summary><strong>Ignoring Directories</strong></summary>
 
-peekm skips dot-directories (except `.claude`), linked git worktrees, and these directories: `node_modules`, `vendor`, `dist`, `venv`, `env`, `virtualenv`, `target`, `__pycache__`.
+peekm skips dot-directories (except `.claude`), linked git worktrees and these directories: `node_modules`, `vendor`, `dist`, `venv`, `env`, `virtualenv`, `target`, `__pycache__`.
 
-To skip more directories, add a `.peekmignore` file with one pattern per line. A pattern matches a directory name, so it cannot contain `/`. You can use `*`, `?`, and `[...]`. The patterns apply to the directory of the file and to all directories below it. peekm reads the `.peekmignore` files in each directory from `$HOME` down.
+To skip more directories, add a `.peekmignore` file with one pattern per line. A pattern matches a directory name, so it cannot contain `/`. You can use `*`, `?` and `[...]`. The patterns apply to the directory of the file and to all directories below it. peekm reads the `.peekmignore` files in each directory from `$HOME` down.
 
 ```
 _site
@@ -150,33 +136,23 @@ To see the exclusions for a directory, run `peekm -show-ignored [dir]`.
 
 ## Requirements & Limits
 
-- The binary runs on macOS, Linux, and Windows, with no runtime dependencies.
-- AI tracking needs Claude Code or pi. The Claude Code hook script also needs `bash`, `curl` and `jq`.
+- The binary runs on macOS, Linux and Windows, with no runtime dependencies.
 - Replies need the `claude` CLI on your `PATH`.
+- Desktop notifications work only on `localhost` or HTTPS.
 - peekm runs on one machine. It does not sync data between machines or users.
 - On macOS, peekm keeps a file descriptor open for each file that it watches. It uses at most 3/4 of the file descriptor limit. If a directory tree has more files, peekm logs a warning and does not detect new files in some directories. To prevent this, add large directories to `.peekmignore`.
 
 ## FAQ
 
-**Does peekm send my code anywhere?**
-Only when you share a file or reply to a session. See [Network Use](#network-use).
-
 **Does a reply cost anything?**
 peekm is free. A reply runs `claude -p` with your Claude Code login, so the usage rules of your plan apply. Each reply sends the session history with your question, as a resumed session does in the terminal.
 
-**Why not read the JSONL or the git log?**
-You can. peekm matches each change to its session, renders the conversation, and shows the sessions of many projects on one timeline.
-
-**Does it work with Cursor, Copilot, or Aider?**
+**Does it work with Cursor, Copilot or Aider?**
 No. peekm supports Claude Code and pi. To request another agent, [open an issue](https://github.com/razvandimescu/peekm/issues).
-
-## Development
-
-You need Go 1.25 or later. `make all` builds peekm, runs the tests with `-race`, and runs the linters.
 
 ## Contributing
 
-Pull requests are welcome. If something breaks, [open an issue](https://github.com/razvandimescu/peekm/issues).
+If something breaks, [open an issue](https://github.com/razvandimescu/peekm/issues). Pull requests are welcome. You need Go 1.25 or later. `make all` builds peekm, runs the tests with `-race` and runs the linters.
 
 ## License
 
